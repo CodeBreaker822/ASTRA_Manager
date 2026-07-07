@@ -1,16 +1,22 @@
 <script setup lang="ts">
-import { Link } from '@inertiajs/vue3';
+import { Link, usePage } from '@inertiajs/vue3';
+import { KeyRound, UsersRound } from '@lucide/vue';
+import { computed } from 'vue';
 import Heading from '@/components/Heading.vue';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { useCurrentUrl } from '@/composables/useCurrentUrl';
 import { toUrl } from '@/lib/utils';
+import { manager as apiManager } from '@/routes/api';
 import { edit as editAppearance } from '@/routes/appearance';
 import { edit as editProfile } from '@/routes/profile';
 import { edit as editSecurity } from '@/routes/security';
+import { index as usersIndex } from '@/routes/settings/users';
 import type { NavItem } from '@/types';
 
-const sidebarNavItems: NavItem[] = [
+const page = usePage();
+
+const sidebarNavItems = computed<NavItem[]>(() => [
     {
         title: 'Profile',
         href: editProfile(),
@@ -23,7 +29,26 @@ const sidebarNavItems: NavItem[] = [
         title: 'Appearance',
         href: editAppearance(),
     },
-];
+    ...(page.props.auth.canManageUsers
+        ? [
+              {
+                  title: 'Users',
+                  href: usersIndex(),
+                  icon: UsersRound,
+              },
+          ]
+        : []),
+    ...(page.props.auth.canManageApi
+        ? [
+              {
+                  title: 'API',
+                  href: apiManager(),
+                  icon: KeyRound,
+                  inertia: false,
+              },
+          ]
+        : []),
+]);
 
 const { isCurrentOrParentUrl } = useCurrentUrl();
 </script>
@@ -51,18 +76,22 @@ const { isCurrentOrParentUrl } = useCurrentUrl();
                         ]"
                         as-child
                     >
-                        <Link :href="item.href">
+                        <Link v-if="item.inertia !== false" :href="item.href">
                             <component :is="item.icon" class="h-4 w-4" />
                             {{ item.title }}
                         </Link>
+                        <a v-else :href="toUrl(item.href)">
+                            <component :is="item.icon" class="h-4 w-4" />
+                            {{ item.title }}
+                        </a>
                     </Button>
                 </nav>
             </aside>
 
             <Separator class="my-6 lg:hidden" />
 
-            <div class="flex-1 md:max-w-2xl">
-                <section class="max-w-xl space-y-12">
+            <div class="min-w-0 flex-1">
+                <section class="max-w-6xl space-y-12">
                     <slot />
                 </section>
             </div>

@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('user_permissions', function (Blueprint $table) {
             $table->id();
             $table->string('permission_name');
-            $table->string('position_id');
+            $table->foreignId('position_id')->constrained('user_positions')->cascadeOnDelete();
 
             $table->softDeletes();
             $table->timestamps();

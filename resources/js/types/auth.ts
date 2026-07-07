@@ -13,6 +13,8 @@ export type User = {
 export type Auth = {
     user: User;
     isAdmin: boolean;
+    canManageApi: boolean;
+    canManageUsers: boolean;
 };
 
 /* @chisel-passkeys */

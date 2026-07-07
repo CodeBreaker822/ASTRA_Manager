@@ -14,9 +14,9 @@ trait Gates
      */
     public static function logUnauthorizedAccess(string $gateName, string $url): void
     {
-        $ipAddress = request()->ip();
+        $ipAddress = request()->ip() ?? '0.0.0.0';
         $sessionId = session()->getId();
-        $userAgent = request()->userAgent();
+        $userAgent = request()->userAgent() ?? '';
 
         // Enhanced security checks
 

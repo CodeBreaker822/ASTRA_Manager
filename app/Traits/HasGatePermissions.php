@@ -12,11 +12,6 @@ trait HasGatePermissions
      */
     protected static function checkPermission(User $user, string $permission): bool
     {
-        // Allow all permissions if user_status = 'admin'
-        if ($user->user_status === 'admin') {
-            return true;
-        }
-
         $positionId = $user->position_id;
 
         if ($positionId === null) {
@@ -41,11 +36,6 @@ trait HasGatePermissions
      */
     protected static function checkAnyPermission(User $user, array $permissions): bool
     {
-        // Allow all permissions if user_status = 'admin'
-        if ($user->user_status === 'admin') {
-            return true;
-        }
-
         $positionId = $user->position_id;
 
         if ($positionId === null) {
@@ -70,11 +60,6 @@ trait HasGatePermissions
      */
     protected static function checkAllPermissions(User $user, array $permissions): bool
     {
-        // Allow all permissions if user_status = 'admin'
-        if ($user->user_status === 'admin') {
-            return true;
-        }
-
         $positionId = $user->position_id;
 
         if ($positionId === null) {

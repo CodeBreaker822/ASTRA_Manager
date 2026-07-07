@@ -40,7 +40,9 @@ class HandleInertiaRequests extends Middleware
             'name' => config('app.name'),
             'auth' => [
                 'user' => $request->user(),
-                'isAdmin' => $request->user()?->can('API-manage_api') ?? false,
+                'isAdmin' => $request->user()?->can('API-manage_api') || $request->user()?->can('user.manage-users') || false,
+                'canManageApi' => $request->user()?->can('API-manage_api') ?? false,
+                'canManageUsers' => $request->user()?->can('user.manage-users') ?? false,
             ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
         ];

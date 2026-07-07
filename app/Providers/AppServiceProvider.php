@@ -2,8 +2,10 @@
 
 namespace App\Providers;
 
-use Carbon\CarbonImmutable;
+use App\Gates\APIManagerGates;
+use App\Gates\UserGates;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -37,12 +39,9 @@ class AppServiceProvider extends ServiceProvider
 
         Gate::before(fn (User $user, string $ability): ?bool => $this->isConfiguredAdmin($user) ? true : null);
 
-        Gate::define('API-manage_api', fn (User $user): bool => $this->isConfiguredAdmin($user));
-        Gate::define('delete-api_manager', fn (User $user): bool => $this->isConfiguredAdmin($user));
-        Gate::define('viewAny', fn (User $user, string $model): bool => $model === User::class && $this->isConfiguredAdmin($user));
-        Gate::define('create', fn (User $user, string $model): bool => $model === User::class && $this->isConfiguredAdmin($user));
-        Gate::define('update', fn (User $user, mixed $model): bool => $model instanceof User && $this->isConfiguredAdmin($user));
-        Gate::define('delete', fn (User $user, mixed $model): bool => $model instanceof User && $this->isConfiguredAdmin($user));
+        UserGates::register();
+        APIManagerGates::register();
+        Gate::define('delete-api_manager', fn (User $user): bool => $user->can('API-manage_api'));
 
         DB::prohibitDestructiveCommands(
             app()->isProduction(),
