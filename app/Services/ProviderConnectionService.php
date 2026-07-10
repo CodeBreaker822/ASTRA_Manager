@@ -239,13 +239,14 @@ class ProviderConnectionService
             return $this->result('offline', 'Configuration required', 'RunPod endpoint is not configured.');
         }
 
+        $healthEndpoint = preg_replace('#/runsync(?:\?.*)?$#', '/health', $endpoint) ?: $endpoint;
+
         try {
             $response = Http::withToken(trim($apiKey))
                 ->acceptJson()
-                ->asJson()
                 ->connectTimeout((int) config('services.provider_health.connect_timeout', 3))
                 ->timeout((int) config('services.provider_health.timeout', 6))
-                ->post($endpoint, ['input' => ['action' => 'capabilities']]);
+                ->get($healthEndpoint);
         } catch (ConnectionException|RequestException) {
             return $this->result('offline', 'Offline', 'The provider could not be reached.');
         }
@@ -262,7 +263,7 @@ class ProviderConnectionService
             return $this->result('offline', 'Offline', 'The provider returned HTTP '.$response->status().'.');
         }
 
-        return $this->result('online', 'Online', 'The RunPod endpoint accepted the capabilities request.');
+        return $this->result('online', 'Online', 'The RunPod endpoint is reachable; workers may be scaled to zero while idle.');
     }
 
     private function runPodEndpointUrl(array $metadata = []): string
