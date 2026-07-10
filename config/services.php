@@ -112,7 +112,7 @@ return [
         'timeout' => env('RUNPOD_TIMEOUT', 300),
         'audio_url_ttl_seconds' => env('RUNPOD_AUDIO_URL_TTL_SECONDS', 600),
         'beam_size' => env('RUNPOD_BEAM_SIZE', 5),
-        'vad_filter' => env('RUNPOD_VAD_FILTER', true),
+        'vad_filter' => env('RUNPOD_VAD_FILTER', false),
     ],
 
     'gemini' => [

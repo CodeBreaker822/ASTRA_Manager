@@ -72,15 +72,11 @@ class RunPodSpeechToTextService
                     'action' => 'transcribe',
                     'clips' => $payloadClips,
                     'beam_size' => (int) config('services.runpod.beam_size', 5),
-                    'vad_filter' => filter_var(config('services.runpod.vad_filter', true), FILTER_VALIDATE_BOOLEAN),
+                    'vad_filter' => filter_var(config('services.runpod.vad_filter', false), FILTER_VALIDATE_BOOLEAN),
                 ],
             ]);
         } catch (ConnectionException $exception) {
             throw new RuntimeException(ServiceUserMessage::cannotReachProvider('RunPod'), 0, $exception);
-        } finally {
-            foreach ($temporaryPaths as $temporaryPath) {
-                Storage::disk('local')->delete($temporaryPath);
-            }
         }
 
         if ($response->failed()) {
@@ -128,7 +124,7 @@ class RunPodSpeechToTextService
             'clip_end_ms' => $options['clip_end_ms'] ?? null,
             'language' => $language,
             'beam_size' => (int) config('services.runpod.beam_size', 5),
-            'vad_filter' => filter_var(config('services.runpod.vad_filter', true), FILTER_VALIDATE_BOOLEAN),
+            'vad_filter' => filter_var(config('services.runpod.vad_filter', false), FILTER_VALIDATE_BOOLEAN),
         ], fn (mixed $value): bool => $value !== null && $value !== '');
     }
 

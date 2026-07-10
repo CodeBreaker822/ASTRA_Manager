@@ -455,7 +455,7 @@ class TranscriptionController extends Controller
 
         return response()->file($path, [
             'Content-Type' => mime_content_type($path) ?: 'application/octet-stream',
-        ]);
+        ])->deleteFileAfterSend(true);
     }
 
     private function licenseFor(Request $request, string $method): API|JsonResponse
