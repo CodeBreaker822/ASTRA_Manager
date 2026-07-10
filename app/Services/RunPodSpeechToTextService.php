@@ -56,16 +56,31 @@ class RunPodSpeechToTextService
 
         try {
             $payloadClips = [];
+            $encodedBytes = 0;
 
             foreach ($clips as $index => $clip) {
                 $file = $this->audioFile($clip['audio']);
-                $temporaryPath = $this->storeTemporaryAudio($file);
-                $temporaryPaths[] = $temporaryPath;
-                $payloadClips[] = $this->clipInputPayload($temporaryPath, [
+                $contents = file_get_contents($file['path']);
+                if ($contents === false) {
+                    throw new RuntimeException(ServiceUserMessage::audioReadFailed());
+                }
+                $encoded = base64_encode($contents);
+                $encodedBytes += strlen($encoded);
+                $payloadClips[] = $this->directClipInputPayload($file, $encoded, [
                     ...$options,
                     ...$clip,
                     'queue_index' => $index,
                 ]);
+            }
+
+            if ($encodedBytes > 9_000_000) {
+                $payloadClips = [];
+                foreach ($clips as $index => $clip) {
+                    $file = $this->audioFile($clip['audio']);
+                    $temporaryPath = $this->storeTemporaryAudio($file);
+                    $temporaryPaths[] = $temporaryPath;
+                    $payloadClips[] = $this->clipInputPayload($temporaryPath, [...$options, ...$clip, 'queue_index' => $index]);
+                }
             }
 
             $response = $this->submitAndWait([
@@ -164,6 +179,22 @@ class RunPodSpeechToTextService
             'language' => $language,
             'beam_size' => (int) config('services.runpod.beam_size', 5),
             'vad_filter' => filter_var(config('services.runpod.vad_filter', false), FILTER_VALIDATE_BOOLEAN),
+        ], fn (mixed $value): bool => $value !== null && $value !== '');
+    }
+
+    private function directClipInputPayload(array $file, string $encoded, array $options): array
+    {
+        return array_filter([
+            'queue_index' => $options['queue_index'] ?? null,
+            'audio_base64' => $encoded,
+            'audio_name' => $file['name'],
+            'audio_mime_type' => $file['mime_type'],
+            'clip_index' => $options['clip_index'] ?? null,
+            'clip_start_ms' => $options['clip_start_ms'] ?? null,
+            'clip_end_ms' => $options['clip_end_ms'] ?? null,
+            'language' => $this->language($options['language_code'] ?? null),
+            'beam_size' => (int) config('services.runpod.beam_size', 5),
+            'vad_filter' => false,
         ], fn (mixed $value): bool => $value !== null && $value !== '');
     }
 

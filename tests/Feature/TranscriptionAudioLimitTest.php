@@ -198,6 +198,6 @@ it('sends batched clips to runpod when runpod is the first provider', function (
         && count($request['input']['clips']) === 2
         && $request['input']['clips'][0]['clip_index'] === 1
         && $request['input']['clips'][1]['clip_index'] === 2
-        && str_contains($request['input']['clips'][0]['audio_url'], '/runpod/audio/')
-        && str_contains($request['input']['clips'][0]['audio_url'], 'signature='));
+        && is_string($request['input']['clips'][0]['audio_base64'] ?? null)
+        && base64_decode($request['input']['clips'][0]['audio_base64'], true) === 'fake audio 1');
 });
