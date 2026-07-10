@@ -47,6 +47,12 @@ class ProviderConnectionService
                 continue;
             }
 
+            if ($provider['provider'] === AppSettingsService::PROVIDER_RUNPOD) {
+                $results[$provider['setting_id']] = $this->checkRunPodProvider($setting->api_key);
+
+                continue;
+            }
+
             $request = $this->requestFor(
                 $provider['provider'],
                 $provider['model'],
@@ -221,6 +227,47 @@ class ProviderConnectionService
             AppSettingsService::PROVIDER_AZURE_SPEECH => true,
             default => false,
         };
+    }
+
+    private function checkRunPodProvider(string $apiKey): array
+    {
+        $endpoint = trim((string) config('services.runpod.runsync_url'));
+
+        if ($endpoint === '') {
+            $endpointId = trim((string) config('services.runpod.endpoint_id'));
+            $endpoint = $endpointId === ''
+                ? ''
+                : rtrim((string) config('services.runpod.base_url', 'https://api.runpod.ai/v2'), '/').'/'.$endpointId.'/runsync';
+        }
+
+        if ($endpoint === '') {
+            return $this->result('offline', 'Configuration required', 'RunPod endpoint is not configured.');
+        }
+
+        try {
+            $response = Http::withToken(trim($apiKey))
+                ->acceptJson()
+                ->asJson()
+                ->connectTimeout((int) config('services.provider_health.connect_timeout', 3))
+                ->timeout((int) config('services.provider_health.timeout', 6))
+                ->post($endpoint, ['input' => ['action' => 'capabilities']]);
+        } catch (ConnectionException|RequestException) {
+            return $this->result('offline', 'Offline', 'The provider could not be reached.');
+        }
+
+        if ($response->status() === 429) {
+            return $this->result('limited', 'Rate limited', 'The provider is reachable but is currently rate limited or out of quota.');
+        }
+
+        if (in_array($response->status(), [401, 403], true)) {
+            return $this->result('offline', 'Authentication failed', 'The API key was rejected or cannot access this endpoint.');
+        }
+
+        if ($response->failed()) {
+            return $this->result('offline', 'Offline', 'The provider returned HTTP '.$response->status().'.');
+        }
+
+        return $this->result('online', 'Online', 'The RunPod endpoint accepted the capabilities request.');
     }
 
     private function azureHealthRequest(array $request, string $apiKey): array

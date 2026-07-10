@@ -8,6 +8,11 @@ Route::get('/transcriber/{zipfile}', [TranscriptionController::class, 'downloadU
     ->where('zipfile', '[^/]+')
     ->name('transcriber.update.download');
 
+Route::get('/runpod/audio/{file}', [TranscriptionController::class, 'temporaryRunPodAudio'])
+    ->middleware('signed')
+    ->where('file', '[^/]+')
+    ->name('runpod.audio.temporary');
+
 Route::middleware(['auth', 'can:API-manage_api'])->group(function () {
     Route::get('/settings/api', [APIController::class, 'index'])->name('api.manager');
     Route::get('/settings/api/transcription-providers/health', [APIController::class, 'transcriptionProviderHealth'])->name('api.transcription-providers.health');
@@ -21,4 +26,3 @@ Route::middleware(['auth', 'can:API-manage_api'])->group(function () {
     Route::post('/api/settings/store', [APIController::class, 'store'])->name('api.store');
     Route::delete('/api/settings/{aPI}', [APIController::class, 'destroy'])->name('api.destroy');
 });
-

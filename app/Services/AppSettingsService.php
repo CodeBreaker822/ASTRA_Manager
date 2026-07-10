@@ -33,6 +33,8 @@ class AppSettingsService
 
     public const PROVIDER_AWS_TRANSCRIBE = 'aws_transcribe';
 
+    public const PROVIDER_RUNPOD = 'runpod';
+
     public const PROVIDER_GROQ_TEXT_FIXER = 'groq_text_fixer';
 
     public const PROVIDER_DEEPSEEK = 'deepseek';
@@ -154,6 +156,7 @@ class AppSettingsService
                         self::PROVIDER_AZURE_SPEECH,
                         self::PROVIDER_GOOGLE_SPEECH,
                         self::PROVIDER_AWS_TRANSCRIBE,
+                        self::PROVIDER_RUNPOD,
                     ], true);
                     $capability['languages'] = $this->languageOptions($provider['provider'], $model);
                 }
@@ -525,6 +528,7 @@ class AppSettingsService
             self::PROVIDER_AZURE_SPEECH => AzureSpeechToTextService::MODEL_FAST_TRANSCRIPTION,
             self::PROVIDER_GOOGLE_SPEECH => GoogleCloudSpeechToTextService::MODEL_CHIRP_3,
             self::PROVIDER_AWS_TRANSCRIBE => AwsTranscribeSpeechToTextService::MODEL_STANDARD,
+            self::PROVIDER_RUNPOD => RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR,
             self::PROVIDER_GROQ_TEXT_FIXER => $this->groqTextFixerModel(),
             self::PROVIDER_DEEPSEEK => $this->deepSeekModel(),
             self::PROVIDER_CEREBRAS => $this->cerebrasModel(),
@@ -710,6 +714,20 @@ class AppSettingsService
                 'credential_placeholder' => '{"access_key_id":"...","secret_access_key":"...","region":"ap-southeast-1","bucket":"..."}',
                 'credential_help' => 'Paste encrypted AWS credentials plus the S3 bucket used for temporary audio.',
             ],
+            self::PROVIDER_RUNPOD => [
+                'provider' => self::PROVIDER_RUNPOD,
+                'name' => 'RunPod Serverless Transcriptor',
+                'endpoint' => config('services.runpod.runsync_url')
+                    ?: rtrim((string) config('services.runpod.base_url'), '/').'/'.config('services.runpod.endpoint_id').'/runsync',
+                'default_model' => RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR,
+                'models' => [RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR],
+                'model_labels' => [
+                    RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR => 'Serverless Transcriptor',
+                ],
+                'api_key_url' => 'https://console.runpod.io/user/settings',
+                'purpose' => 'Serverless speech to text',
+                'category' => 'transcriber',
+            ],
             self::PROVIDER_GEMINI => [
                 'provider' => self::PROVIDER_GEMINI,
                 'name' => 'Gemini',
@@ -863,7 +881,7 @@ class AppSettingsService
             self::PROVIDER_DEEPGRAM => 'multi',
             self::PROVIDER_ELEVENLABS => null,
             self::PROVIDER_GROQ_TRANSCRIPTION => null,
-            self::PROVIDER_GLADIA, self::PROVIDER_ASSEMBLYAI, self::PROVIDER_AWS_TRANSCRIBE => 'auto',
+            self::PROVIDER_GLADIA, self::PROVIDER_ASSEMBLYAI, self::PROVIDER_AWS_TRANSCRIBE, self::PROVIDER_RUNPOD => 'auto',
             self::PROVIDER_AZURE_SPEECH, self::PROVIDER_GOOGLE_SPEECH => 'en-US',
             self::PROVIDER_SPEECHMATICS => $model === SpeechmaticsSpeechToTextService::MODEL_MELIA_1 ? 'multi' : 'auto',
             default => null,
@@ -877,6 +895,9 @@ class AppSettingsService
             self::PROVIDER_ELEVENLABS => $this->elevenLabsScribeLanguages(),
             self::PROVIDER_GROQ_TRANSCRIPTION => [['code' => 'auto', 'label' => 'Automatic detection']],
             self::PROVIDER_GLADIA, self::PROVIDER_AWS_TRANSCRIBE => $this->languageRows([
+                'auto' => 'Automatic detection', 'en' => 'English', 'fil' => 'Filipino / Tagalog',
+            ]),
+            self::PROVIDER_RUNPOD => $this->languageRows([
                 'auto' => 'Automatic detection', 'en' => 'English', 'fil' => 'Filipino / Tagalog',
             ]),
             self::PROVIDER_ASSEMBLYAI => $model === AssemblyAiSpeechToTextService::MODEL_UNIVERSAL_3_PRO

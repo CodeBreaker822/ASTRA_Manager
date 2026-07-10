@@ -22,6 +22,7 @@ use App\Services\MistralTranscriptCleanerService;
 use App\Services\OpenAICompatibleTranscriptCleanerService;
 use App\Services\OpenRouterTranscriptCleanerService;
 use App\Services\ProviderFallbackLogger;
+use App\Services\RunPodSpeechToTextService;
 use App\Services\ServiceUserMessage;
 use App\Services\SpeechmaticsSpeechToTextService;
 use App\Services\TranscriptionApiRequestLogger;
@@ -37,6 +38,8 @@ use Throwable;
 class TranscriptionController extends Controller
 {
     private const RATE_LIMIT_PER_MINUTE = 120;
+    private const MAX_TRANSCRIBE_BATCH_DURATION_MS = 20 * 60 * 1000;
+    private const MAX_TRANSCRIBE_BATCH_CLIPS = 20;
 
     public function transcribe(Request $request, AppSettingsService $settings): JsonResponse
     {
@@ -59,66 +62,119 @@ class TranscriptionController extends Controller
         }
 
         try {
-            $validated = $request->validate([
-                'audio' => ['required', 'file', 'max:512000'],
+            $audioRules = is_array($request->file('audio'))
+                ? [
+                    'audio' => ['required', 'array', 'min:1', 'max:'.self::MAX_TRANSCRIBE_BATCH_CLIPS],
+                    'audio.*' => ['required', 'file', 'max:512000'],
+                ]
+                : ['audio' => ['required', 'file', 'max:512000']];
+
+            $validated = $request->validate(array_merge($audioRules, [
                 'provider' => ['nullable', 'string', 'max:100'],
                 'model' => ['nullable', 'string', 'max:200'],
-                'language_code' => ['nullable', 'string', 'max:20'],
-                'clip_index' => ['nullable', 'integer', 'min:0'],
-                'clip_start_ms' => ['nullable', 'integer', 'min:0'],
-                'clip_end_ms' => ['nullable', 'integer', 'min:0'],
-            ]);
+                'language_code' => ['nullable'],
+                'language_code.*' => ['nullable', 'string', 'max:20'],
+                'clip_index' => ['nullable'],
+                'clip_index.*' => ['nullable', 'integer', 'min:0'],
+                'clip_start_ms' => ['nullable'],
+                'clip_start_ms.*' => ['nullable', 'integer', 'min:0'],
+                'clip_end_ms' => ['nullable'],
+                'clip_end_ms.*' => ['nullable', 'integer', 'min:0'],
+                'clips' => ['nullable', 'array'],
+                'clips.*' => ['array'],
+                'clips.*.language_code' => ['nullable', 'string', 'max:20'],
+                'clips.*.clip_index' => ['nullable', 'integer', 'min:0'],
+                'clips.*.clip_start_ms' => ['nullable', 'integer', 'min:0'],
+                'clips.*.clip_end_ms' => ['nullable', 'integer', 'min:0'],
+            ]));
         } catch (ValidationException $exception) {
             return $this->logAndReturn($request, 'transcribe', $license, $this->validationError($exception), $startedAt);
         }
 
-        $providers = $settings->orderedConnectedProviders('transcriber');
-        $attemptedProviders = [];
-        $result = null;
-        $usedProvider = null;
+        $queuedClips = $this->normalizeTranscribeClips($request, $validated);
 
-        foreach ($providers as $position => $provider) {
-            $attemptedProviders[] = $provider['provider'];
-
-            try {
-                $result = $this->retryEmptyTranscriptionResponse(
-                    fn (): array => $this->transcribeUsingProvider($provider, $request, $validated),
-                    $provider,
-                );
-                $usedProvider = $provider;
-                app(ProviderFallbackLogger::class)->recovered('transcriber', 'transcribe', $provider, $position, $request, $license);
-                break;
-            } catch (Throwable $exception) {
-                app(ProviderFallbackLogger::class)->failure('transcriber', 'transcribe', $provider, $position, $exception, $request, $license);
-                report($exception);
-            }
+        if ($this->transcribeBatchDurationTooLarge($queuedClips)) {
+            return $this->logAndReturn($request, 'transcribe', $license, response()->json([
+                'message' => 'Audio is too big.',
+            ], 422), $startedAt, [
+                'status' => 'validation_error',
+                'severity' => 'low',
+            ]);
         }
 
-        if ($result === null || $usedProvider === null) {
+        $providers = $settings->orderedConnectedProviders('transcriber');
+        $providerCount = count($providers);
+
+        if ($providerCount === 0) {
             return $this->logAndReturn($request, 'transcribe', $license, response()->json([
                 'message' => 'All configured transcription providers are unavailable.',
             ], 503), $startedAt, [
                 'status' => 'provider_error',
                 'severity' => 'high',
-                'attempted_providers' => $attemptedProviders,
+                'attempted_providers' => [],
             ]);
         }
 
+        $clipTranscripts = [];
+        $attemptedProviders = [];
+        $usedProviders = [];
+        $batchResult = $this->transcribeBatchWithFirstProvider($providers, $queuedClips, $request, $license);
+
+        if ($batchResult !== null) {
+            $clipTranscripts = $batchResult['clips'];
+            $attemptedProviders = $batchResult['attempted_providers'];
+            $usedProviders[] = $batchResult['provider']['provider'];
+        }
+
+        foreach ($batchResult === null ? $queuedClips : [] as $queueIndex => $clip) {
+            $clipResult = $this->transcribeClipAcrossProviders(
+                $providers,
+                $queueIndex % $providerCount,
+                $clip,
+                $request,
+                $license,
+            );
+
+            if ($clipResult === null) {
+                return $this->logAndReturn($request, 'transcribe', $license, response()->json([
+                    'message' => 'All configured transcription providers are unavailable.',
+                    'clip_index' => $clip['clip_index'],
+                ], 503), $startedAt, [
+                    'status' => 'provider_error',
+                    'severity' => 'high',
+                    'attempted_providers' => array_values(array_unique($attemptedProviders)),
+                ]);
+            }
+
+            $attemptedProviders = array_merge($attemptedProviders, $clipResult['attempted_providers']);
+            $usedProviders[] = $clipResult['provider']['provider'];
+            $clipTranscripts[] = $this->clipTranscript($clip, $clipResult['result'], $clipResult['attempted_providers']);
+        }
+
+        $firstClip = $clipTranscripts[0];
+        $attemptedProviders = array_values(array_unique($attemptedProviders));
+        $fallback = [
+            'used' => collect($clipTranscripts)->contains(fn (array $clip): bool => (bool) ($clip['fallback']['used'] ?? false)),
+        ];
+
         $response = response()->json([
-            'text' => $result['text'] ?? '',
-            'timestamps' => $result['timestamps'] ?? [],
+            'text' => count($clipTranscripts) === 1
+                ? $firstClip['text']
+                : collect($clipTranscripts)->pluck('text')->filter()->implode("\n\n"),
+            'timestamps' => count($clipTranscripts) === 1 ? $firstClip['timestamps'] : [],
             'provider' => AppSettingsService::PUBLIC_PROVIDER_ID,
             'provider_name' => AppSettingsService::PUBLIC_PROVIDER_NAME,
             'model' => AppSettingsService::PUBLIC_MODEL,
-            'clip_index' => $validated['clip_index'] ?? null,
-            'clip_start_ms' => $validated['clip_start_ms'] ?? null,
-            'clip_end_ms' => $validated['clip_end_ms'] ?? null,
-            'fallback' => $this->fallbackDetails($attemptedProviders),
+            'clip_index' => $firstClip['clip_index'],
+            'clip_start_ms' => $firstClip['clip_start_ms'],
+            'clip_end_ms' => count($clipTranscripts) === 1 ? $firstClip['clip_end_ms'] : collect($clipTranscripts)->max('clip_end_ms'),
+            'duration_ms' => collect($clipTranscripts)->sum(fn (array $clip): int => (int) ($clip['duration_ms'] ?? 0)),
+            'clips' => $clipTranscripts,
+            'fallback' => $fallback,
         ]);
 
         return $this->logAndReturn($request, 'transcribe', $license, $response, $startedAt, [
-            'provider' => $usedProvider['provider'],
-            'model' => $usedProvider['model'],
+            'provider' => implode(',', array_values(array_unique($usedProviders))),
             'attempted_providers' => $attemptedProviders,
         ]);
     }
@@ -311,6 +367,10 @@ class TranscriptionController extends Controller
                     'path' => '/api/transcribe',
                     'allowed' => $canPost && ! $rateLimited && $transcriptionProvider['connected'],
                     'providers' => [AppSettingsService::PUBLIC_PROVIDER_ID],
+                    'supports_batch' => true,
+                    'max_batch_clips' => self::MAX_TRANSCRIBE_BATCH_CLIPS,
+                    'max_batch_duration_ms' => self::MAX_TRANSCRIBE_BATCH_DURATION_MS,
+                    'max_batch_duration_minutes' => intdiv(self::MAX_TRANSCRIBE_BATCH_DURATION_MS, 60 * 1000),
                     'fields' => [
                         'audio',
                         'language_code',
@@ -380,6 +440,20 @@ class TranscriptionController extends Controller
         return response()->download($zipPath, basename($zipPath), [
             'Content-Type' => 'application/zip',
             'Cache-Control' => 'private, no-store',
+        ]);
+    }
+
+    public function temporaryRunPodAudio(string $file): JsonResponse|BinaryFileResponse
+    {
+        $file = basename($file);
+        $path = Storage::disk('local')->path('runpod-audio/'.$file);
+
+        if (! is_file($path) || ! is_readable($path)) {
+            return response()->json(['message' => 'Audio file not found.'], 404);
+        }
+
+        return response()->file($path, [
+            'Content-Type' => mime_content_type($path) ?: 'application/octet-stream',
         ]);
     }
 
@@ -553,7 +627,7 @@ class TranscriptionController extends Controller
         return $response;
     }
 
-    private function transcribeUsingProvider(array $provider, Request $request, array $options): array
+    private function transcribeUsingProvider(array $provider, mixed $audio, array $options): array
     {
         $service = match ($provider['provider']) {
             AppSettingsService::PROVIDER_DEEPGRAM => new DeepgramSpeechToTextService(
@@ -577,9 +651,233 @@ class TranscriptionController extends Controller
             AppSettingsService::PROVIDER_AZURE_SPEECH => new AzureSpeechToTextService($provider['api_key'], $provider['model']),
             AppSettingsService::PROVIDER_GOOGLE_SPEECH => new GoogleCloudSpeechToTextService($provider['api_key'], $provider['model']),
             AppSettingsService::PROVIDER_AWS_TRANSCRIBE => new AwsTranscribeSpeechToTextService($provider['api_key'], $provider['model']),
+            AppSettingsService::PROVIDER_RUNPOD => new RunPodSpeechToTextService($provider['api_key'], $provider['model']),
         };
 
-        return $service->transcribe($request->file('audio'), $options);
+        return $service->transcribe($audio, $options);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $providers
+     * @param  array<int, array<string, mixed>>  $clips
+     * @return array{clips: array<int, array<string, mixed>>, provider: array<string, mixed>, attempted_providers: array<int, string>}|null
+     */
+    private function transcribeBatchWithFirstProvider(
+        array $providers,
+        array $clips,
+        Request $request,
+        API $license,
+    ): ?array {
+        $provider = $providers[0] ?? null;
+
+        if (count($clips) < 2 || ! is_array($provider) || $provider['provider'] !== AppSettingsService::PROVIDER_RUNPOD) {
+            return null;
+        }
+
+        try {
+            $service = new RunPodSpeechToTextService($provider['api_key'], $provider['model']);
+            $results = $service->transcribeBatch(array_map(
+                fn (array $clip): array => [
+                    'audio' => $clip['audio'],
+                    'language_code' => $clip['language_code'],
+                    'clip_index' => $clip['clip_index'],
+                    'clip_start_ms' => $clip['clip_start_ms'],
+                    'clip_end_ms' => $clip['clip_end_ms'],
+                ],
+                $clips,
+            ));
+
+            if (! collect($results)->contains(fn (mixed $result): bool => is_array($result) && trim((string) ($result['text'] ?? '')) !== '')) {
+                throw new \RuntimeException(ServiceUserMessage::emptyTranscriptionResponse((string) $provider['provider']));
+            }
+
+            return [
+                'clips' => array_map(function (array $clip, int $index) use ($results): array {
+                    $result = $this->resultForBatchClip($results, $clip, $index);
+
+                    return $this->clipTranscript($clip, $result, [AppSettingsService::PROVIDER_RUNPOD]);
+                }, $clips, array_keys($clips)),
+                'provider' => $provider,
+                'attempted_providers' => [AppSettingsService::PROVIDER_RUNPOD],
+            ];
+        } catch (Throwable $exception) {
+            app(ProviderFallbackLogger::class)->failure('transcriber', 'transcribe', $provider, 0, $exception, $request, $license);
+            report($exception);
+
+            return null;
+        }
+    }
+
+    private function resultForBatchClip(array $results, array $clip, int $index): array
+    {
+        $clipIndex = $clip['clip_index'] ?? null;
+
+        foreach ($results as $result) {
+            if (! is_array($result)) {
+                continue;
+            }
+
+            if (isset($result['clip_index']) && is_numeric($clipIndex) && (int) $result['clip_index'] === (int) $clipIndex) {
+                return $result;
+            }
+
+            if (isset($result['queue_index']) && (int) $result['queue_index'] === $index) {
+                return $result;
+            }
+        }
+
+        return is_array($results[$index] ?? null) ? $results[$index] : ['text' => '', 'timestamps' => []];
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeTranscribeClips(Request $request, array $validated): array
+    {
+        $audio = $request->file('audio');
+        $files = is_array($audio) ? array_values($audio) : [$audio];
+        $clips = [];
+
+        foreach ($files as $index => $file) {
+            $metadata = is_array($validated['clips'][$index] ?? null) ? $validated['clips'][$index] : [];
+
+            $clips[] = [
+                'audio' => $file,
+                'queue_index' => $index,
+                'provider' => $validated['provider'] ?? null,
+                'model' => $validated['model'] ?? null,
+                'language_code' => $metadata['language_code'] ?? $this->indexedValue($validated, 'language_code', $index),
+                'clip_index' => $metadata['clip_index'] ?? $this->indexedValue($validated, 'clip_index', $index),
+                'clip_start_ms' => $metadata['clip_start_ms'] ?? $this->indexedValue($validated, 'clip_start_ms', $index),
+                'clip_end_ms' => $metadata['clip_end_ms'] ?? $this->indexedValue($validated, 'clip_end_ms', $index),
+            ];
+        }
+
+        return $clips;
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     */
+    private function indexedValue(array $validated, string $key, int $index): mixed
+    {
+        $value = $validated[$key] ?? null;
+
+        if (is_array($value)) {
+            return $value[$index] ?? null;
+        }
+
+        return $index === 0 ? $value : null;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $providers
+     * @param  array<string, mixed>  $clip
+     * @return array{result: array<string, mixed>, provider: array<string, mixed>, attempted_providers: array<int, string>}|null
+     */
+    private function transcribeClipAcrossProviders(
+        array $providers,
+        int $startingIndex,
+        array $clip,
+        Request $request,
+        API $license,
+    ): ?array {
+        $providerCount = count($providers);
+        $attemptedProviders = [];
+
+        for ($offset = 0; $offset < $providerCount; $offset++) {
+            $provider = $providers[($startingIndex + $offset) % $providerCount];
+            $attemptedProviders[] = $provider['provider'];
+
+            try {
+                $result = $this->retryEmptyTranscriptionResponse(
+                    fn (): array => $this->transcribeUsingProvider($provider, $clip['audio'], $clip),
+                    $provider,
+                );
+
+                if ($offset > 0) {
+                    app(ProviderFallbackLogger::class)->recovered('transcriber', 'transcribe', $provider, $offset, $request, $license);
+                }
+
+                return [
+                    'result' => $result,
+                    'provider' => $provider,
+                    'attempted_providers' => $attemptedProviders,
+                ];
+            } catch (Throwable $exception) {
+                app(ProviderFallbackLogger::class)->failure('transcriber', 'transcribe', $provider, $offset, $exception, $request, $license);
+                report($exception);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $clip
+     * @param  array<string, mixed>  $result
+     * @param  array<int, string>  $attemptedProviders
+     * @return array<string, mixed>
+     */
+    private function clipTranscript(array $clip, array $result, array $attemptedProviders): array
+    {
+        return [
+            'queue_index' => $clip['queue_index'],
+            'clip_index' => is_numeric($clip['clip_index']) ? (int) $clip['clip_index'] : null,
+            'clip_start_ms' => is_numeric($clip['clip_start_ms']) ? (int) $clip['clip_start_ms'] : null,
+            'clip_end_ms' => is_numeric($clip['clip_end_ms']) ? (int) $clip['clip_end_ms'] : null,
+            'duration_ms' => $this->clipDurationMs($clip),
+            'text' => $result['text'] ?? '',
+            'timestamps' => $result['timestamps'] ?? [],
+            'provider' => AppSettingsService::PUBLIC_PROVIDER_ID,
+            'provider_name' => AppSettingsService::PUBLIC_PROVIDER_NAME,
+            'model' => AppSettingsService::PUBLIC_MODEL,
+            'attempted_providers' => $attemptedProviders,
+            'fallback' => $this->fallbackDetails($attemptedProviders),
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $clips
+     */
+    private function transcribeBatchDurationTooLarge(array $clips): bool
+    {
+        $totalDurationMs = 0;
+
+        foreach ($clips as $clip) {
+            $clipStartMs = $clip['clip_start_ms'] ?? null;
+            $clipEndMs = $clip['clip_end_ms'] ?? null;
+
+            if (! is_numeric($clipStartMs) || ! is_numeric($clipEndMs)) {
+                return count($clips) > 1;
+            }
+
+            $durationMs = max(0, (int) $clipEndMs - (int) $clipStartMs);
+
+            if ((int) $clipEndMs > self::MAX_TRANSCRIBE_BATCH_DURATION_MS || $durationMs > self::MAX_TRANSCRIBE_BATCH_DURATION_MS) {
+                return true;
+            }
+
+            $totalDurationMs += $durationMs;
+        }
+
+        return $totalDurationMs > self::MAX_TRANSCRIBE_BATCH_DURATION_MS;
+    }
+
+    /**
+     * @param  array<string, mixed>  $clip
+     */
+    private function clipDurationMs(array $clip): ?int
+    {
+        $clipStartMs = $clip['clip_start_ms'] ?? null;
+        $clipEndMs = $clip['clip_end_ms'] ?? null;
+
+        if (! is_numeric($clipStartMs) || ! is_numeric($clipEndMs)) {
+            return null;
+        }
+
+        return max(0, (int) $clipEndMs - (int) $clipStartMs);
     }
 
     private function retryEmptyTranscriptionResponse(callable $callback, array $provider): array

@@ -108,6 +108,17 @@ return [
         'max_wait_seconds' => env('AWS_TRANSCRIBE_MAX_WAIT_SECONDS', 300),
     ],
 
+    'runpod' => [
+        'base_url' => env('RUNPOD_BASE_URL', 'https://api.runpod.ai/v2'),
+        'endpoint_id' => env('RUNPOD_ENDPOINT_ID', ''),
+        'runsync_url' => env('RUNPOD_RUNSYNC_URL'),
+        'health_url' => env('RUNPOD_HEALTH_URL'),
+        'timeout' => env('RUNPOD_TIMEOUT', 300),
+        'audio_url_ttl_seconds' => env('RUNPOD_AUDIO_URL_TTL_SECONDS', 600),
+        'beam_size' => env('RUNPOD_BEAM_SIZE', 5),
+        'vad_filter' => env('RUNPOD_VAD_FILTER', true),
+    ],
+
     'gemini' => [
         'key' => env('GEMINI_API_KEY'),
         'base_url' => env('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
