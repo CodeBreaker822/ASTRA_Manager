@@ -145,7 +145,11 @@ it('sends batched clips to runpod when runpod is the first provider', function (
     ]);
 
     Http::fake([
-        'https://runpod.test/v2/endpoint/runsync' => Http::response([
+        'https://runpod.test/v2/endpoint/run' => Http::response([
+            'id' => 'batch-job-1',
+            'status' => 'IN_QUEUE',
+        ]),
+        'https://runpod.test/v2/endpoint/status/batch-job-1' => Http::response([
             'status' => 'COMPLETED',
             'output' => [
                 'clips' => [
@@ -188,7 +192,7 @@ it('sends batched clips to runpod when runpod is the first provider', function (
         ->assertJsonPath('clips.0.attempted_providers', ['runpod'])
         ->assertJsonPath('fallback.used', false);
 
-    Http::assertSent(fn ($request): bool => $request->url() === 'https://runpod.test/v2/endpoint/runsync'
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://runpod.test/v2/endpoint/run'
         && $request->hasHeader('Authorization', 'Bearer runpod-key')
         && is_array($request['input']['clips'] ?? null)
         && count($request['input']['clips']) === 2

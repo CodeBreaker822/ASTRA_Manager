@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use RuntimeException;
 use SplFileInfo;
+use Throwable;
 
 class RunPodSpeechToTextService
 {
@@ -67,7 +68,7 @@ class RunPodSpeechToTextService
                 ]);
             }
 
-            $response = $this->client()->post($this->endpoint(), [
+            $response = $this->submitAndWait([
                 'input' => [
                     'action' => 'transcribe',
                     'clips' => $payloadClips,
@@ -107,6 +108,44 @@ class RunPodSpeechToTextService
         }
 
         return $endpoint;
+    }
+
+    private function submitAndWait(array $payload)
+    {
+        $client = $this->client();
+        $runUrl = preg_replace('#/runsync(?:\?.*)?$#', '/run', $this->endpoint()) ?: $this->endpoint();
+        $response = $client->post($runUrl, $payload);
+
+        if ($response->failed()) {
+            return $response;
+        }
+
+        $jobId = trim((string) $response->json('id'));
+
+        if ($jobId === '') {
+            return $response;
+        }
+
+        $statusUrl = preg_replace('#/run$#', '/status/'.rawurlencode($jobId), $runUrl) ?: $runUrl;
+        $deadline = microtime(true) + ($this->timeout ?? (int) config('services.runpod.timeout', 1500));
+
+        do {
+            $status = $client->get($statusUrl);
+
+            if ($status->failed()) {
+                return $status;
+            }
+
+            $state = strtoupper((string) $status->json('status'));
+
+            if (in_array($state, ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'], true)) {
+                return $status;
+            }
+
+            usleep(2_000_000);
+        } while (microtime(true) < $deadline);
+
+        throw new RuntimeException('RunPod transcription timed out while waiting for the submitted job.');
     }
 
     /**
