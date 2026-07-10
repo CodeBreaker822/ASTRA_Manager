@@ -135,11 +135,13 @@ it('sends batched clips to runpod when runpod is the first provider', function (
         'model' => 'serverless-transcriptor',
         'is_enabled' => true,
         'sort_order' => 0,
+        'metadata' => [
+            'runsync_url' => 'https://runpod.test/v2/endpoint/runsync',
+        ],
     ]);
 
     config([
         'app.url' => 'https://server.test',
-        'services.runpod.runsync_url' => 'https://runpod.test/v2/endpoint/runsync',
     ]);
 
     Http::fake([

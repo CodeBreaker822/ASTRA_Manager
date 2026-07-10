@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\DB;
 
 class AppSettingsService
 {
+    private const RUNPOD_API_BASE_URL = 'https://api.runpod.ai/v2';
+
     public const PUBLIC_PROVIDER_ID = 'aims_server';
 
     public const PUBLIC_PROVIDER_NAME = 'AIMS Server';
@@ -77,11 +79,7 @@ class AppSettingsService
 
             foreach ($providerSettings as $setting) {
                 $model = $this->validModelForDefinition($definition, $setting->model);
-                $metadata = $setting->metadata ?? [];
-
-                if ($providerId === self::PROVIDER_CLOUDFLARE && blank($metadata['account_id'] ?? null)) {
-                    $metadata['account_id'] = (string) config('services.cloudflare.account_id');
-                }
+                $metadata = $this->metadataWithDefaults($providerId, $setting->metadata ?? []);
 
                 $selectableModels = array_values(array_unique([
                     $model,
@@ -95,9 +93,9 @@ class AppSettingsService
                     'model' => $model,
                     'model_label' => $definition['model_labels'][$model] ?? $model,
                     'is_enabled' => $setting->is_enabled,
-                    'configured' => filled($setting->api_key),
+                    'configured' => filled($setting->api_key) && $this->providerHasRequiredMetadata($providerId, $metadata),
                     'masked_api_key' => $this->maskKey($setting->api_key),
-                    'has_reusable_api_key' => false,
+                    'has_reusable_api_key' => filled($setting->api_key),
                     'metadata' => $metadata,
                     'sort_order' => $setting->sort_order,
                 ]);
@@ -115,9 +113,7 @@ class AppSettingsService
                     'configured' => false,
                     'masked_api_key' => $this->maskKey($reusableApiKey),
                     'has_reusable_api_key' => filled($reusableApiKey),
-                    'metadata' => $providerId === self::PROVIDER_CLOUDFLARE
-                        ? ['account_id' => (string) config('services.cloudflare.account_id')]
-                        : [],
+                    'metadata' => $this->metadataWithDefaults($providerId),
                     'sort_order' => PHP_INT_MAX,
                 ]);
             }
@@ -272,6 +268,13 @@ class AppSettingsService
             if ($provider === self::PROVIDER_CLOUDFLARE) {
                 $values['metadata'] = [
                     'account_id' => trim((string) ($data['account_id'] ?? $setting->metadata['account_id'] ?? '')),
+                ];
+            }
+
+            if ($provider === self::PROVIDER_RUNPOD) {
+                $values['metadata'] = [
+                    'endpoint_id' => trim((string) ($data['endpoint_id'] ?? $setting->metadata['endpoint_id'] ?? '')),
+                    'runsync_url' => trim((string) ($data['runsync_url'] ?? $setting->metadata['runsync_url'] ?? '')),
                 ];
             }
 
@@ -717,8 +720,7 @@ class AppSettingsService
             self::PROVIDER_RUNPOD => [
                 'provider' => self::PROVIDER_RUNPOD,
                 'name' => 'RunPod Serverless Transcriptor',
-                'endpoint' => config('services.runpod.runsync_url')
-                    ?: rtrim((string) config('services.runpod.base_url'), '/').'/'.config('services.runpod.endpoint_id').'/runsync',
+                'endpoint' => $this->runPodEndpointUrl() ?: 'https://api.runpod.ai/v2/{endpoint_id}/runsync',
                 'default_model' => RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR,
                 'models' => [RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR],
                 'model_labels' => [
@@ -727,6 +729,10 @@ class AppSettingsService
                 'api_key_url' => 'https://console.runpod.io/user/settings',
                 'purpose' => 'Serverless speech to text',
                 'category' => 'transcriber',
+                'credential_label' => 'RunPod API Key',
+                'credential_placeholder' => 'Paste RunPod API key',
+                'credential_help' => 'RunPod Serverless also requires an Endpoint ID or full /runsync URL.',
+                'requires_runpod_endpoint' => true,
             ],
             self::PROVIDER_GEMINI => [
                 'provider' => self::PROVIDER_GEMINI,
@@ -845,6 +851,45 @@ class AppSettingsService
 
         return rtrim((string) config('services.cloudflare.base_url'), '/')
             .'/'.rawurlencode($accountId).'/'.ltrim($path, '/');
+    }
+
+    private function metadataWithDefaults(string $providerId, array $metadata = []): array
+    {
+        if ($providerId === self::PROVIDER_CLOUDFLARE && blank($metadata['account_id'] ?? null)) {
+            $metadata['account_id'] = (string) config('services.cloudflare.account_id');
+        }
+
+        if ($providerId === self::PROVIDER_RUNPOD) {
+            $metadata['endpoint_id'] = trim((string) ($metadata['endpoint_id'] ?? ''));
+            $metadata['runsync_url'] = trim((string) ($metadata['runsync_url'] ?? ''));
+        }
+
+        return $metadata;
+    }
+
+    private function providerHasRequiredMetadata(string $providerId, array $metadata): bool
+    {
+        if ($providerId === self::PROVIDER_RUNPOD) {
+            return filled($metadata['runsync_url'] ?? null) || filled($metadata['endpoint_id'] ?? null);
+        }
+
+        return true;
+    }
+
+    private function runPodEndpointUrl(array $metadata = []): string
+    {
+        $metadata = $this->metadataWithDefaults(self::PROVIDER_RUNPOD, $metadata);
+        $runsyncUrl = trim((string) ($metadata['runsync_url'] ?? ''));
+
+        if ($runsyncUrl !== '') {
+            return $runsyncUrl;
+        }
+
+        $endpointId = trim((string) ($metadata['endpoint_id'] ?? ''));
+
+        return $endpointId === ''
+            ? ''
+            : self::RUNPOD_API_BASE_URL.'/'.$endpointId.'/runsync';
     }
 
     private function nextSortOrder(string $category): int

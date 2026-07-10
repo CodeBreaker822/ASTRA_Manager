@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\Http;
 
 class ProviderConnectionService
 {
+    private const RUNPOD_API_BASE_URL = 'https://api.runpod.ai/v2';
+
     public function __construct(private readonly AppSettingsService $settings) {}
 
     /**
@@ -48,7 +50,7 @@ class ProviderConnectionService
             }
 
             if ($provider['provider'] === AppSettingsService::PROVIDER_RUNPOD) {
-                $results[$provider['setting_id']] = $this->checkRunPodProvider($setting->api_key);
+                $results[$provider['setting_id']] = $this->checkRunPodProvider($setting->api_key, $provider['metadata'] ?? []);
 
                 continue;
             }
@@ -229,16 +231,9 @@ class ProviderConnectionService
         };
     }
 
-    private function checkRunPodProvider(string $apiKey): array
+    private function checkRunPodProvider(string $apiKey, array $metadata = []): array
     {
-        $endpoint = trim((string) config('services.runpod.runsync_url'));
-
-        if ($endpoint === '') {
-            $endpointId = trim((string) config('services.runpod.endpoint_id'));
-            $endpoint = $endpointId === ''
-                ? ''
-                : rtrim((string) config('services.runpod.base_url', 'https://api.runpod.ai/v2'), '/').'/'.$endpointId.'/runsync';
-        }
+        $endpoint = $this->runPodEndpointUrl($metadata);
 
         if ($endpoint === '') {
             return $this->result('offline', 'Configuration required', 'RunPod endpoint is not configured.');
@@ -268,6 +263,21 @@ class ProviderConnectionService
         }
 
         return $this->result('online', 'Online', 'The RunPod endpoint accepted the capabilities request.');
+    }
+
+    private function runPodEndpointUrl(array $metadata = []): string
+    {
+        $runsyncUrl = trim((string) ($metadata['runsync_url'] ?? ''));
+
+        if ($runsyncUrl !== '') {
+            return $runsyncUrl;
+        }
+
+        $endpointId = trim((string) ($metadata['endpoint_id'] ?? ''));
+
+        return $endpointId === ''
+            ? ''
+            : self::RUNPOD_API_BASE_URL.'/'.$endpointId.'/runsync';
     }
 
     private function azureHealthRequest(array $request, string $apiKey): array

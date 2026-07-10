@@ -37,6 +37,7 @@ use Throwable;
 
 class TranscriptionController extends Controller
 {
+    private const RUNPOD_API_BASE_URL = 'https://api.runpod.ai/v2';
     private const RATE_LIMIT_PER_MINUTE = 120;
     private const MAX_TRANSCRIBE_BATCH_DURATION_MS = 20 * 60 * 1000;
     private const MAX_TRANSCRIBE_BATCH_CLIPS = 20;
@@ -651,7 +652,11 @@ class TranscriptionController extends Controller
             AppSettingsService::PROVIDER_AZURE_SPEECH => new AzureSpeechToTextService($provider['api_key'], $provider['model']),
             AppSettingsService::PROVIDER_GOOGLE_SPEECH => new GoogleCloudSpeechToTextService($provider['api_key'], $provider['model']),
             AppSettingsService::PROVIDER_AWS_TRANSCRIBE => new AwsTranscribeSpeechToTextService($provider['api_key'], $provider['model']),
-            AppSettingsService::PROVIDER_RUNPOD => new RunPodSpeechToTextService($provider['api_key'], $provider['model']),
+            AppSettingsService::PROVIDER_RUNPOD => new RunPodSpeechToTextService(
+                $provider['api_key'],
+                $provider['model'],
+                $this->runPodRunsyncUrl($provider['metadata'] ?? []),
+            ),
         };
 
         return $service->transcribe($audio, $options);
@@ -675,7 +680,11 @@ class TranscriptionController extends Controller
         }
 
         try {
-            $service = new RunPodSpeechToTextService($provider['api_key'], $provider['model']);
+            $service = new RunPodSpeechToTextService(
+                $provider['api_key'],
+                $provider['model'],
+                $this->runPodRunsyncUrl($provider['metadata'] ?? []),
+            );
             $results = $service->transcribeBatch(array_map(
                 fn (array $clip): array => [
                     'audio' => $clip['audio'],
@@ -727,6 +736,21 @@ class TranscriptionController extends Controller
         }
 
         return is_array($results[$index] ?? null) ? $results[$index] : ['text' => '', 'timestamps' => []];
+    }
+
+    private function runPodRunsyncUrl(array $metadata): ?string
+    {
+        $runsyncUrl = trim((string) ($metadata['runsync_url'] ?? ''));
+
+        if ($runsyncUrl !== '') {
+            return $runsyncUrl;
+        }
+
+        $endpointId = trim((string) ($metadata['endpoint_id'] ?? ''));
+
+        return $endpointId === ''
+            ? null
+            : self::RUNPOD_API_BASE_URL.'/'.$endpointId.'/runsync';
     }
 
     /**

@@ -263,6 +263,18 @@
                         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ __('Required with a Workers AI API token.') }}</p>
                     </div>
 
+                    <div id="providerRunPodEndpointGroup" class="hidden space-y-3">
+                        <div>
+                            <label for="providerRunPodEndpointId" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ __('RunPod Endpoint ID') }}</label>
+                            <input id="providerRunPodEndpointId" type="text" autocomplete="off" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200" placeholder="{{ __('Example: abc123xyz') }}">
+                        </div>
+                        <div>
+                            <label for="providerRunPodRunsyncUrl" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ __('RunPod Runsync URL') }}</label>
+                            <input id="providerRunPodRunsyncUrl" type="url" autocomplete="off" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200" placeholder="{{ __('https://api.runpod.ai/v2/{endpoint_id}/runsync') }}">
+                            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ __('Use either Endpoint ID or the full /runsync URL from the RunPod serverless endpoint.') }}</p>
+                        </div>
+                    </div>
+
                     <label class="flex items-center justify-between gap-4 rounded-md border border-gray-200 px-4 py-3 dark:border-gray-700">
                         <span>
                             <span class="block text-sm font-medium text-gray-800 dark:text-gray-200">{{ __('Enabled') }}</span>
@@ -544,6 +556,15 @@
         accountIdInput.required = requiresAccountId;
         accountIdInput.value = requiresAccountId ? (provider.metadata?.account_id || '') : '';
 
+        const runPodEndpointGroup = document.getElementById('providerRunPodEndpointGroup');
+        const runPodEndpointIdInput = document.getElementById('providerRunPodEndpointId');
+        const runPodRunsyncUrlInput = document.getElementById('providerRunPodRunsyncUrl');
+        const requiresRunPodEndpoint = provider.requires_runpod_endpoint === true;
+        runPodEndpointGroup.classList.toggle('hidden', !requiresRunPodEndpoint);
+        runPodEndpointIdInput.required = false;
+        runPodEndpointIdInput.value = requiresRunPodEndpoint ? (provider.metadata?.endpoint_id || '') : '';
+        runPodRunsyncUrlInput.value = requiresRunPodEndpoint ? (provider.metadata?.runsync_url || '') : '';
+
         if (providerModalMode === 'add') {
             const apiKeyInput = document.getElementById('providerApiKey');
             const apiKeyHelp = document.getElementById('providerApiKeyHelp');
@@ -668,6 +689,11 @@
 
         if (provider.requires_account_id) {
             data[`providers[${providerId}][account_id]`] = $('#providerAccountId').val().trim();
+        }
+
+        if (provider.requires_runpod_endpoint) {
+            data[`providers[${providerId}][endpoint_id]`] = $('#providerRunPodEndpointId').val().trim();
+            data[`providers[${providerId}][runsync_url]`] = $('#providerRunPodRunsyncUrl').val().trim();
         }
 
         submitBtn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin mr-2"></i>Saving...');

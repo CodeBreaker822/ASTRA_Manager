@@ -104,14 +104,7 @@ class RunPodSpeechToTextService
 
     private function endpoint(): string
     {
-        $endpoint = trim((string) ($this->runsyncUrl ?: config('services.runpod.runsync_url')));
-
-        if ($endpoint === '') {
-            $endpointId = trim((string) config('services.runpod.endpoint_id'));
-            $endpoint = $endpointId !== ''
-                ? rtrim((string) config('services.runpod.base_url', 'https://api.runpod.ai/v2'), '/').'/'.$endpointId.'/runsync'
-                : '';
-        }
+        $endpoint = trim((string) $this->runsyncUrl);
 
         if ($endpoint === '') {
             throw new RuntimeException('RunPod endpoint is not configured.');

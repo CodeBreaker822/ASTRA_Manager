@@ -42,6 +42,8 @@ class APIController extends Controller
             'providers.*.is_enabled' => ['nullable'],
             'providers.*.setting_id' => ['nullable', 'integer'],
             'providers.*.account_id' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'providers.*.endpoint_id' => ['nullable', 'string', 'max:100', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'providers.*.runsync_url' => ['nullable', 'url', 'max:2048'],
         ]);
 
         $providerCatalog = collect($settings->providerCards());
@@ -72,6 +74,14 @@ class APIController extends Controller
                 && blank($data['account_id'] ?? $existingProvider['metadata']['account_id'] ?? config('services.cloudflare.account_id'))) {
                 throw ValidationException::withMessages([
                     "providers.$provider.account_id" => 'A Cloudflare Account ID is required.',
+                ]);
+            }
+
+            if ($provider === AppSettingsService::PROVIDER_RUNPOD
+                && blank($data['runsync_url'] ?? $existingProvider['metadata']['runsync_url'] ?? null)
+                && blank($data['endpoint_id'] ?? $existingProvider['metadata']['endpoint_id'] ?? null)) {
+                throw ValidationException::withMessages([
+                    "providers.$provider.endpoint_id" => 'A RunPod Endpoint ID or Runsync URL is required.',
                 ]);
             }
 

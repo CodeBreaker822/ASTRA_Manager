@@ -109,10 +109,6 @@ return [
     ],
 
     'runpod' => [
-        'base_url' => env('RUNPOD_BASE_URL', 'https://api.runpod.ai/v2'),
-        'endpoint_id' => env('RUNPOD_ENDPOINT_ID', ''),
-        'runsync_url' => env('RUNPOD_RUNSYNC_URL'),
-        'health_url' => env('RUNPOD_HEALTH_URL'),
         'timeout' => env('RUNPOD_TIMEOUT', 300),
         'audio_url_ttl_seconds' => env('RUNPOD_AUDIO_URL_TTL_SECONDS', 600),
         'beam_size' => env('RUNPOD_BEAM_SIZE', 5),
