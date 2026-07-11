@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessAsyncTranscriptionJob;
 use App\Models\API;
+use App\Models\ApiTranscriptionJob;
 use App\Services\AppSettingsService;
 use App\Services\AssemblyAiSpeechToTextService;
 use App\Services\AwsTranscribeSpeechToTextService;
@@ -31,6 +33,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Throwable;
@@ -87,6 +90,7 @@ class TranscriptionController extends Controller
                 'clips.*.clip_index' => ['nullable', 'integer', 'min:0'],
                 'clips.*.clip_start_ms' => ['nullable', 'integer', 'min:0'],
                 'clips.*.clip_end_ms' => ['nullable', 'integer', 'min:0'],
+                'response_mode' => ['nullable', 'string', 'in:sync,async'],
             ]));
         } catch (ValidationException $exception) {
             return $this->logAndReturn($request, 'transcribe', $license, $this->validationError($exception), $startedAt);
@@ -101,6 +105,10 @@ class TranscriptionController extends Controller
                 'status' => 'validation_error',
                 'severity' => 'low',
             ]);
+        }
+
+        if (($validated['response_mode'] ?? null) === 'async') {
+            return $this->createAsyncTranscriptionJob($request, $license, $queuedClips, $startedAt);
         }
 
         $providers = $settings->orderedConnectedProviders('transcriber');
@@ -178,6 +186,45 @@ class TranscriptionController extends Controller
             'provider' => implode(',', array_values(array_unique($usedProviders))),
             'attempted_providers' => $attemptedProviders,
         ]);
+    }
+
+    public function transcriptionJobStatus(Request $request, string $job): JsonResponse
+    {
+        $license = $this->licenseFor($request, 'get');
+
+        if ($license instanceof JsonResponse) {
+            return $license;
+        }
+
+        $transcriptionJob = ApiTranscriptionJob::query()
+            ->whereKey($job)
+            ->where('api_id', $license->id)
+            ->first();
+
+        if (! $transcriptionJob) {
+            return response()->json(['message' => 'Transcription job was not found.'], 404);
+        }
+
+        $payload = [
+            'job_id' => $transcriptionJob->id,
+            'status' => $transcriptionJob->status,
+            'status_code' => $transcriptionJob->status_code,
+            'created_at' => $transcriptionJob->created_at?->toISOString(),
+            'started_at' => $transcriptionJob->started_at?->toISOString(),
+            'finished_at' => $transcriptionJob->finished_at?->toISOString(),
+        ];
+
+        if ($transcriptionJob->status === 'completed') {
+            $payload['result'] = $transcriptionJob->result_payload ?? [];
+        }
+
+        if ($transcriptionJob->status === 'failed') {
+            $payload['message'] = $transcriptionJob->error_message ?: 'Transcription job failed.';
+        }
+
+        return response()->json($payload, $transcriptionJob->status === 'failed'
+            ? max(400, (int) ($transcriptionJob->status_code ?: 500))
+            : 200);
     }
 
     public function polish(Request $request, AppSettingsService $settings): JsonResponse
@@ -626,6 +673,229 @@ class TranscriptionController extends Controller
         );
 
         return $response;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $queuedClips
+     */
+    private function createAsyncTranscriptionJob(
+        Request $request,
+        API $license,
+        array $queuedClips,
+        float $startedAt,
+    ): JsonResponse {
+        try {
+            $jobId = (string) Str::uuid();
+            $storedClips = [];
+
+            foreach ($queuedClips as $clip) {
+                $audio = $clip['audio'];
+                $path = $audio?->getRealPath();
+
+                if (! is_string($path) || ! is_file($path)) {
+                    throw new \RuntimeException(ServiceUserMessage::audioReadFailed());
+                }
+
+                $extension = $audio?->getClientOriginalExtension() ?: pathinfo((string) $audio?->getClientOriginalName(), PATHINFO_EXTENSION);
+                $extension = $extension ?: 'audio';
+                $storedPath = 'transcription-jobs/'.$jobId.'/clip-'.$clip['queue_index'].'.'.$extension;
+                $contents = file_get_contents($path);
+
+                if ($contents === false) {
+                    throw new \RuntimeException(ServiceUserMessage::audioReadFailed());
+                }
+
+                Storage::disk('local')->put($storedPath, $contents);
+
+                $storedClips[] = [
+                    ...$clip,
+                    'audio' => null,
+                    'audio_path' => $storedPath,
+                    'audio_name' => $audio?->getClientOriginalName() ?: basename($storedPath),
+                ];
+            }
+
+            $transcriptionJob = ApiTranscriptionJob::query()->create([
+                'id' => $jobId,
+                'api_id' => $license->id,
+                'status' => 'queued',
+                'request_payload' => [
+                    'clips' => $storedClips,
+                ],
+            ]);
+
+            ProcessAsyncTranscriptionJob::dispatch($transcriptionJob->id);
+
+            $response = response()->json([
+                'job_id' => $transcriptionJob->id,
+                'status' => 'queued',
+                'status_url' => url('/api/transcribe/jobs/'.$transcriptionJob->id),
+            ], 202);
+
+            return $this->logAndReturn($request, 'transcribe', $license, $response, $startedAt, [
+                'status' => 'queued',
+                'async' => true,
+                'clip_count' => count($storedClips),
+            ]);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $this->logAndReturn($request, 'transcribe', $license, response()->json([
+                'message' => 'Transcription job could not be created.',
+            ], 500), $startedAt, [
+                'status' => 'job_create_failed',
+                'severity' => 'high',
+            ]);
+        }
+    }
+
+    public function processAsyncTranscriptionJob(ApiTranscriptionJob $job): void
+    {
+        $job->forceFill([
+            'status' => 'processing',
+            'started_at' => $job->started_at ?: now(),
+            'error_message' => null,
+            'status_code' => null,
+        ])->save();
+
+        $payload = is_array($job->request_payload) ? $job->request_payload : [];
+        $license = API::query()->find($job->api_id);
+
+        if (! $license) {
+            $job->forceFill([
+                'status' => 'failed',
+                'error_message' => 'License key for this transcription job no longer exists.',
+                'status_code' => 404,
+                'finished_at' => now(),
+            ])->save();
+
+            return;
+        }
+
+        $clips = array_map(function (array $clip): array {
+            $audioPath = (string) ($clip['audio_path'] ?? '');
+            $absolutePath = Storage::disk('local')->path($audioPath);
+
+            if ($audioPath === '' || ! is_file($absolutePath)) {
+                throw new \RuntimeException(ServiceUserMessage::audioReadFailed());
+            }
+
+            return [
+                ...$clip,
+                'audio' => $absolutePath,
+            ];
+        }, array_values(array_filter($payload['clips'] ?? [], 'is_array')));
+
+        $request = Request::create('/api/transcribe/jobs/'.$job->id, 'POST');
+        $response = $this->transcribeQueuedClips(
+            $clips,
+            app(AppSettingsService::class),
+            $request,
+            $license,
+        );
+        $responsePayload = json_decode((string) $response->getContent(), true);
+        $responsePayload = is_array($responsePayload) ? $responsePayload : [];
+        $statusCode = $response->getStatusCode();
+
+        $job->forceFill([
+            'status' => $statusCode >= 400 ? 'failed' : 'completed',
+            'result_payload' => $statusCode >= 400 ? null : $responsePayload,
+            'error_message' => $statusCode >= 400
+                ? (string) ($responsePayload['message'] ?? 'Transcription job failed.')
+                : null,
+            'status_code' => $statusCode,
+            'finished_at' => now(),
+        ])->save();
+
+        $this->deleteAsyncTranscriptionAudio($payload);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function deleteAsyncTranscriptionAudio(array $payload): void
+    {
+        foreach (array_values(array_filter($payload['clips'] ?? [], 'is_array')) as $clip) {
+            $path = (string) ($clip['audio_path'] ?? '');
+
+            if ($path !== '') {
+                Storage::disk('local')->delete($path);
+            }
+        }
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $queuedClips
+     */
+    private function transcribeQueuedClips(
+        array $queuedClips,
+        AppSettingsService $settings,
+        Request $request,
+        API $license,
+    ): JsonResponse {
+        $providers = $settings->orderedConnectedProviders('transcriber');
+        $providerCount = count($providers);
+
+        if ($providerCount === 0) {
+            return response()->json([
+                'message' => 'All configured transcription providers are unavailable.',
+            ], 503);
+        }
+
+        $clipTranscripts = [];
+        $attemptedProviders = [];
+        $usedProviders = [];
+        $batchResult = $this->transcribeBatchWithFirstProvider($providers, $queuedClips, $request, $license);
+
+        if ($batchResult !== null) {
+            $clipTranscripts = $batchResult['clips'];
+            $attemptedProviders = $batchResult['attempted_providers'];
+            $usedProviders[] = $batchResult['provider']['provider'];
+        }
+
+        foreach ($batchResult === null ? $queuedClips : [] as $queueIndex => $clip) {
+            $clipResult = $this->transcribeClipAcrossProviders(
+                $providers,
+                $queueIndex % $providerCount,
+                $clip,
+                $request,
+                $license,
+            );
+
+            if ($clipResult === null) {
+                return response()->json([
+                    'message' => 'All configured transcription providers are unavailable.',
+                    'clip_index' => $clip['clip_index'],
+                ], 503);
+            }
+
+            $attemptedProviders = array_merge($attemptedProviders, $clipResult['attempted_providers']);
+            $usedProviders[] = $clipResult['provider']['provider'];
+            $clipTranscripts[] = $this->clipTranscript($clip, $clipResult['result'], $clipResult['attempted_providers']);
+        }
+
+        $firstClip = $clipTranscripts[0];
+        $fallback = [
+            'used' => collect($clipTranscripts)->contains(fn (array $clip): bool => (bool) ($clip['fallback']['used'] ?? false)),
+        ];
+
+        return response()->json([
+            'text' => count($clipTranscripts) === 1
+                ? $firstClip['text']
+                : collect($clipTranscripts)->pluck('text')->filter()->implode("\n\n"),
+            'timestamps' => count($clipTranscripts) === 1 ? $firstClip['timestamps'] : [],
+            'provider' => AppSettingsService::PUBLIC_PROVIDER_ID,
+            'provider_name' => AppSettingsService::PUBLIC_PROVIDER_NAME,
+            'model' => AppSettingsService::PUBLIC_MODEL,
+            'clip_index' => $firstClip['clip_index'],
+            'clip_start_ms' => $firstClip['clip_start_ms'],
+            'clip_end_ms' => count($clipTranscripts) === 1 ? $firstClip['clip_end_ms'] : collect($clipTranscripts)->max('clip_end_ms'),
+            'duration_ms' => collect($clipTranscripts)->sum(fn (array $clip): int => (int) ($clip['duration_ms'] ?? 0)),
+            'clips' => $clipTranscripts,
+            'fallback' => $fallback,
+            'attempted_providers' => array_values(array_unique($attemptedProviders)),
+            'used_providers' => array_values(array_unique($usedProviders)),
+        ]);
     }
 
     private function transcribeUsingProvider(array $provider, mixed $audio, array $options): array
