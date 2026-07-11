@@ -27,7 +27,7 @@ class ProcessAsyncTranscriptionJob implements ShouldQueue
     {
         $job = ApiTranscriptionJob::query()->find($this->transcriptionJobId);
 
-        if (! $job || $job->status === 'completed') {
+        if (! $job || $job->status !== 'queued') {
             return;
         }
 

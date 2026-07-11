@@ -138,7 +138,7 @@ class TranscriptionController extends Controller
         foreach ($batchResult === null ? $queuedClips : [] as $queueIndex => $clip) {
             $clipResult = $this->transcribeClipAcrossProviders(
                 $providers,
-                $queueIndex % $providerCount,
+                0,
                 $clip,
                 $request,
                 $license,
@@ -799,12 +799,21 @@ class TranscriptionController extends Controller
 
     public function processAsyncTranscriptionJob(ApiTranscriptionJob $job): void
     {
-        $job->forceFill([
-            'status' => 'processing',
-            'started_at' => $job->started_at ?: now(),
-            'error_message' => null,
-            'status_code' => null,
-        ])->save();
+        $claimed = ApiTranscriptionJob::query()
+            ->whereKey($job->id)
+            ->where('status', 'queued')
+            ->update([
+                'status' => 'processing',
+                'started_at' => $job->started_at ?: now(),
+                'error_message' => null,
+                'status_code' => null,
+            ]);
+
+        if ($claimed !== 1) {
+            return;
+        }
+
+        $job->refresh();
 
         $payload = is_array($job->request_payload) ? $job->request_payload : [];
         $license = API::query()->find($job->api_id);
@@ -890,6 +899,10 @@ class TranscriptionController extends Controller
         $payload = is_array($job->request_payload) ? $job->request_payload : [];
 
         if (($payload['mode'] ?? null) !== 'runpod_async') {
+            if (($payload['mode'] ?? null) === 'queue' && $job->status === 'queued') {
+                $this->processAsyncTranscriptionJob($job);
+            }
+
             if (($payload['mode'] ?? null) === 'provider_fallback') {
                 $this->completeAsyncTranscriptionWithFallback(
                     $job,
@@ -1074,7 +1087,7 @@ class TranscriptionController extends Controller
         foreach ($batchResult === null ? $queuedClips : [] as $queueIndex => $clip) {
             $clipResult = $this->transcribeClipAcrossProviders(
                 $providers,
-                $queueIndex % $providerCount,
+                0,
                 $clip,
                 $request,
                 $license,

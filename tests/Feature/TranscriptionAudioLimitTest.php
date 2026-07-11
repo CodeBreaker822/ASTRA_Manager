@@ -49,7 +49,7 @@ it('rejects transcribe audio over the twenty minute batch limit', function () {
     Http::assertNothingSent();
 });
 
-it('rotates batched clips across providers and wraps fallback attempts', function () {
+it('uses provider priority for every batched clip and wraps fallback attempts', function () {
     $license = API::query()->create([
         'app_name' => 'Audio Queue Test '.uniqid(),
         'app_token' => 'audio-queue-license-'.uniqid(),
@@ -85,17 +85,11 @@ it('rotates batched clips across providers and wraps fallback attempts', functio
                     ]],
                 ],
             ])
-            ->push([
-                'results' => [
-                    'channels' => [[
-                        'alternatives' => [[
-                            'transcript' => 'Deepgram rescued second clip.',
-                            'words' => [],
-                        ]],
-                    ]],
-                ],
-            ]),
-        config('services.groq.transcription_url') => Http::response(['error' => 'temporary failure'], 500),
+            ->push(['error' => 'temporary failure'], 500),
+        config('services.groq.transcription_url') => Http::response([
+            'text' => 'Groq rescued second clip.',
+            'segments' => [],
+        ]),
     ]);
 
     $this->withToken($license->app_token)
@@ -114,8 +108,8 @@ it('rotates batched clips across providers and wraps fallback attempts', functio
         ->assertJsonPath('clips.0.text', 'Deepgram first clip.')
         ->assertJsonPath('clips.0.attempted_providers', ['deepgram'])
         ->assertJsonPath('clips.0.fallback.used', false)
-        ->assertJsonPath('clips.1.text', 'Deepgram rescued second clip.')
-        ->assertJsonPath('clips.1.attempted_providers', ['groq_transcription', 'deepgram'])
+        ->assertJsonPath('clips.1.text', 'Groq rescued second clip.')
+        ->assertJsonPath('clips.1.attempted_providers', ['deepgram', 'groq_transcription'])
         ->assertJsonPath('clips.1.fallback.used', true)
         ->assertJsonPath('fallback.used', true);
 });
