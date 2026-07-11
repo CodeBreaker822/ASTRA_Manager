@@ -38,6 +38,84 @@ class RunPodSpeechToTextService
 
     /**
      * @param  array<int, array{audio: UploadedFile|string|SplFileInfo, clip_index?: mixed, clip_start_ms?: mixed, clip_end_ms?: mixed, language_code?: mixed}>  $clips
+     * @return array{job_id: string, status: string|null, temporary_paths: array<int, string>, response: array<string, mixed>}
+     */
+    public function submitBatchAsync(array $clips, array $options = []): array
+    {
+        $clips = array_values($clips);
+
+        if ($clips === []) {
+            throw new RuntimeException(ServiceUserMessage::audioReadFailed());
+        }
+
+        if (count($clips) > 20 || $this->batchDurationTooLarge($clips)) {
+            throw new RuntimeException('Audio is too big.', 422);
+        }
+
+        try {
+            [$payloadClips, $temporaryPaths] = $this->payloadClips($clips, $options);
+            $response = $this->client()->post($this->runUrl(), [
+                'input' => [
+                    'action' => 'transcribe',
+                    'clips' => $payloadClips,
+                    'beam_size' => (int) config('services.runpod.beam_size', 5),
+                    'vad_filter' => filter_var(config('services.runpod.vad_filter', false), FILTER_VALIDATE_BOOLEAN),
+                ],
+            ]);
+        } catch (ConnectionException $exception) {
+            throw new RuntimeException(ServiceUserMessage::cannotReachProvider('RunPod'), 0, $exception);
+        }
+
+        if ($response->failed()) {
+            throw new RuntimeException($this->messageForStatus($response->status()), $response->status());
+        }
+
+        $payload = $response->json() ?? [];
+        $jobId = trim((string) data_get($payload, 'id', ''));
+
+        if ($jobId === '') {
+            throw new RuntimeException(ServiceUserMessage::transcriptionFailed('RunPod'));
+        }
+
+        return [
+            'job_id' => $jobId,
+            'status' => is_string($payload['status'] ?? null) ? $payload['status'] : null,
+            'temporary_paths' => $temporaryPaths,
+            'response' => is_array($payload) ? $payload : [],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function status(string $jobId): array
+    {
+        try {
+            $response = $this->client()->get($this->statusUrl($jobId));
+        } catch (ConnectionException $exception) {
+            throw new RuntimeException(ServiceUserMessage::cannotReachProvider('RunPod'), 0, $exception);
+        }
+
+        if ($response->failed()) {
+            throw new RuntimeException($this->messageForStatus($response->status()), $response->status());
+        }
+
+        $payload = $response->json();
+
+        return is_array($payload) ? $payload : [];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $sourceClips
+     * @return array<int, array{text: string, timestamps: array<int, array<string, mixed>>, clip_index?: int|null, clip_start_ms?: int|null, clip_end_ms?: int|null, queue_index?: int}>
+     */
+    public function normalizeSubmittedBatch(array $payload, array $sourceClips): array
+    {
+        return $this->normalizeBatch($payload, $sourceClips);
+    }
+
+    /**
+     * @param  array<int, array{audio: UploadedFile|string|SplFileInfo, clip_index?: mixed, clip_start_ms?: mixed, clip_end_ms?: mixed, language_code?: mixed}>  $clips
      * @return array<int, array{text: string, timestamps: array<int, array<string, mixed>>, clip_index?: int|null, clip_start_ms?: int|null, clip_end_ms?: int|null, queue_index?: int}>
      */
     public function transcribeBatch(array $clips, array $options = []): array
@@ -52,37 +130,8 @@ class RunPodSpeechToTextService
             throw new RuntimeException('Audio is too big.', 422);
         }
 
-        $temporaryPaths = [];
-
         try {
-            $payloadClips = [];
-            $encodedBytes = 0;
-
-            foreach ($clips as $index => $clip) {
-                $file = $this->audioFile($clip['audio']);
-                $contents = file_get_contents($file['path']);
-                if ($contents === false) {
-                    throw new RuntimeException(ServiceUserMessage::audioReadFailed());
-                }
-                $encoded = base64_encode($contents);
-                $encodedBytes += strlen($encoded);
-                $payloadClips[] = $this->directClipInputPayload($file, $encoded, [
-                    ...$options,
-                    ...$clip,
-                    'queue_index' => $index,
-                ]);
-            }
-
-            if ($encodedBytes > 9_000_000) {
-                $payloadClips = [];
-                foreach ($clips as $index => $clip) {
-                    $file = $this->audioFile($clip['audio']);
-                    $temporaryPath = $this->storeTemporaryAudio($file);
-                    $temporaryPaths[] = $temporaryPath;
-                    $payloadClips[] = $this->clipInputPayload($temporaryPath, [...$options, ...$clip, 'queue_index' => $index]);
-                }
-            }
-
+            [$payloadClips] = $this->payloadClips($clips, $options);
             $response = $this->submitAndWait([
                 'input' => [
                     'action' => 'transcribe',
@@ -125,10 +174,20 @@ class RunPodSpeechToTextService
         return $endpoint;
     }
 
+    private function runUrl(): string
+    {
+        return preg_replace('#/runsync(?:\?.*)?$#', '/run', $this->endpoint()) ?: $this->endpoint();
+    }
+
+    private function statusUrl(string $jobId): string
+    {
+        return preg_replace('#/run$#', '/status/'.rawurlencode($jobId), $this->runUrl()) ?: $this->runUrl();
+    }
+
     private function submitAndWait(array $payload)
     {
         $client = $this->client();
-        $runUrl = preg_replace('#/runsync(?:\?.*)?$#', '/run', $this->endpoint()) ?: $this->endpoint();
+        $runUrl = $this->runUrl();
         $response = $client->post($runUrl, $payload);
 
         if ($response->failed()) {
@@ -141,7 +200,7 @@ class RunPodSpeechToTextService
             return $response;
         }
 
-        $statusUrl = preg_replace('#/run$#', '/status/'.rawurlencode($jobId), $runUrl) ?: $runUrl;
+        $statusUrl = $this->statusUrl($jobId);
         $deadline = microtime(true) + ($this->timeout ?? (int) config('services.runpod.timeout', 1500));
 
         do {
@@ -161,6 +220,46 @@ class RunPodSpeechToTextService
         } while (microtime(true) < $deadline);
 
         throw new RuntimeException('RunPod transcription timed out while waiting for the submitted job.');
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $clips
+     * @return array{0: array<int, array<string, mixed>>, 1: array<int, string>}
+     */
+    private function payloadClips(array $clips, array $options): array
+    {
+        $payloadClips = [];
+        $temporaryPaths = [];
+        $encodedBytes = 0;
+
+        foreach ($clips as $index => $clip) {
+            $file = $this->audioFile($clip['audio']);
+            $contents = file_get_contents($file['path']);
+            if ($contents === false) {
+                throw new RuntimeException(ServiceUserMessage::audioReadFailed());
+            }
+            $encoded = base64_encode($contents);
+            $encodedBytes += strlen($encoded);
+            $payloadClips[] = $this->directClipInputPayload($file, $encoded, [
+                ...$options,
+                ...$clip,
+                'queue_index' => $index,
+            ]);
+        }
+
+        if ($encodedBytes <= 9_000_000) {
+            return [$payloadClips, $temporaryPaths];
+        }
+
+        $payloadClips = [];
+        foreach ($clips as $index => $clip) {
+            $file = $this->audioFile($clip['audio']);
+            $temporaryPath = $this->storeTemporaryAudio($file);
+            $temporaryPaths[] = $temporaryPath;
+            $payloadClips[] = $this->clipInputPayload($temporaryPath, [...$options, ...$clip, 'queue_index' => $index]);
+        }
+
+        return [$payloadClips, $temporaryPaths];
     }
 
     /**

@@ -205,6 +205,11 @@ class TranscriptionController extends Controller
             return response()->json(['message' => 'Transcription job was not found.'], 404);
         }
 
+        if (in_array($transcriptionJob->status, ['queued', 'processing'], true)) {
+            $this->refreshAsyncTranscriptionJob($transcriptionJob, $request, $license);
+            $transcriptionJob->refresh();
+        }
+
         $payload = [
             'job_id' => $transcriptionJob->id,
             'status' => $transcriptionJob->status,
@@ -687,6 +692,17 @@ class TranscriptionController extends Controller
         try {
             $jobId = (string) Str::uuid();
             $storedClips = [];
+            $providers = app(AppSettingsService::class)->orderedConnectedProviders('transcriber');
+
+            if ($providers === []) {
+                return $this->logAndReturn($request, 'transcribe', $license, response()->json([
+                    'message' => 'All configured transcription providers are unavailable.',
+                ], 503), $startedAt, [
+                    'status' => 'provider_error',
+                    'severity' => 'high',
+                    'attempted_providers' => [],
+                ]);
+            }
 
             foreach ($queuedClips as $clip) {
                 $audio = $clip['audio'];
@@ -715,20 +731,52 @@ class TranscriptionController extends Controller
                 ];
             }
 
+            $requestPayload = [
+                'clips' => $storedClips,
+                'mode' => 'queue',
+            ];
+            $status = 'queued';
+            $dispatchQueueJob = true;
+
+            if (($providers[0]['provider'] ?? null) === AppSettingsService::PROVIDER_RUNPOD) {
+                try {
+                    $runPodJob = $this->runPodService($providers[0])->submitBatchAsync($this->storedClipsWithAudio($storedClips));
+                    $requestPayload = [
+                        ...$requestPayload,
+                        'mode' => 'runpod_async',
+                        'runpod_job_id' => $runPodJob['job_id'],
+                        'runpod_temporary_paths' => $runPodJob['temporary_paths'],
+                    ];
+                } catch (Throwable $exception) {
+                    app(ProviderFallbackLogger::class)->failure('transcriber', 'transcribe', $providers[0], 0, $exception, $request, $license);
+                    report($exception);
+
+                    $requestPayload = [
+                        ...$requestPayload,
+                        'mode' => 'provider_fallback',
+                        'initial_error' => $exception->getMessage(),
+                    ];
+                }
+
+                $status = 'processing';
+                $dispatchQueueJob = false;
+            }
+
             $transcriptionJob = ApiTranscriptionJob::query()->create([
                 'id' => $jobId,
                 'api_id' => $license->id,
-                'status' => 'queued',
-                'request_payload' => [
-                    'clips' => $storedClips,
-                ],
+                'status' => $status,
+                'request_payload' => $requestPayload,
+                'started_at' => $status === 'processing' ? now() : null,
             ]);
 
-            ProcessAsyncTranscriptionJob::dispatch($transcriptionJob->id);
+            if ($dispatchQueueJob) {
+                ProcessAsyncTranscriptionJob::dispatch($transcriptionJob->id);
+            }
 
             $response = response()->json([
                 'job_id' => $transcriptionJob->id,
-                'status' => 'queued',
+                'status' => $transcriptionJob->status,
                 'status_url' => url('/api/transcribe/jobs/'.$transcriptionJob->id),
             ], 202);
 
@@ -772,19 +820,7 @@ class TranscriptionController extends Controller
             return;
         }
 
-        $clips = array_map(function (array $clip): array {
-            $audioPath = (string) ($clip['audio_path'] ?? '');
-            $absolutePath = Storage::disk('local')->path($audioPath);
-
-            if ($audioPath === '' || ! is_file($absolutePath)) {
-                throw new \RuntimeException(ServiceUserMessage::audioReadFailed());
-            }
-
-            return [
-                ...$clip,
-                'audio' => $absolutePath,
-            ];
-        }, array_values(array_filter($payload['clips'] ?? [], 'is_array')));
+        $clips = $this->storedClipsWithAudio($payload['clips'] ?? []);
 
         $request = Request::create('/api/transcribe/jobs/'.$job->id, 'POST');
         $response = $this->transcribeQueuedClips(
@@ -822,18 +858,200 @@ class TranscriptionController extends Controller
                 Storage::disk('local')->delete($path);
             }
         }
+
+        foreach (array_values(array_filter($payload['runpod_temporary_paths'] ?? [], 'is_string')) as $path) {
+            Storage::disk('local')->delete($path);
+        }
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $storedClips
+     * @return array<int, array<string, mixed>>
+     */
+    private function storedClipsWithAudio(array $storedClips): array
+    {
+        return array_map(function (array $clip): array {
+            $audioPath = (string) ($clip['audio_path'] ?? '');
+            $absolutePath = Storage::disk('local')->path($audioPath);
+
+            if ($audioPath === '' || ! is_file($absolutePath)) {
+                throw new \RuntimeException(ServiceUserMessage::audioReadFailed());
+            }
+
+            return [
+                ...$clip,
+                'audio' => $absolutePath,
+            ];
+        }, array_values(array_filter($storedClips, 'is_array')));
+    }
+
+    private function refreshAsyncTranscriptionJob(ApiTranscriptionJob $job, Request $request, API $license): void
+    {
+        $payload = is_array($job->request_payload) ? $job->request_payload : [];
+
+        if (($payload['mode'] ?? null) !== 'runpod_async') {
+            if (($payload['mode'] ?? null) === 'provider_fallback') {
+                $this->completeAsyncTranscriptionWithFallback(
+                    $job,
+                    $payload,
+                    $request,
+                    $license,
+                    new \RuntimeException((string) ($payload['initial_error'] ?? ServiceUserMessage::transcriptionFailed('RunPod'))),
+                );
+            }
+
+            return;
+        }
+
+        $provider = $this->runPodProvider(app(AppSettingsService::class)->orderedConnectedProviders('transcriber'));
+        $runPodJobId = trim((string) ($payload['runpod_job_id'] ?? ''));
+
+        if (! is_array($provider) || $runPodJobId === '') {
+            $this->completeAsyncTranscriptionWithFallback(
+                $job,
+                $payload,
+                $request,
+                $license,
+                new \RuntimeException('RunPod async job metadata is missing.'),
+            );
+
+            return;
+        }
+
+        try {
+            $service = $this->runPodService($provider);
+            $runPodPayload = $service->status($runPodJobId);
+            $state = strtoupper((string) data_get($runPodPayload, 'status', ''));
+
+            if (! in_array($state, ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'], true)) {
+                $job->forceFill([
+                    'status' => $state === 'IN_QUEUE' ? 'queued' : 'processing',
+                    'started_at' => $job->started_at ?: now(),
+                    'error_message' => null,
+                    'status_code' => null,
+                ])->save();
+
+                return;
+            }
+
+            if ($state !== 'COMPLETED') {
+                throw new \RuntimeException(ServiceUserMessage::transcriptionFailed('RunPod'));
+            }
+
+            $clips = $this->storedClipsWithAudio($payload['clips'] ?? []);
+            $results = $service->normalizeSubmittedBatch($runPodPayload, $clips);
+
+            if (! collect($results)->contains(fn (mixed $result): bool => is_array($result) && trim((string) ($result['text'] ?? '')) !== '')) {
+                throw new \RuntimeException(ServiceUserMessage::emptyTranscriptionResponse('RunPod'));
+            }
+
+            $clipTranscripts = array_map(function (array $clip, int $index) use ($results): array {
+                $result = $this->resultForBatchClip($results, $clip, $index);
+
+                return $this->clipTranscript($clip, $result, [AppSettingsService::PROVIDER_RUNPOD]);
+            }, $clips, array_keys($clips));
+
+            $job->forceFill([
+                'status' => 'completed',
+                'result_payload' => $this->transcriptionPayloadFromClips(
+                    $clipTranscripts,
+                    [AppSettingsService::PROVIDER_RUNPOD],
+                    [AppSettingsService::PROVIDER_RUNPOD],
+                ),
+                'error_message' => null,
+                'status_code' => 200,
+                'finished_at' => now(),
+            ])->save();
+
+            $this->deleteAsyncTranscriptionAudio($payload);
+        } catch (Throwable $exception) {
+            app(ProviderFallbackLogger::class)->failure('transcriber', 'transcribe', $provider, 0, $exception, $request, $license);
+            report($exception);
+
+            $this->completeAsyncTranscriptionWithFallback($job, $payload, $request, $license, $exception);
+        }
+    }
+
+    private function completeAsyncTranscriptionWithFallback(
+        ApiTranscriptionJob $job,
+        array $payload,
+        Request $request,
+        API $license,
+        Throwable $runPodException,
+    ): void {
+        $settings = app(AppSettingsService::class);
+        $providers = array_values(array_filter(
+            $settings->orderedConnectedProviders('transcriber'),
+            fn (array $provider): bool => ($provider['provider'] ?? null) !== AppSettingsService::PROVIDER_RUNPOD,
+        ));
+
+        if ($providers === []) {
+            $job->forceFill([
+                'status' => 'failed',
+                'result_payload' => null,
+                'error_message' => $runPodException->getMessage() ?: ServiceUserMessage::transcriptionFailed('RunPod'),
+                'status_code' => max(500, (int) $runPodException->getCode()),
+                'finished_at' => now(),
+            ])->save();
+
+            $this->deleteAsyncTranscriptionAudio($payload);
+
+            return;
+        }
+
+        try {
+            $clips = $this->storedClipsWithAudio($payload['clips'] ?? []);
+            $response = $this->transcribeQueuedClips($clips, $settings, $request, $license, $providers);
+            $responsePayload = json_decode((string) $response->getContent(), true);
+            $responsePayload = is_array($responsePayload) ? $responsePayload : [];
+            $statusCode = $response->getStatusCode();
+
+            if ($statusCode < 400) {
+                $attempted = array_values(array_unique([
+                    AppSettingsService::PROVIDER_RUNPOD,
+                    ...array_values(array_filter($responsePayload['attempted_providers'] ?? [], 'is_string')),
+                ]));
+
+                $responsePayload['attempted_providers'] = $attempted;
+                $responsePayload['fallback'] = ['used' => true];
+            }
+
+            $job->forceFill([
+                'status' => $statusCode >= 400 ? 'failed' : 'completed',
+                'result_payload' => $statusCode >= 400 ? null : $responsePayload,
+                'error_message' => $statusCode >= 400
+                    ? (string) ($responsePayload['message'] ?? 'Transcription job failed.')
+                    : null,
+                'status_code' => $statusCode,
+                'finished_at' => now(),
+            ])->save();
+        } catch (Throwable $exception) {
+            report($exception);
+
+            $job->forceFill([
+                'status' => 'failed',
+                'result_payload' => null,
+                'error_message' => $exception->getMessage() ?: 'Transcription job failed.',
+                'status_code' => max(500, (int) $exception->getCode()),
+                'finished_at' => now(),
+            ])->save();
+        } finally {
+            $this->deleteAsyncTranscriptionAudio($payload);
+        }
     }
 
     /**
      * @param  array<int, array<string, mixed>>  $queuedClips
+     * @param  array<int, array<string, mixed>>|null  $providersOverride
      */
     private function transcribeQueuedClips(
         array $queuedClips,
         AppSettingsService $settings,
         Request $request,
         API $license,
+        ?array $providersOverride = null,
     ): JsonResponse {
-        $providers = $settings->orderedConnectedProviders('transcriber');
+        $providers = $providersOverride ?? $settings->orderedConnectedProviders('transcriber');
         $providerCount = count($providers);
 
         if ($providerCount === 0) {
@@ -874,12 +1092,23 @@ class TranscriptionController extends Controller
             $clipTranscripts[] = $this->clipTranscript($clip, $clipResult['result'], $clipResult['attempted_providers']);
         }
 
+        return response()->json($this->transcriptionPayloadFromClips($clipTranscripts, $attemptedProviders, $usedProviders));
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $clipTranscripts
+     * @param  array<int, string>  $attemptedProviders
+     * @param  array<int, string>  $usedProviders
+     * @return array<string, mixed>
+     */
+    private function transcriptionPayloadFromClips(array $clipTranscripts, array $attemptedProviders, array $usedProviders): array
+    {
         $firstClip = $clipTranscripts[0];
         $fallback = [
             'used' => collect($clipTranscripts)->contains(fn (array $clip): bool => (bool) ($clip['fallback']['used'] ?? false)),
         ];
 
-        return response()->json([
+        return [
             'text' => count($clipTranscripts) === 1
                 ? $firstClip['text']
                 : collect($clipTranscripts)->pluck('text')->filter()->implode("\n\n"),
@@ -895,7 +1124,7 @@ class TranscriptionController extends Controller
             'fallback' => $fallback,
             'attempted_providers' => array_values(array_unique($attemptedProviders)),
             'used_providers' => array_values(array_unique($usedProviders)),
-        ]);
+        ];
     }
 
     private function transcribeUsingProvider(array $provider, mixed $audio, array $options): array
@@ -922,14 +1151,37 @@ class TranscriptionController extends Controller
             AppSettingsService::PROVIDER_AZURE_SPEECH => new AzureSpeechToTextService($provider['api_key'], $provider['model']),
             AppSettingsService::PROVIDER_GOOGLE_SPEECH => new GoogleCloudSpeechToTextService($provider['api_key'], $provider['model']),
             AppSettingsService::PROVIDER_AWS_TRANSCRIBE => new AwsTranscribeSpeechToTextService($provider['api_key'], $provider['model']),
-            AppSettingsService::PROVIDER_RUNPOD => new RunPodSpeechToTextService(
-                $provider['api_key'],
-                $provider['model'],
-                $this->runPodRunsyncUrl($provider['metadata'] ?? []),
-            ),
+            AppSettingsService::PROVIDER_RUNPOD => $this->runPodService($provider),
         };
 
         return $service->transcribe($audio, $options);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $providers
+     * @return array<string, mixed>|null
+     */
+    private function runPodProvider(array $providers): ?array
+    {
+        foreach ($providers as $provider) {
+            if (($provider['provider'] ?? null) === AppSettingsService::PROVIDER_RUNPOD) {
+                return $provider;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $provider
+     */
+    private function runPodService(array $provider): RunPodSpeechToTextService
+    {
+        return new RunPodSpeechToTextService(
+            $provider['api_key'],
+            $provider['model'],
+            $this->runPodRunsyncUrl($provider['metadata'] ?? []),
+        );
     }
 
     /**
