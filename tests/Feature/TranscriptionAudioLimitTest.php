@@ -1,8 +1,10 @@
 <?php
 
 use App\Models\API;
+use App\Models\ApiTranscriptionJob;
 use App\Models\TranscriptionProviderSetting;
 use App\Services\GroqSpeechToTextService;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 
@@ -126,7 +128,7 @@ it('sends batched clips to runpod when runpod is the first provider', function (
     TranscriptionProviderSetting::query()->create([
         'provider' => 'runpod',
         'api_key' => 'runpod-key',
-        'model' => 'serverless-transcriptor',
+        'model' => 'cebuano-bisaya-epoch1-ct2',
         'is_enabled' => true,
         'sort_order' => 0,
         'metadata' => [
@@ -194,4 +196,152 @@ it('sends batched clips to runpod when runpod is the first provider', function (
         && $request['input']['clips'][1]['clip_index'] === 2
         && is_string($request['input']['clips'][0]['audio_base64'] ?? null)
         && base64_decode($request['input']['clips'][0]['audio_base64'], true) === 'fake audio 1');
+});
+
+it('accepts twenty one minute audio chunks in a single runpod batch', function () {
+    $license = API::query()->create([
+        'app_name' => 'RunPod Twenty One Minute Batch Test '.uniqid(),
+        'app_token' => 'runpod-twenty-one-minute-license-'.uniqid(),
+        'can_post' => true,
+        'can_get' => true,
+        'is_active' => true,
+    ]);
+
+    TranscriptionProviderSetting::query()->create([
+        'provider' => 'runpod',
+        'api_key' => 'runpod-key',
+        'model' => 'cebuano-bisaya-epoch1-ct2',
+        'is_enabled' => true,
+        'sort_order' => 0,
+        'metadata' => [
+            'runsync_url' => 'https://runpod.test/v2/endpoint/runsync',
+        ],
+    ]);
+
+    config([
+        'app.url' => 'https://server.test',
+    ]);
+
+    $outputClips = [];
+
+    for ($index = 1; $index <= 20; $index += 1) {
+        $startMs = ($index - 1) * 60000;
+        $endMs = $index * 60000;
+        $outputClips[] = [
+            'queue_index' => $index - 1,
+            'clip_index' => $index,
+            'clip_start_ms' => $startMs,
+            'clip_end_ms' => $endMs,
+            'text' => "RunPod clip {$index}.",
+            'timestamps' => [['text' => "RunPod clip {$index}.", 'start' => 0, 'end' => 1]],
+        ];
+    }
+
+    Http::fake([
+        'https://runpod.test/v2/endpoint/run' => Http::response([
+            'id' => 'twenty-one-minute-batch-job',
+            'status' => 'IN_QUEUE',
+        ]),
+        'https://runpod.test/v2/endpoint/status/twenty-one-minute-batch-job' => Http::response([
+            'status' => 'COMPLETED',
+            'output' => [
+                'clips' => $outputClips,
+            ],
+        ]),
+    ]);
+
+    $this->withToken($license->app_token)
+        ->post('/api/transcribe', [
+            'audio' => array_map(
+                fn (int $index): UploadedFile => UploadedFile::fake()->createWithContent("clip-{$index}.wav", "fake audio {$index}"),
+                range(1, 20),
+            ),
+            'language_code' => array_fill(0, 20, 'en'),
+            'clip_index' => range(1, 20),
+            'clip_start_ms' => array_map(fn (int $index): int => ($index - 1) * 60000, range(1, 20)),
+            'clip_end_ms' => array_map(fn (int $index): int => $index * 60000, range(1, 20)),
+        ], ['Accept' => 'application/json'])
+        ->assertOk()
+        ->assertJsonCount(20, 'clips')
+        ->assertJsonPath('clips.0.text', 'RunPod clip 1.')
+        ->assertJsonPath('clips.19.text', 'RunPod clip 20.')
+        ->assertJsonPath('duration_ms', 1200000)
+        ->assertJsonPath('fallback.used', false);
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://runpod.test/v2/endpoint/run'
+        && is_array($request['input']['clips'] ?? null)
+        && count($request['input']['clips']) === 20
+        && $request['input']['clips'][0]['clip_start_ms'] === 0
+        && $request['input']['clips'][19]['clip_end_ms'] === 1200000);
+});
+
+it('keeps an accepted runpod async job pending when status polling is temporarily unavailable', function () {
+    $license = API::query()->create([
+        'app_name' => 'RunPod Pending Test '.uniqid(),
+        'app_token' => 'runpod-pending-license-'.uniqid(),
+        'can_post' => true,
+        'can_get' => true,
+        'is_active' => true,
+    ]);
+
+    TranscriptionProviderSetting::query()->create([
+        'provider' => 'runpod',
+        'api_key' => 'runpod-key',
+        'model' => 'cebuano-bisaya-epoch1-ct2',
+        'is_enabled' => true,
+        'sort_order' => 0,
+        'metadata' => [
+            'runsync_url' => 'https://runpod.test/v2/endpoint/runsync',
+        ],
+    ]);
+    TranscriptionProviderSetting::query()->create([
+        'provider' => 'groq_transcription',
+        'api_key' => 'groq-key',
+        'model' => GroqSpeechToTextService::MODEL_WHISPER_LARGE_V3_TURBO,
+        'is_enabled' => true,
+        'sort_order' => 1,
+    ]);
+
+    config([
+        'app.url' => 'https://server.test',
+    ]);
+
+    Http::fake([
+        'https://runpod.test/v2/endpoint/run' => Http::response([
+            'id' => 'batch-job-pending',
+            'status' => 'IN_QUEUE',
+        ]),
+        'https://runpod.test/v2/endpoint/status/batch-job-pending' => fn () => throw new ConnectionException('RunPod status is not ready.'),
+        config('services.groq.transcription_url') => Http::response([
+            'text' => 'Groq should not be used while RunPod is pending.',
+            'segments' => [],
+        ]),
+    ]);
+
+    $created = $this->withToken($license->app_token)
+        ->post('/api/transcribe', [
+            'audio' => [
+                UploadedFile::fake()->createWithContent('clip-1.wav', 'fake audio 1'),
+                UploadedFile::fake()->createWithContent('clip-2.wav', 'fake audio 2'),
+            ],
+            'language_code' => ['en', 'en'],
+            'clip_index' => [1, 2],
+            'clip_start_ms' => [0, 300000],
+            'clip_end_ms' => [300000, 600000],
+            'response_mode' => 'async',
+        ], ['Accept' => 'application/json'])
+        ->assertAccepted()
+        ->assertJsonPath('status', 'processing');
+
+    $jobId = $created->json('job_id');
+
+    $this->withToken($license->app_token)
+        ->getJson('/api/transcribe/jobs/'.$jobId)
+        ->assertOk()
+        ->assertJsonPath('status', 'processing')
+        ->assertJsonMissingPath('result');
+
+    expect(ApiTranscriptionJob::query()->find($jobId)?->status)->toBe('processing');
+
+    Http::assertNotSent(fn ($request): bool => $request->url() === config('services.groq.transcription_url'));
 });

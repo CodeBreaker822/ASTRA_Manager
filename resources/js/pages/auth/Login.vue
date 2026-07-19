@@ -14,8 +14,8 @@ import { request } from '@/routes/password';
 
 defineOptions({
     layout: {
-        title: 'Log in to your account',
-        description: 'Enter your email and password below to log in',
+        title: 'Sign in to JERVA',
+        description: 'Transcription workspace.',
     },
 });
 
@@ -30,7 +30,7 @@ defineProps<{
 
     <div
         v-if="status"
-        class="mb-4 text-center text-sm font-medium text-green-600"
+        class="mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-center text-sm font-medium text-green-700"
     >
         {{ status }}
     </div>
@@ -91,7 +91,7 @@ defineProps<{
 
             <Button
                 type="submit"
-                class="mt-4 w-full"
+                class="mt-2 w-full"
                 :tabindex="4"
                 :disabled="processing"
                 data-test="login-button"
@@ -101,4 +101,9 @@ defineProps<{
             </Button>
         </div>
     </Form>
+
+    <div class="mt-6 text-center text-sm text-slate-600">
+        New here?
+        <TextLink href="/register">Create an account</TextLink>
+    </div>
 </template>

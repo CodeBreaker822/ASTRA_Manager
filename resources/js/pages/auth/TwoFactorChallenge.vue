@@ -85,11 +85,11 @@ const toggleRecoveryMode = (clearErrors: () => void): void => {
                 <Button type="submit" class="w-full" :disabled="processing"
                     >Continue</Button
                 >
-                <div class="text-center text-sm text-muted-foreground">
+                <div class="text-center text-sm text-slate-600">
                     <span>or you can </span>
                     <button
                         type="button"
-                        class="text-foreground underline decoration-neutral-300 underline-offset-4 transition-colors duration-300 ease-out hover:decoration-current! dark:decoration-neutral-500"
+                        class="font-medium text-blue-600 underline underline-offset-4 transition-colors duration-300 ease-out hover:text-blue-700 hover:decoration-current!"
                         @click="() => toggleRecoveryMode(clearErrors)"
                     >
                         {{ authConfigContent.buttonText }}
@@ -117,11 +117,11 @@ const toggleRecoveryMode = (clearErrors: () => void): void => {
                     >Continue</Button
                 >
 
-                <div class="text-center text-sm text-muted-foreground">
+                <div class="text-center text-sm text-slate-600">
                     <span>or you can </span>
                     <button
                         type="button"
-                        class="text-foreground underline decoration-neutral-300 underline-offset-4 transition-colors duration-300 ease-out hover:decoration-current! dark:decoration-neutral-500"
+                        class="font-medium text-blue-600 underline underline-offset-4 transition-colors duration-300 ease-out hover:text-blue-700 hover:decoration-current!"
                         @click="() => toggleRecoveryMode(clearErrors)"
                     >
                         {{ authConfigContent.buttonText }}

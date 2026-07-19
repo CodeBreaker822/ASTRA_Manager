@@ -17,7 +17,7 @@ defineProps<{
 defineOptions({
     layout: {
         title: 'Create an account',
-        description: 'Enter your details below to create your account',
+        description: 'Start your online transcription workspace.',
     },
 });
 </script>
@@ -101,14 +101,9 @@ defineOptions({
             </Button>
         </div>
 
-        <div class="text-center text-sm text-muted-foreground">
+        <div class="text-center text-sm text-slate-600">
             Already have an account?
-            <TextLink
-                :href="login()"
-                class="underline underline-offset-4"
-                :tabindex="6"
-                >Log in</TextLink
-            >
+            <TextLink :href="login()" :tabindex="6">Log in</TextLink>
         </div>
     </Form>
 </template>

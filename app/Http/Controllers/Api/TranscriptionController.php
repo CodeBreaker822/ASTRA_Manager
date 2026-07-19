@@ -931,26 +931,52 @@ class TranscriptionController extends Controller
             return;
         }
 
+        $service = $this->runPodService($provider);
+
         try {
-            $service = $this->runPodService($provider);
             $runPodPayload = $service->status($runPodJobId);
-            $state = strtoupper((string) data_get($runPodPayload, 'status', ''));
+        } catch (Throwable $exception) {
+            Log::warning('RunPod async status check failed; keeping transcription job pending.', [
+                'job_id' => $job->id,
+                'runpod_job_id' => $runPodJobId,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
 
-            if (! in_array($state, ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'], true)) {
-                $job->forceFill([
-                    'status' => $state === 'IN_QUEUE' ? 'queued' : 'processing',
-                    'started_at' => $job->started_at ?: now(),
-                    'error_message' => null,
-                    'status_code' => null,
-                ])->save();
+            $job->forceFill([
+                'status' => $job->status === 'queued' ? 'queued' : 'processing',
+                'started_at' => $job->started_at ?: now(),
+                'error_message' => null,
+                'status_code' => null,
+            ])->save();
 
-                return;
-            }
+            return;
+        }
 
-            if ($state !== 'COMPLETED') {
-                throw new \RuntimeException(ServiceUserMessage::transcriptionFailed('RunPod'));
-            }
+        $state = strtoupper((string) data_get($runPodPayload, 'status', ''));
 
+        if (! in_array($state, ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'], true)) {
+            $job->forceFill([
+                'status' => $state === 'IN_QUEUE' ? 'queued' : 'processing',
+                'started_at' => $job->started_at ?: now(),
+                'error_message' => null,
+                'status_code' => null,
+            ])->save();
+
+            return;
+        }
+
+        if ($state !== 'COMPLETED') {
+            $exception = new \RuntimeException(ServiceUserMessage::transcriptionFailed('RunPod'));
+            app(ProviderFallbackLogger::class)->failure('transcriber', 'transcribe', $provider, 0, $exception, $request, $license);
+            report($exception);
+
+            $this->completeAsyncTranscriptionWithFallback($job, $payload, $request, $license, $exception);
+
+            return;
+        }
+
+        try {
             $clips = $this->storedClipsWithAudio($payload['clips'] ?? []);
             $results = $service->normalizeSubmittedBatch($runPodPayload, $clips);
 

@@ -14,7 +14,8 @@ use Throwable;
 
 class RunPodSpeechToTextService
 {
-    public const MODEL_SERVERLESS_TRANSCRIPTOR = 'serverless-transcriptor';
+    public const MODEL_CEBUANO_BISAYA_EPOCH1_CT2 = 'cebuano-bisaya-epoch1-ct2';
+    public const MODEL_SERVERLESS_TRANSCRIPTOR = self::MODEL_CEBUANO_BISAYA_EPOCH1_CT2;
 
     public function __construct(
         private readonly string $apiKey,

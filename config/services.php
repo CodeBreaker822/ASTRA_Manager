@@ -36,6 +36,21 @@ return [
         ],
     ],
 
+    'billing' => [
+        'provider' => env('BILLING_PROVIDER', 'paymongo'),
+        'pro_amount' => env('PAYMONGO_PRO_AMOUNT'),
+        'team_amount' => env('PAYMONGO_TEAM_AMOUNT'),
+    ],
+
+    'paymongo' => [
+        'api_url' => env('PAYMONGO_API_URL', 'https://api.paymongo.com'),
+        'public_key' => env('PAYMONGO_PUBLIC_KEY'),
+        'secret_key' => env('PAYMONGO_SECRET_KEY'),
+        'webhook_secret' => env('PAYMONGO_WEBHOOK_SECRET'),
+        'payment_method_types' => array_values(array_filter(explode(',', env('PAYMONGO_PAYMENT_METHOD_TYPES', 'card,gcash,grab_pay,paymaya,qrph')))),
+        'send_email_receipt' => env('PAYMONGO_SEND_EMAIL_RECEIPT', true),
+    ],
+
     'lambda_pdf' => [
         'url' => env('LAMBDA_PDF_URL'),
     ],

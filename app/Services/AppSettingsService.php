@@ -719,12 +719,12 @@ class AppSettingsService
             ],
             self::PROVIDER_RUNPOD => [
                 'provider' => self::PROVIDER_RUNPOD,
-                'name' => 'RunPod Serverless Transcriptor',
+                'name' => 'RunPod Cebuano/Bisaya Epoch 1',
                 'endpoint' => $this->runPodEndpointUrl() ?: 'https://api.runpod.ai/v2/{endpoint_id}/runsync',
                 'default_model' => RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR,
                 'models' => [RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR],
                 'model_labels' => [
-                    RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR => 'Serverless Transcriptor',
+                    RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR => 'Cebuano/Bisaya Epoch 1 CT2',
                 ],
                 'api_key_url' => 'https://console.runpod.io/user/settings',
                 'purpose' => 'Serverless speech to text',

@@ -234,6 +234,16 @@ class APIController extends Controller
         $temporaryVersion = $directory.DIRECTORY_SEPARATOR.'.version-'.bin2hex(random_bytes(12)).'.json';
 
         try {
+            $embeddedVersion = $this->transcriberPackageVersionFromZip((string) $request->file('package')->getRealPath());
+
+            if ($embeddedVersion === null) {
+                throw new \RuntimeException('The Transcriber App Package must include a root version.json file.');
+            }
+
+            if (! hash_equals($version, $embeddedVersion)) {
+                throw new \RuntimeException("The Transcriber App Package version.json version [{$embeddedVersion}] does not match the published version [{$version}].");
+            }
+
             File::ensureDirectoryExists($directory);
             $request->file('package')->move($directory, basename($temporaryPackage));
 
@@ -415,5 +425,130 @@ class APIController extends Controller
         $detail = Str::limit(preg_replace('/\s+/', ' ', $detail) ?? $detail, 350, '...');
 
         return "Transcriber package upload failed: {$detail} Error reference: {$errorId}.";
+    }
+
+    private function transcriberPackageVersionFromZip(string $path): ?string
+    {
+        $versionJson = $this->readFileFromZip($path, 'version.json');
+
+        if ($versionJson === null) {
+            return null;
+        }
+
+        $payload = json_decode($versionJson, true);
+
+        return is_array($payload) && is_string($payload['version'] ?? null)
+            ? trim($payload['version'])
+            : null;
+    }
+
+    private function readFileFromZip(string $path, string $wantedName): ?string
+    {
+        $handle = fopen($path, 'rb');
+
+        if ($handle === false) {
+            throw new \RuntimeException('Unable to read the uploaded Transcriber App Package.');
+        }
+
+        try {
+            $size = filesize($path);
+
+            if ($size === false || $size < 22) {
+                throw new \RuntimeException('The Transcriber App Package is not a readable ZIP file.');
+            }
+
+            $tailSize = min($size, 65557);
+            fseek($handle, -$tailSize, SEEK_END);
+            $tail = fread($handle, $tailSize);
+            $endOffset = is_string($tail) ? strrpos($tail, "PK\x05\x06") : false;
+
+            if ($endOffset === false) {
+                throw new \RuntimeException('The Transcriber App Package is not a readable ZIP file.');
+            }
+
+            $endRecord = substr($tail, $endOffset, 22);
+            $directory = unpack('ventries/vtotal/Vsize/Voffset', substr($endRecord, 8, 12));
+
+            if (! is_array($directory)) {
+                throw new \RuntimeException('The Transcriber App Package directory could not be read.');
+            }
+
+            fseek($handle, (int) $directory['offset']);
+            $read = 0;
+
+            while ($read < (int) $directory['size']) {
+                $header = fread($handle, 46);
+
+                if (! is_string($header) || strlen($header) !== 46 || substr($header, 0, 4) !== "PK\x01\x02") {
+                    throw new \RuntimeException('The Transcriber App Package directory is malformed.');
+                }
+
+                $entry = unpack(
+                    'x10/vmethod/x8/VcompressedSize/VuncompressedSize/vnameLength/vextraLength/vcommentLength/x8/VlocalOffset',
+                    $header,
+                );
+
+                if (! is_array($entry)) {
+                    throw new \RuntimeException('The Transcriber App Package directory entry could not be read.');
+                }
+
+                $name = fread($handle, (int) $entry['nameLength']);
+                $extra = (int) $entry['extraLength'];
+                $comment = (int) $entry['commentLength'];
+
+                if ($extra > 0) {
+                    fseek($handle, $extra, SEEK_CUR);
+                }
+
+                if ($comment > 0) {
+                    fseek($handle, $comment, SEEK_CUR);
+                }
+
+                $read += 46 + (int) $entry['nameLength'] + $extra + $comment;
+
+                if (! is_string($name) || ltrim(str_replace('\\', '/', $name), './') !== $wantedName) {
+                    continue;
+                }
+
+                return $this->readZipEntryContents($handle, (int) $entry['localOffset'], (int) $entry['method'], (int) $entry['compressedSize']);
+            }
+        } finally {
+            fclose($handle);
+        }
+
+        return null;
+    }
+
+    private function readZipEntryContents(mixed $handle, int $localOffset, int $method, int $compressedSize): string
+    {
+        if ($compressedSize > 1024 * 1024) {
+            throw new \RuntimeException('The Transcriber App Package version.json file is too large.');
+        }
+
+        fseek($handle, $localOffset);
+        $localHeader = fread($handle, 30);
+
+        if (! is_string($localHeader) || strlen($localHeader) !== 30 || substr($localHeader, 0, 4) !== "PK\x03\x04") {
+            throw new \RuntimeException('The Transcriber App Package file entry is malformed.');
+        }
+
+        $local = unpack('vnameLength/vextraLength', substr($localHeader, 26, 4));
+
+        if (! is_array($local)) {
+            throw new \RuntimeException('The Transcriber App Package file entry could not be read.');
+        }
+
+        fseek($handle, (int) $local['nameLength'] + (int) $local['extraLength'], SEEK_CUR);
+        $contents = $compressedSize === 0 ? '' : fread($handle, $compressedSize);
+
+        if (! is_string($contents) || strlen($contents) !== $compressedSize) {
+            throw new \RuntimeException('The Transcriber App Package version.json file could not be read.');
+        }
+
+        return match ($method) {
+            0 => $contents,
+            8 => gzinflate($contents) ?: throw new \RuntimeException('The Transcriber App Package version.json file could not be decompressed.'),
+            default => throw new \RuntimeException('The Transcriber App Package version.json file uses an unsupported ZIP compression method.'),
+        };
     }
 }

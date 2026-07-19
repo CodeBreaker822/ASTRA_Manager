@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link, usePage } from '@inertiajs/vue3';
-import { KeyRound, UsersRound } from '@lucide/vue';
+import { CreditCard, KeyRound, UsersRound } from '@lucide/vue';
 import { computed } from 'vue';
 import Heading from '@/components/Heading.vue';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,11 @@ const sidebarNavItems = computed<NavItem[]>(() => [
     {
         title: 'Appearance',
         href: editAppearance(),
+    },
+    {
+        title: 'Billing',
+        href: '/settings/billing',
+        icon: CreditCard,
     },
     ...(page.props.auth.canManageUsers
         ? [
