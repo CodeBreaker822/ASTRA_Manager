@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link, usePage } from '@inertiajs/vue3';
-import { LayoutGrid, Menu, Search } from '@lucide/vue';
+import { BriefcaseBusiness, LayoutGrid, Menu, Search } from '@lucide/vue';
 import { computed } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
@@ -53,13 +53,22 @@ const { isCurrentUrl, whenCurrentUrl } = useCurrentUrl();
 const activeItemStyles =
     'text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100';
 
-const mainNavItems: NavItem[] = [
+const mainNavItems = computed<NavItem[]>(() => [
     {
-        title: 'Dashboard',
-        href: dashboard(),
+        title: 'Workspace',
+        href: '/workspace',
         icon: LayoutGrid,
     },
-];
+    ...(auth.value.canAccessDashboard
+        ? [
+              {
+                  title: 'Dashboard',
+                  href: dashboard(),
+                  icon: BriefcaseBusiness,
+              },
+          ]
+        : []),
+]);
 
 const rightNavItems: NavItem[] = [];
 </script>
@@ -135,7 +144,10 @@ const rightNavItems: NavItem[] = [];
                     </Sheet>
                 </div>
 
-                <Link :href="dashboard()" class="flex items-center gap-x-2">
+                <Link
+                    :href="auth.canAccessDashboard ? dashboard() : '/workspace'"
+                    class="flex items-center gap-x-2"
+                >
                     <AppLogo />
                 </Link>
 

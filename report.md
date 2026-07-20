@@ -256,3 +256,118 @@ Verification:
 Manual follow-up:
 
 - The side-by-side desktop parity walkthrough from `PROCESSING_UI_PLAN.md` section 10 still needs a browser session and desktop app session to verify interaction feel, focus travel, and real microphone/upload behavior beyond automated checks.
+
+# No Manual Code CMS Report
+
+## Phase 1 - CMS Gates & Dashboard Shell
+
+Status: Complete
+
+- Added `cms.view`, `cms.manage-blog`, `cms.manage-pricing`, and `cms.manage-pages` through the existing Gate + position-permission protocol.
+- Registered CMS gates alongside the existing user/API gates so they auto-enumerate into the current Positions & Gates UI.
+- Preserved the `ADMIN_ACESS` super-admin kill switch and added `ADMIN_ACCESS` as a compatibility fallback.
+- Replaced the blind `/dashboard` redirect with a gate-aware dashboard shell; regular users still go to `/workspace`.
+- Added filtered dashboard navigation, permission-based dashboard cards, and conditional sidebar/header Dashboard links.
+- Added Content Editor and Content Manager starter positions through the existing role/permission tables.
+- Added placeholder dashboard sections for Blog, Pricing, Features, and Download so later CRUD phases can land inside secured routes.
+
+Verification:
+
+- Focused dashboard gate tests passed: 6 tests, 19 assertions.
+- Workspace/auth regression tests passed: 10 tests, 26 assertions.
+- Targeted PHPStan passed for the CMS gate/controller/middleware/seeder slice.
+- Vue type-check passed.
+- Vite production build passed.
+- Vite build still prints upstream Rolldown annotation warnings from `reka-ui/@vueuse`.
+
+## Phase 2 - Blog Manager
+
+Status: Complete
+
+- Added `blog_posts` with draft/published status, soft deletes, author tracking, markdown body, slug uniqueness, optional cover images, and published dates.
+- Added a `BlogPost` model with the same safe markdown rendering options used by the original file-backed blog.
+- Added a blog post factory and `BlogPostSeeder` to import the existing `resources/blog/*.md` posts into the database.
+- Rewired the public `/blog` and `/blog/{slug}` routes to read published database posts only.
+- Added cover rendering on the blog index with the existing icon fallback.
+- Added gated dashboard blog CRUD under `/dashboard/blog`, including create/edit/delete, publish/unpublish, cover upload/removal, and sanitized markdown preview.
+- Added a CSRF meta tag for dashboard fetch requests and existing workspace fetch helpers.
+- Kept every dashboard blog route protected by `can:cms.manage-blog` plus controller `Gate::authorize`.
+
+Verification:
+
+- Blog CMS tests passed: 4 tests, 58 assertions.
+- Combined CMS dashboard/blog tests passed: 10 tests, 77 assertions.
+- Full Pest suite passed: 74 tests, 349 assertions.
+- Targeted PHPStan passed for the Blog model/controller/seeder/factory slice.
+- Vue type-check passed.
+- Vite production build passed.
+- Vite build still prints upstream Rolldown annotation warnings from `reka-ui/@vueuse`.
+
+## Phase 3 - Pricing Manager
+
+Status: Complete
+
+- Added `plan_tiers` and `plan_comparison_rows` with JSON-backed features, entitlements, export formats, active flags, and sort order.
+- Added `PlanTier`, `PlanComparisonRow`, and `PlanTierSeeder` to seed the current `config/plans.php` values into editable database rows.
+- Added `PlanService` with cache-backed DB reads and config fallback when tables or rows are empty.
+- Rewired `EntitlementService`, marketing `/price`, billing settings, checkout plan lookup, and PayMongo webhook plan validation to use `PlanService`.
+- Updated `/price` comparison matching to use stable plan keys instead of `plan.name.toLowerCase()`.
+- Replaced the pricing dashboard placeholder with a structured gated editor for plan copy, minutes, prices, feature bullets, entitlement toggles, export formats, and comparison rows.
+- Added editable pricing hero and FAQ copy through the same page content fallback system.
+- Kept PayMongo charge amounts env-driven through `PAYMONGO_*_AMOUNT`; dashboard prices remain display copy only.
+- Added the PayMongo amount warning banner to the pricing editor.
+
+Verification:
+
+- Pricing CMS tests passed: 3 tests, 55 assertions.
+- Billing and PayMongo regression tests passed: 5 tests, 31 assertions.
+- Full Pest suite passed: 80 tests, 455 assertions.
+- Targeted PHPStan passed for the pricing model/service/controller/seeder slice.
+- Vue type-check passed.
+- Vite production build passed.
+- Vite build still prints upstream Rolldown annotation warnings from `reka-ui/@vueuse`.
+
+## Phase 4 - Features & Download Page Manager
+
+Status: Complete
+
+- Added `config/marketing.php` as the fallback source for current Pricing, Features, and Download page copy.
+- Added `page_contents` with per-page/per-section JSON content and `updated_by` tracking.
+- Added `PageContent`, `PageContentService`, and `PageContentSeeder`.
+- Rewired the public Features and Download pages to consume structured controller props with config fallback.
+- Kept Download release/version/size/download URL dynamic from package storage.
+- Replaced the Pages dashboard placeholder with structured editors for Features and Download content.
+- Added whitelisted icon selectors for editable page sections so the JERVA layout cannot be broken by arbitrary icon/component input.
+- Kept every page manager route protected by `can:cms.manage-pages` plus controller `Gate::authorize`.
+
+Verification:
+
+- Page CMS tests passed: 3 tests, 51 assertions.
+- Combined CMS tests passed: 16 tests, 179 assertions.
+- Full Pest suite passed: 80 tests, 455 assertions.
+- Targeted PHPStan passed for the page content model/service/controller/seeder slice.
+- Vue type-check passed.
+- Vite production build passed.
+- Vite build still prints upstream Rolldown annotation warnings from `reka-ui/@vueuse`.
+
+## Phase 5 - Hardening & Review
+
+Status: Complete for automated checks
+
+- Covered CMS gate allow/deny, super-admin bypass, `ADMIN_ACESS=false` kill switch, blog CRUD, markdown XSS safety, pricing config fallback, pricing cache invalidation through save, billing/entitlement reflection, page content fallback, and page manager authorization.
+- Verified regular users still land on `/workspace`; dashboard is visible only to users with CMS/user/API gates.
+- Verified PayMongo checkout amounts remain env-driven while display pricing is editable.
+- Verified `/workspace` and `/` landing were not moved into CMS control.
+
+Verification:
+
+- Full Pest suite passed: 80 tests, 455 assertions.
+- Targeted PHPStan passed for the CMS slices.
+- Vue type-check passed.
+- Vite production build passed.
+- Vite build still prints upstream Rolldown annotation warnings from `reka-ui/@vueuse`.
+
+Manual follow-up:
+
+- Local CMS migrations and idempotent CMS seeders were applied for testing. Run the same migrations and CMS seeders on the target environment before deployment.
+- Browser review is still useful for final visual inspection of the structured editors, especially long copy wrapping on small screens.

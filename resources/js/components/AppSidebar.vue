@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { Link } from '@inertiajs/vue3';
-import { LayoutGrid } from '@lucide/vue';
+import { Link, usePage } from '@inertiajs/vue3';
+import { BriefcaseBusiness, LayoutGrid } from '@lucide/vue';
+import { computed } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
@@ -17,13 +18,24 @@ import {
 import { dashboard } from '@/routes';
 import type { NavItem } from '@/types';
 
-const mainNavItems: NavItem[] = [
+const page = usePage();
+
+const mainNavItems = computed<NavItem[]>(() => [
     {
-        title: 'Dashboard',
-        href: dashboard(),
+        title: 'Workspace',
+        href: '/workspace',
         icon: LayoutGrid,
     },
-];
+    ...(page.props.auth.canAccessDashboard
+        ? [
+              {
+                  title: 'Dashboard',
+                  href: dashboard(),
+                  icon: BriefcaseBusiness,
+              },
+          ]
+        : []),
+]);
 
 const footerNavItems: NavItem[] = [];
 </script>
@@ -34,7 +46,13 @@ const footerNavItems: NavItem[] = [];
             <SidebarMenu>
                 <SidebarMenuItem>
                     <SidebarMenuButton size="lg" as-child>
-                        <Link :href="dashboard()">
+                        <Link
+                            :href="
+                                page.props.auth.canAccessDashboard
+                                    ? dashboard()
+                                    : '/workspace'
+                            "
+                        >
                             <AppLogo />
                         </Link>
                     </SidebarMenuButton>

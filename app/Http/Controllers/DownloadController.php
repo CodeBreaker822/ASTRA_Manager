@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\PageContentService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
@@ -10,10 +11,11 @@ use Inertia\Response;
 
 class DownloadController extends Controller
 {
-    public function index(): Response
+    public function index(PageContentService $pages): Response
     {
         return Inertia::render('marketing/Download', [
             'release' => $this->latestRelease(),
+            'content' => $pages->page('download'),
         ]);
     }
 

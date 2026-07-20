@@ -9,6 +9,7 @@ import {
     MonitorDown,
     ShieldCheck,
 } from '@lucide/vue';
+import { computed } from 'vue';
 import { Button } from '@/components/ui/button';
 
 type Release = {
@@ -21,32 +22,53 @@ type Release = {
     download_url: string | null;
 };
 
-defineProps<{
+type DownloadContent = {
+    hero: {
+        eyebrow: string;
+        title: string;
+        intro: string;
+    };
+    download_card: {
+        title: string;
+        body: string;
+        button_label: string;
+        empty_label: string;
+    };
+    requirements: Array<{
+        icon: keyof typeof iconMap;
+        title: string;
+        body: string;
+    }>;
+    account: {
+        title: string;
+        body: string;
+        bullets: string[];
+        button_label: string;
+    };
+    faq: Array<{
+        question: string;
+        answer: string;
+    }>;
+};
+
+const iconMap = {
+    Laptop,
+    Cpu,
+    HardDrive,
+    ShieldCheck,
+};
+
+const props = defineProps<{
     release: Release;
+    content: DownloadContent;
 }>();
 
-const requirements = [
-    {
-        icon: Laptop,
-        title: 'OS',
-        body: 'Windows desktop build for v1 distribution.',
-    },
-    {
-        icon: Cpu,
-        title: 'Memory',
-        body: '8 GB RAM minimum. More memory helps local offline models.',
-    },
-    {
-        icon: HardDrive,
-        title: 'Disk space',
-        body: 'Reserve space for the app package and optional offline models.',
-    },
-    {
-        icon: ShieldCheck,
-        title: 'Account',
-        body: 'Pair with your JERVA account when online features are enabled.',
-    },
-];
+const requirements = computed(() =>
+    props.content.requirements.map((requirement) => ({
+        ...requirement,
+        icon: iconMap[requirement.icon] ?? Laptop,
+    })),
+);
 </script>
 
 <template>
@@ -58,19 +80,17 @@ const requirements = [
                 <p
                     class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
                 >
-                    Desktop app
+                    {{ content.hero.eyebrow }}
                 </p>
                 <h1
                     class="mx-auto mt-4 max-w-3xl text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl"
                 >
-                    Get JERVA for desktop
+                    {{ content.hero.title }}
                 </h1>
                 <p
                     class="mx-auto mt-5 max-w-3xl text-base leading-7 text-slate-700"
                 >
-                    Use JERVA Web for online transcription anywhere. Use the
-                    desktop app when you need offline Whisper, local VAD,
-                    speaker separation, and files that stay on your machine.
+                    {{ content.hero.intro }}
                 </p>
             </div>
         </section>
@@ -82,11 +102,10 @@ const requirements = [
                 >
                     <MonitorDown class="mx-auto size-10 text-blue-600" />
                     <h2 class="mt-4 text-2xl font-semibold text-slate-950">
-                        Download for Windows
+                        {{ content.download_card.title }}
                     </h2>
                     <p class="mt-3 text-sm leading-6 text-slate-700">
-                        The current desktop distribution channel is Windows-only
-                        until additional platform packages are uploaded.
+                        {{ content.download_card.body }}
                     </p>
 
                     <Button
@@ -97,11 +116,11 @@ const requirements = [
                     >
                         <a :href="release.download_url">
                             <Download class="size-4" />
-                            Download for Windows
+                            {{ content.download_card.button_label }}
                         </a>
                     </Button>
                     <Button v-else size="lg" class="mt-8 w-full" disabled>
-                        No package uploaded
+                        {{ content.download_card.empty_label }}
                     </Button>
 
                     <div class="mt-4 text-sm text-slate-600">
@@ -180,32 +199,26 @@ const requirements = [
                 <div class="grid gap-6 md:grid-cols-[1fr_auto] md:items-center">
                     <div>
                         <h2 class="text-2xl font-semibold text-blue-950">
-                            Pair with your account
+                            {{ content.account.title }}
                         </h2>
                         <p class="mt-3 text-sm leading-6 text-blue-900">
-                            The desktop app can pair with the same account as
-                            the web workspace for online services. Offline
-                            transcription still runs on your machine.
+                            {{ content.account.body }}
                         </p>
                         <div class="mt-5 grid gap-2 text-sm text-blue-900">
-                            <div class="flex items-start gap-2">
+                            <div
+                                v-for="bullet in content.account.bullets"
+                                :key="bullet"
+                                class="flex items-start gap-2"
+                            >
                                 <Check class="mt-0.5 size-4 text-blue-600" />
-                                <span
-                                    >Web: online, browser-based, no
-                                    install</span
-                                >
-                            </div>
-                            <div class="flex items-start gap-2">
-                                <Check class="mt-0.5 size-4 text-blue-600" />
-                                <span
-                                    >Desktop: offline models and local
-                                    files</span
-                                >
+                                <span>{{ bullet }}</span>
                             </div>
                         </div>
                     </div>
                     <Button as-child>
-                        <Link href="/register">Create account</Link>
+                        <Link href="/register">{{
+                            content.account.button_label
+                        }}</Link>
                     </Button>
                 </div>
             </div>
@@ -220,45 +233,18 @@ const requirements = [
                 </h2>
                 <div class="mt-8 grid gap-4">
                     <details
+                        v-for="(item, index) in content.faq"
+                        :key="item.question"
                         class="rounded-lg border border-slate-200 bg-white p-4"
-                        open
+                        :open="index === 0"
                     >
                         <summary
                             class="cursor-pointer text-sm font-semibold text-slate-950"
                         >
-                            Is the desktop app free?
+                            {{ item.question }}
                         </summary>
                         <p class="mt-3 text-sm leading-6 text-slate-700">
-                            The download channel can publish the desktop app
-                            package. Account and plan rules are handled by the
-                            web SaaS layer as billing is added.
-                        </p>
-                    </details>
-                    <details
-                        class="rounded-lg border border-slate-200 bg-white p-4"
-                    >
-                        <summary
-                            class="cursor-pointer text-sm font-semibold text-slate-950"
-                        >
-                            What is different from the web version?
-                        </summary>
-                        <p class="mt-3 text-sm leading-6 text-slate-700">
-                            Web transcription is online-only. Desktop keeps the
-                            offline-capable model workflow and local processing
-                            features.
-                        </p>
-                    </details>
-                    <details
-                        class="rounded-lg border border-slate-200 bg-white p-4"
-                    >
-                        <summary
-                            class="cursor-pointer text-sm font-semibold text-slate-950"
-                        >
-                            How do offline models work?
-                        </summary>
-                        <p class="mt-3 text-sm leading-6 text-slate-700">
-                            Offline models are downloaded and managed by the
-                            desktop application, not by the web workspace.
+                            {{ item.answer }}
                         </p>
                     </details>
                 </div>

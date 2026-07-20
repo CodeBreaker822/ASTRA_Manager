@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\PageContentService;
+use App\Services\PlanService;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -12,16 +14,19 @@ class MarketingController extends Controller
         return Inertia::render('marketing/Landing');
     }
 
-    public function features(): Response
+    public function features(PageContentService $pages): Response
     {
-        return Inertia::render('marketing/Features');
+        return Inertia::render('marketing/Features', [
+            'content' => $pages->page('features'),
+        ]);
     }
 
-    public function price(): Response
+    public function price(PlanService $plans, PageContentService $pages): Response
     {
         return Inertia::render('marketing/Price', [
-            'plans' => array_values(config('plans.tiers', [])),
-            'comparison' => config('plans.comparison', []),
+            'plans' => $plans->tiersForDisplay(),
+            'comparison' => $plans->comparison(),
+            'content' => $pages->page('pricing'),
         ]);
     }
 }

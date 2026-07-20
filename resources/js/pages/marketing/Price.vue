@@ -5,6 +5,7 @@ import { computed, ref } from 'vue';
 import { Button } from '@/components/ui/button';
 
 type Plan = {
+    key: string;
     name: string;
     tagline: string;
     monthly_price: number | null;
@@ -19,6 +20,17 @@ type Plan = {
 const props = defineProps<{
     plans: Plan[];
     comparison: Record<string, string[]>;
+    content: {
+        hero: {
+            eyebrow: string;
+            title: string;
+            intro: string;
+        };
+        faq: Array<{
+            question: string;
+            answer: string;
+        }>;
+    };
 }>();
 
 const billingPeriod = ref<'monthly' | 'yearly'>('monthly');
@@ -48,19 +60,17 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                 <p
                     class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
                 >
-                    Price
+                    {{ content.hero.eyebrow }}
                 </p>
                 <h1
                     class="mx-auto mt-4 max-w-3xl text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl"
                 >
-                    Simple pricing
+                    {{ content.hero.title }}
                 </h1>
                 <p
                     class="mx-auto mt-5 max-w-2xl text-base leading-7 text-slate-700"
                 >
-                    Start with free upload transcription. Upgrade when your
-                    workflow needs live capture, polishing, summaries, and every
-                    export format.
+                    {{ content.hero.intro }}
                 </p>
 
                 <div
@@ -99,7 +109,7 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
             <div class="mx-auto grid max-w-6xl gap-6 px-6 lg:grid-cols-3">
                 <article
                     v-for="plan in plans"
-                    :key="plan.name"
+                    :key="plan.key"
                     class="rounded-lg border bg-white p-8"
                     :class="
                         plan.featured
@@ -175,7 +185,7 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                         </div>
                         <div
                             v-for="plan in plans"
-                            :key="plan.name"
+                            :key="plan.key"
                             class="p-4 text-sm font-semibold text-slate-950"
                         >
                             {{ plan.name }}
@@ -191,15 +201,11 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                         </div>
                         <div
                             v-for="plan in plans"
-                            :key="`${feature}-${plan.name}`"
+                            :key="`${feature}-${plan.key}`"
                             class="p-4 text-sm text-slate-700"
                         >
                             <Check
-                                v-if="
-                                    enabledPlans.includes(
-                                        plan.name.toLowerCase(),
-                                    )
-                                "
+                                v-if="enabledPlans.includes(plan.key)"
                                 class="size-4 text-blue-600"
                                 aria-label="Included"
                             />
@@ -219,45 +225,18 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                 </h2>
                 <div class="mt-8 grid gap-4">
                     <details
+                        v-for="(item, index) in content.faq"
+                        :key="item.question"
                         class="rounded-lg border border-slate-200 bg-white p-4"
-                        open
+                        :open="index === 0"
                     >
                         <summary
                             class="cursor-pointer text-sm font-semibold text-slate-950"
                         >
-                            Can I use JERVA Web offline?
+                            {{ item.question }}
                         </summary>
                         <p class="mt-3 text-sm leading-6 text-slate-700">
-                            No. The web edition is online-only and uses the
-                            server provider pipeline. Offline Whisper remains in
-                            the desktop app.
-                        </p>
-                    </details>
-                    <details
-                        class="rounded-lg border border-slate-200 bg-white p-4"
-                    >
-                        <summary
-                            class="cursor-pointer text-sm font-semibold text-slate-950"
-                        >
-                            Is billing active in beta?
-                        </summary>
-                        <p class="mt-3 text-sm leading-6 text-slate-700">
-                            Not yet. These plan definitions prepare the UI and
-                            entitlement structure for the later billing phase.
-                        </p>
-                    </details>
-                    <details
-                        class="rounded-lg border border-slate-200 bg-white p-4"
-                    >
-                        <summary
-                            class="cursor-pointer text-sm font-semibold text-slate-950"
-                        >
-                            What happens when I reach my quota?
-                        </summary>
-                        <p class="mt-3 text-sm leading-6 text-slate-700">
-                            The workspace will show a friendly upgrade prompt
-                            once quota middleware is added in the workspace
-                            phase.
+                            {{ item.answer }}
                         </p>
                     </details>
                 </div>

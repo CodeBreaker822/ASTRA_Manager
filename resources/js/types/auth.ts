@@ -15,6 +15,10 @@ export type Auth = {
     isAdmin: boolean;
     canManageApi: boolean;
     canManageUsers: boolean;
+    canAccessDashboard: boolean;
+    canManageBlog: boolean;
+    canManagePricing: boolean;
+    canManagePages: boolean;
 };
 
 /* @chisel-passkeys */

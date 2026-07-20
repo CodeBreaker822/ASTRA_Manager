@@ -1,6 +1,10 @@
 <?php
 
 use App\Http\Controllers\BlogController;
+use App\Http\Controllers\DashboardBlogController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DashboardPageController;
+use App\Http\Controllers\DashboardPricingController;
 use App\Http\Controllers\DownloadController;
 use App\Http\Controllers\MarketingController;
 use App\Http\Controllers\PayMongoWebhookController;
@@ -20,7 +24,24 @@ Route::get('/download/latest', [DownloadController::class, 'latest'])->name('dow
 Route::post('/paymongo/webhook', PayMongoWebhookController::class)->name('paymongo.webhook');
 
 Route::middleware(['auth', 'verified'])->group(function () {
-    Route::redirect('dashboard', '/workspace')->name('dashboard');
+    Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::middleware('can:cms.manage-blog')->prefix('dashboard/blog')->name('dashboard.blog.')->group(function (): void {
+        Route::get('/', [DashboardBlogController::class, 'index'])->name('index');
+        Route::get('create', [DashboardBlogController::class, 'create'])->name('create');
+        Route::post('/', [DashboardBlogController::class, 'store'])->name('store');
+        Route::post('preview', [DashboardBlogController::class, 'preview'])->name('preview');
+        Route::get('{post}/edit', [DashboardBlogController::class, 'edit'])->name('edit');
+        Route::put('{post}', [DashboardBlogController::class, 'update'])->name('update');
+        Route::delete('{post}', [DashboardBlogController::class, 'destroy'])->name('destroy');
+        Route::post('{post}/publish', [DashboardBlogController::class, 'publish'])->name('publish');
+    });
+    Route::get('dashboard/pricing', [DashboardPricingController::class, 'edit'])->middleware('can:cms.manage-pricing')->name('dashboard.pricing.edit');
+    Route::put('dashboard/pricing', [DashboardPricingController::class, 'update'])->middleware('can:cms.manage-pricing')->name('dashboard.pricing.update');
+    Route::get('dashboard/pages/features', [DashboardPageController::class, 'features'])->middleware('can:cms.manage-pages')->name('dashboard.pages.features.edit');
+    Route::put('dashboard/pages/features', [DashboardPageController::class, 'updateFeatures'])->middleware('can:cms.manage-pages')->name('dashboard.pages.features.update');
+    Route::get('dashboard/pages/download', [DashboardPageController::class, 'download'])->middleware('can:cms.manage-pages')->name('dashboard.pages.download.edit');
+    Route::put('dashboard/pages/download', [DashboardPageController::class, 'updateDownload'])->middleware('can:cms.manage-pages')->name('dashboard.pages.download.update');
+
     Route::get('workspace', [WorkspaceController::class, 'index'])->name('workspace.index');
     Route::post('workspace', [WorkspaceController::class, 'store'])->name('workspace.store');
     Route::get('workspace/{project}', [WorkspaceController::class, 'show'])->name('workspace.show');

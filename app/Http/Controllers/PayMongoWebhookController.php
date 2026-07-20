@@ -3,13 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\BillingTransaction;
+use App\Services\PlanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 
 class PayMongoWebhookController extends Controller
 {
-    public function __invoke(Request $request): JsonResponse
+    public function __invoke(Request $request, PlanService $plans): JsonResponse
     {
         if (! $this->hasValidSignature($request)) {
             return response()->json(['message' => 'Invalid signature.'], 401);
@@ -39,7 +40,7 @@ class PayMongoWebhookController extends Controller
 
         $plan = is_string($plan) && $plan !== '' ? $plan : $transaction->plan;
 
-        if (! array_key_exists($plan, config('plans.tiers', []))) {
+        if ($plans->plan($plan) === null) {
             return response()->json(['message' => 'Unknown plan.'], 422);
         }
 

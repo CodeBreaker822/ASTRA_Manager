@@ -7,6 +7,7 @@ use App\Models\BillingTransaction;
 use App\Models\User;
 use App\Services\EntitlementService;
 use App\Services\PayMongoCheckoutService;
+use App\Services\PlanService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -20,12 +21,10 @@ class BillingController extends Controller
         Request $request,
         EntitlementService $entitlements,
         PayMongoCheckoutService $payMongo,
+        PlanService $plans,
     ): Response {
         $user = $request->user();
         abort_unless($user instanceof User, 403);
-
-        $plans = config('plans.tiers', []);
-        $plans = is_array($plans) ? $plans : [];
 
         return Inertia::render('settings/Billing', [
             'billing' => [
@@ -40,17 +39,11 @@ class BillingController extends Controller
                 ],
             ],
             'entitlements' => $entitlements->summaryFor($user),
-            'plans' => collect($plans)
-                ->map(fn (mixed $plan, string $key): array => array_merge(
-                    ['key' => $key],
-                    is_array($plan) ? $plan : [],
-                ))
-                ->values()
-                ->all(),
+            'plans' => $plans->tiersForDisplay(),
         ]);
     }
 
-    public function checkout(Request $request, PayMongoCheckoutService $payMongo): RedirectResponse
+    public function checkout(Request $request, PayMongoCheckoutService $payMongo, PlanService $plans): RedirectResponse
     {
         $user = $request->user();
         abort_unless($user instanceof User, 403);
@@ -59,8 +52,7 @@ class BillingController extends Controller
             'plan' => ['required', 'string', 'in:pro,team'],
         ]);
         $planKey = $validated['plan'];
-        $plans = config('plans.tiers', []);
-        $plan = is_array($plans) ? ($plans[$planKey] ?? null) : null;
+        $plan = $plans->plan($planKey);
 
         if (! is_array($plan)) {
             return back()->withErrors([

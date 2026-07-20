@@ -11,72 +11,50 @@ import {
     Network,
     Sparkles,
 } from '@lucide/vue';
+import { computed } from 'vue';
 import { Button } from '@/components/ui/button';
 
-const features = [
-    {
-        eyebrow: 'Live',
-        icon: Mic,
-        title: 'Live transcription in the browser',
-        body: 'Record from the browser and send short chunks to the server for online transcription.',
-        bullets: [
-            'MediaRecorder capture',
-            'Queued pending clips',
-            'Server-side processing',
-        ],
-    },
-    {
-        eyebrow: 'Upload',
-        icon: FileAudio,
-        title: 'Upload audio',
-        body: 'Process common audio formats through the same provider pipeline already used by the server.',
-        bullets: [
-            'WAV, MP3, M4A, AAC, OGG, FLAC',
-            'Async job polling',
-            'Progress states',
-        ],
-    },
-    {
-        eyebrow: 'Polish',
-        icon: Languages,
-        title: 'Grammar fixes and translation',
-        body: 'Use preset instructions for English, Filipino, grammar cleanup, or a custom instruction.',
-        bullets: [
-            'Translate to English',
-            'Translate to Filipino',
-            'Custom cleanup prompts',
-        ],
-    },
-    {
-        eyebrow: 'Summaries',
-        icon: Sparkles,
-        title: 'Summarize transcripts',
-        body: 'Summarize either raw or cleaned text with the existing LLM cleaner services.',
-        bullets: [
-            'Raw or cleaned source',
-            'Long transcript splitting',
-            'Provider fallback',
-        ],
-    },
-    {
-        eyebrow: 'Export',
-        icon: FileSpreadsheet,
-        title: 'Export to TXT, Word, and Excel',
-        body: 'Move transcript work into the formats teams already use for review and reporting.',
-        bullets: ['Raw exports', 'Cleaned exports', 'Signed downloads'],
-    },
-    {
-        eyebrow: 'Fallback',
-        icon: Network,
-        title: 'Multi-provider accuracy',
-        body: 'The web workspace reuses configured server providers and fallback behavior.',
-        bullets: [
-            'AssemblyAI, Deepgram, Groq, and more',
-            'Admin-managed ordering',
-            'API request logs',
-        ],
-    },
-];
+type FeatureRow = {
+    eyebrow: string;
+    icon: keyof typeof iconMap;
+    title: string;
+    body: string;
+    bullets: string[];
+};
+
+type FeaturesContent = {
+    hero: {
+        eyebrow: string;
+        title: string;
+        intro: string;
+    };
+    feature_rows: FeatureRow[];
+    cta: {
+        title: string;
+        body: string;
+        button_label: string;
+    };
+};
+
+const props = defineProps<{
+    content: FeaturesContent;
+}>();
+
+const iconMap = {
+    Mic,
+    FileAudio,
+    Languages,
+    Sparkles,
+    FileSpreadsheet,
+    Network,
+};
+
+const features = computed(() =>
+    props.content.feature_rows.map((feature) => ({
+        ...feature,
+        icon: iconMap[feature.icon] ?? FileText,
+    })),
+);
 </script>
 
 <template>
@@ -88,22 +66,18 @@ const features = [
                 <p
                     class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
                 >
-                    Features
+                    {{ content.hero.eyebrow }}
                 </p>
                 <div class="mt-4 grid gap-8 lg:grid-cols-[0.8fr_1fr]">
                     <div>
                         <h1
                             class="text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl"
                         >
-                            Online transcription, shaped like the desktop
-                            workspace.
+                            {{ content.hero.title }}
                         </h1>
                     </div>
                     <p class="text-base leading-7 text-slate-700">
-                        JERVA Web keeps the familiar light workspace, but every
-                        transcription action runs through the server. That means
-                        upload, live capture, polish, summarize, and export
-                        without shipping local models to the browser.
+                        {{ content.hero.intro }}
                     </p>
                 </div>
             </div>
@@ -209,15 +183,14 @@ const features = [
             >
                 <div>
                     <h2 class="text-2xl font-semibold text-blue-950">
-                        Build your first online transcript.
+                        {{ content.cta.title }}
                     </h2>
                     <p class="mt-2 text-sm leading-6 text-blue-900">
-                        Start with upload transcription, then unlock live,
-                        polish, summaries, and exports as the workspace grows.
+                        {{ content.cta.body }}
                     </p>
                 </div>
                 <Button as-child>
-                    <Link href="/register">Create account</Link>
+                    <Link href="/register">{{ content.cta.button_label }}</Link>
                 </Button>
             </div>
         </section>

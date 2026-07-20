@@ -15,6 +15,11 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        $this->call(CmsPositionSeeder::class);
+        $this->call(BlogPostSeeder::class);
+        $this->call(PlanTierSeeder::class);
+        $this->call(PageContentSeeder::class);
+
         // User::factory(10)->create();
 
         User::factory()->create([

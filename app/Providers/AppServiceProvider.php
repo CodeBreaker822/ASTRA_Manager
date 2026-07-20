@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Gates\APIManagerGates;
+use App\Gates\CmsGates;
 use App\Gates\UserGates;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -41,6 +42,7 @@ class AppServiceProvider extends ServiceProvider
 
         UserGates::register();
         APIManagerGates::register();
+        CmsGates::register();
         Gate::define('delete-api_manager', fn (User $user): bool => $user->can('API-manage_api'));
 
         DB::prohibitDestructiveCommands(

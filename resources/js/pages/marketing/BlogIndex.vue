@@ -8,6 +8,7 @@ type Post = {
     date: string;
     excerpt: string;
     cover?: string;
+    cover_url?: string | null;
 };
 
 defineProps<{
@@ -51,7 +52,13 @@ defineProps<{
                     <div
                         class="flex aspect-video items-center justify-center border-b border-slate-200 bg-blue-50"
                     >
-                        <FileText class="size-10 text-blue-600" />
+                        <img
+                            v-if="post.cover_url"
+                            :src="post.cover_url"
+                            :alt="post.title"
+                            class="h-full w-full object-cover"
+                        />
+                        <FileText v-else class="size-10 text-blue-600" />
                     </div>
                     <div class="p-6">
                         <div

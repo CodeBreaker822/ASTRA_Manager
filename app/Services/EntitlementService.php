@@ -8,20 +8,21 @@ use Illuminate\Support\Carbon;
 
 class EntitlementService
 {
+    public function __construct(private readonly PlanService $plans) {}
+
     /**
      * @return array<string, mixed>
      */
     public function planFor(User $user): array
     {
-        $plans = config('plans.tiers', []);
-        $plans = is_array($plans) ? $plans : [];
-        $default = (string) config('plans.default', 'free');
+        $plans = $this->plans->tiers();
+        $default = $this->plans->defaultKey();
         $planKey = array_key_exists((string) $user->plan, $plans)
             ? (string) $user->plan
             : $default;
         $plan = $plans[$planKey] ?? [];
 
-        return array_merge(['key' => $planKey], is_array($plan) ? $plan : []);
+        return array_merge(['key' => $planKey], $plan);
     }
 
     public function allows(User $user, string $feature): bool
