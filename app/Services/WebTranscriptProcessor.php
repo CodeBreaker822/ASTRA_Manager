@@ -7,13 +7,13 @@ use App\Models\TranscriptSection;
 use App\Models\UsageRecord;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class WebTranscriptProcessor
 {
     public function __construct(
         private readonly AppSettingsService $settings,
+        private readonly WebApiTranscriptionClient $transcriptionClient,
     ) {}
 
     /**
@@ -21,71 +21,61 @@ class WebTranscriptProcessor
      */
     public function transcribe(Transcript $transcript, array $options = []): void
     {
-        $this->appendLog($transcript, 'processing', 'Transcription started.');
+        $this->appendLog($transcript, 'processing', 'Transcribing');
 
-        $providers = $this->settings->orderedConnectedProviders('transcriber');
+        try {
+            $user = $transcript->project()->first()?->user()->first();
 
-        if ($providers === []) {
-            $this->fail($transcript, 'All configured transcription providers are unavailable.');
-
-            return;
-        }
-
-        $audioPath = (string) $transcript->audio_path;
-        $fullPath = Storage::disk('local')->path($audioPath);
-
-        if ($audioPath === '' || ! is_file($fullPath)) {
-            $this->fail($transcript, ServiceUserMessage::audioReadFailed());
-
-            return;
-        }
-
-        $attemptedProviders = [];
-
-        foreach ($providers as $position => $provider) {
-            $attemptedProviders[] = (string) $provider['provider'];
-
-            try {
-                $result = $this->transcribeUsingProvider($provider, $fullPath, $options);
-                $text = trim((string) ($result['text'] ?? ''));
-
-                if ($text === '') {
-                    throw new \RuntimeException(ServiceUserMessage::emptyTranscriptionResponse((string) $provider['provider']));
-                }
-
-                $this->persistTranscriptionResult($transcript, $result);
-                $this->recordUsage($transcript);
-                $this->appendLog(
-                    $transcript,
-                    'completed',
-                    $position === 0
-                        ? 'Transcription completed.'
-                        : 'Transcription completed using provider fallback.',
-                    ['attempted_providers' => $attemptedProviders],
-                );
-
-                return;
-            } catch (Throwable $exception) {
-                Log::warning('Web transcription provider failed.', [
-                    'transcript_id' => $transcript->id,
-                    'provider' => $provider['provider'] ?? null,
-                    'error' => $exception->getMessage(),
-                ]);
+            if (! $user instanceof User) {
+                throw new \RuntimeException('Transcript owner could not be resolved.');
             }
-        }
 
-        $this->fail($transcript, 'All configured transcription providers are unavailable.', [
-            'attempted_providers' => $attemptedProviders,
-        ]);
+            $clips = $this->transcriptionClips($transcript, $options);
+            $result = $this->transcriptionClient->transcribe(
+                $user,
+                $clips,
+                is_string($options['language_code'] ?? null) ? $options['language_code'] : null,
+            );
+
+            if ($transcript->fresh()?->status === 'cancelled') {
+                return;
+            }
+
+            $this->appendLog($transcript, 'processing', 'Finalizing');
+            $this->persistTranscriptionResult($transcript, $result);
+            $this->recordUsage($transcript);
+            $this->appendLog($transcript, 'completed', 'Complete');
+        } catch (Throwable $exception) {
+            Log::warning('Web transcription through API pipeline failed.', [
+                'transcript_id' => $transcript->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            $this->fail($transcript, $exception->getMessage() ?: 'Audio upload could not be processed.');
+        }
     }
 
     public function polish(Transcript $transcript, string $instruction): string
     {
         $text = $this->sourceText($transcript);
-        $result = $this->cleanText($text, $instruction, 'polish');
+        $user = $transcript->project()->first()?->user()->first();
+
+        if (! $user instanceof User) {
+            throw new \RuntimeException('Transcript owner could not be resolved.');
+        }
+
+        $result = $this->transcriptionClient->polish($user, $text, [], $instruction, 'polish');
         $cleaned = trim((string) ($result['text'] ?? ''));
 
-        $transcript->forceFill(['cleaned_text' => $cleaned])->save();
+        if ($cleaned === '') {
+            throw new \RuntimeException('Transcript could not be polished.');
+        }
+
+        $transcript->forceFill([
+            'cleaned_text' => $cleaned,
+            'polish_status' => 'complete',
+            'polish_error_message' => null,
+        ])->save();
         $this->appendLog($transcript, 'polished', 'Transcript polished.');
 
         $this->usageRecord($transcript)->increment('polish_count');
@@ -106,7 +96,11 @@ class WebTranscriptProcessor
         );
         $summary = trim((string) ($result['text'] ?? ''));
 
-        $transcript->forceFill(['summary_text' => $summary])->save();
+        $transcript->forceFill([
+            'summary_text' => $summary,
+            'summary_status' => 'complete',
+            'summary_error_message' => null,
+        ])->save();
         $this->appendLog($transcript, 'summarized', 'Transcript summarized.');
 
         $this->usageRecord($transcript)->increment('summary_count');
@@ -127,10 +121,13 @@ class WebTranscriptProcessor
             'created_at' => now()->toISOString(),
         ];
 
-        $transcript->forceFill([
-            'status' => $status,
-            'processing_log' => $log,
-        ])->save();
+        $updates = ['processing_log' => $log];
+
+        if (in_array($status, ['queued', 'processing', 'completed', 'failed', 'cancelled'], true)) {
+            $updates['status'] = $status;
+        }
+
+        $transcript->forceFill($updates)->save();
     }
 
     /**
@@ -142,43 +139,27 @@ class WebTranscriptProcessor
     }
 
     /**
-     * @param  array<string, mixed>  $provider
      * @param  array<string, mixed>  $options
-     * @return array<string, mixed>
+     * @return array<int, array<string, mixed>>
      */
-    private function transcribeUsingProvider(array $provider, string $audioPath, array $options): array
+    private function transcriptionClips(Transcript $transcript, array $options): array
     {
-        $service = match ($provider['provider']) {
-            AppSettingsService::PROVIDER_DEEPGRAM => new DeepgramSpeechToTextService(
-                apiKey: $provider['api_key'],
-                modelId: $provider['model'],
-            ),
-            AppSettingsService::PROVIDER_ELEVENLABS => new ElevenLabsSpeechToTextService(
-                apiKey: $provider['api_key'],
-                modelId: $provider['model'],
-            ),
-            AppSettingsService::PROVIDER_SPEECHMATICS => new SpeechmaticsSpeechToTextService(
-                apiKey: $provider['api_key'],
-                modelId: $provider['model'],
-            ),
-            AppSettingsService::PROVIDER_GROQ_TRANSCRIPTION => new GroqSpeechToTextService(
-                apiKey: $provider['api_key'],
-                modelId: $provider['model'],
-            ),
-            AppSettingsService::PROVIDER_GLADIA => new GladiaSpeechToTextService($provider['api_key'], $provider['model']),
-            AppSettingsService::PROVIDER_ASSEMBLYAI => new AssemblyAiSpeechToTextService($provider['api_key'], $provider['model']),
-            AppSettingsService::PROVIDER_AZURE_SPEECH => new AzureSpeechToTextService($provider['api_key'], $provider['model']),
-            AppSettingsService::PROVIDER_GOOGLE_SPEECH => new GoogleCloudSpeechToTextService($provider['api_key'], $provider['model']),
-            AppSettingsService::PROVIDER_AWS_TRANSCRIBE => new AwsTranscribeSpeechToTextService($provider['api_key'], $provider['model']),
-            AppSettingsService::PROVIDER_RUNPOD => new RunPodSpeechToTextService(
-                $provider['api_key'],
-                $provider['model'],
-                $this->runPodRunsyncUrl($provider['metadata'] ?? []),
-            ),
-            default => throw new \InvalidArgumentException('Unsupported transcription provider.'),
-        };
+        $clips = array_values(array_filter($options['clips'] ?? [], 'is_array'));
 
-        return $service->transcribe($audioPath, $options);
+        if ($clips !== []) {
+            return $clips;
+        }
+
+        $path = (string) $transcript->audio_path;
+
+        return [[
+            'path' => $path,
+            'name' => basename($path),
+            'clip_index' => $options['clip_index'] ?? 0,
+            'clip_start_ms' => $options['clip_start_ms'] ?? 0,
+            'clip_end_ms' => $options['clip_end_ms'] ?? max(0, (int) $transcript->duration_seconds * 1000),
+            'language_code' => $options['language_code'] ?? null,
+        ]];
     }
 
     /**
@@ -326,23 +307,5 @@ class WebTranscriptProcessor
         }
 
         return app(EntitlementService::class)->usageForCurrentPeriod($user);
-    }
-
-    /**
-     * @param  array<string, mixed>  $metadata
-     */
-    private function runPodRunsyncUrl(array $metadata): ?string
-    {
-        $runsyncUrl = trim((string) ($metadata['runsync_url'] ?? ''));
-
-        if ($runsyncUrl !== '') {
-            return $runsyncUrl;
-        }
-
-        $endpointId = trim((string) ($metadata['endpoint_id'] ?? ''));
-
-        return $endpointId === ''
-            ? null
-            : 'https://api.runpod.ai/v2/'.$endpointId.'/runsync';
     }
 }

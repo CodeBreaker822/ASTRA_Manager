@@ -75,13 +75,13 @@ import { Button } from '@/components/ui/button';
                         class="rounded-lg border border-blue-100 bg-blue-50 p-4"
                     >
                         <p class="text-sm font-semibold text-blue-950">
-                            Processing online
+                            Transcribing
                         </p>
                         <div
-                            class="mt-3 h-2 overflow-hidden rounded-full bg-blue-100"
+                            class="mt-3 h-1 overflow-hidden rounded-full bg-blue-100"
                         >
                             <div
-                                class="h-full w-2/3 rounded-full bg-blue-600"
+                                class="h-full w-full animate-pulse bg-blue-600"
                             />
                         </div>
                     </div>

@@ -7,6 +7,7 @@ use App\Models\API;
 use App\Models\TranscriptionApiRequestLog;
 use App\Models\TranscriptionProviderSetting;
 use App\Services\AppSettingsService;
+use App\Services\LicenseKeyService;
 use App\Services\ProviderConnectionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -290,15 +291,15 @@ class APIController extends Controller
         ]);
     }
 
-    public function generateLicenseKey()
+    public function generateLicenseKey(LicenseKeyService $licenses)
     {
         return response()->json([
             'success' => true,
-            'license_key' => $this->makeUniqueLicenseKey(),
+            'license_key' => $licenses->makeUniqueLicenseKey(),
         ]);
     }
 
-    public function store(Request $request)
+    public function store(Request $request, LicenseKeyService $licenses)
     {
         $validated = $request->validate([
             'app_name' => 'required|string|max:255|unique:a_p_i_s,app_name',
@@ -313,7 +314,7 @@ class APIController extends Controller
         ]);
 
         if (blank($validated['app_token'] ?? null)) {
-            $validated['app_token'] = $this->makeUniqueLicenseKey();
+            $validated['app_token'] = $licenses->makeUniqueLicenseKey();
         }
 
         // Convert checkbox values to integers
@@ -368,15 +369,6 @@ class APIController extends Controller
             'message' => 'API deleted successfully!',
             'data' => $aPI,
         ]);
-    }
-
-    private function makeUniqueLicenseKey(): string
-    {
-        do {
-            $key = 'is_license_'.bin2hex(random_bytes(48));
-        } while (API::query()->where('app_token', $key)->exists());
-
-        return $key;
     }
 
     private function transcriberPackage(): array

@@ -3,12 +3,14 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class API extends Model
 {
     protected $table = 'a_p_i_s';
 
     protected $fillable = [
+        'user_id',
         'app_name',
         'app_token',
         'user_address',
@@ -32,4 +34,12 @@ class API extends Model
         'blacklisted_routes' => 'array',
         'is_active' => 'boolean',
     ];
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
 }

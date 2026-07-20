@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Models\UserPermissions;
 use App\Models\UserPositions;
+use App\Services\LicenseKeyService;
 use App\Traits\Gates;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -42,22 +43,23 @@ class UserManagerController extends Controller
         ]);
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request, LicenseKeyService $licenses): RedirectResponse
     {
         Gate::authorize('user.manage-users');
 
-        User::create($request->validate([
+        $user = User::create($request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', Rule::unique(User::class)],
             'password' => ['required', 'string', Password::defaults()],
             'position_id' => ['nullable', 'integer', Rule::exists(UserPositions::class, 'id')],
             'user_status' => ['nullable', 'string', Rule::in(['active', 'banned', 'deactivated'])],
         ]));
+        $licenses->syncStatusForUser($user);
 
         return back()->with('success', 'User created.');
     }
 
-    public function update(Request $request, User $user): RedirectResponse
+    public function update(Request $request, User $user, LicenseKeyService $licenses): RedirectResponse
     {
         Gate::authorize('user.manage-users');
 
@@ -74,6 +76,7 @@ class UserManagerController extends Controller
         }
 
         $user->update($validated);
+        $licenses->syncStatusForUser($user);
 
         return back()->with('success', 'User updated.');
     }

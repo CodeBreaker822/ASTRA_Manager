@@ -37,7 +37,7 @@ class WorkspaceController extends Controller
         ]);
 
         return redirect()->route('workspace.show', $project)
-            ->with('success', 'Transcript project created.');
+            ->with('toast', ['type' => 'success', 'message' => 'Transcript project created.']);
     }
 
     public function update(Request $request, TranscriptProject $project): RedirectResponse
@@ -50,7 +50,7 @@ class WorkspaceController extends Controller
 
         $project->update(['title' => $validated['title']]);
 
-        return back()->with('success', 'Transcript project renamed.');
+        return back()->with('toast', ['type' => 'success', 'message' => 'Transcript project renamed.']);
     }
 
     public function destroy(Request $request, TranscriptProject $project): RedirectResponse
@@ -60,7 +60,7 @@ class WorkspaceController extends Controller
         $project->delete();
 
         return redirect()->route('workspace.index')
-            ->with('success', 'Transcript project deleted.');
+            ->with('toast', ['type' => 'success', 'message' => 'Transcript project deleted.']);
     }
 
     private function renderWorkspace(
@@ -100,6 +100,10 @@ class WorkspaceController extends Controller
                         'raw_text' => $transcript->raw_text,
                         'cleaned_text' => $transcript->cleaned_text,
                         'summary_text' => $transcript->summary_text,
+                        'polish_status' => $transcript->polish_status,
+                        'polish_error_message' => $transcript->polish_error_message,
+                        'summary_status' => $transcript->summary_status,
+                        'summary_error_message' => $transcript->summary_error_message,
                         'processing_log' => $transcript->processing_log ?? [],
                         'sections' => $transcript->sections
                             ->map(fn (TranscriptSection $section): array => [

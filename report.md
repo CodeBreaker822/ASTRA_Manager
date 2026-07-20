@@ -136,3 +136,123 @@ Deferred by design:
 
 - Live PayMongo checkout requires setting `PAYMONGO_SECRET_KEY`, `PAYMONGO_WEBHOOK_SECRET`, and plan amounts in centavos (`PAYMONGO_PRO_AMOUNT`, `PAYMONGO_TEAM_AMOUNT`).
 - Optional dark mode was not implemented; JERVA remains light-first per the plan.
+
+# Processing UI Parity Report
+
+## Phase 1 - Foundation
+
+Status: Complete
+
+- Added workspace-native toast support with the desktop timing, colors, close behavior, and mount point.
+- Added `ProcessingButton` for the desktop `Processing...` spinner pattern.
+- Added polling lifecycle composable with 3s active polling and idle stop behavior.
+- Replaced persistent workspace action banners with toasts plus the dedicated quota banner.
+- Added the destructive delete confirmation dialog copy from the plan.
+- Updated project create/rename/delete flashes to use the `toast` payload shape.
+
+Verification:
+
+- Workspace tests passed.
+- Vue type-check passed.
+- Full Pest suite previously passed after Phase 1.
+
+## Phase 2 - Upload Flow Parity
+
+Status: Complete
+
+- Added per-user license provisioning and suspension sync.
+- Added `WebApiTranscriptionClient` to route web transcription through the existing `/api/transcribe` async pipeline with the user's server-side license.
+- Updated web upload endpoints to accept desktop-style batched `audio[]` plus `clip_index[]`, `clip_start_ms[]`, and `clip_end_ms[]`.
+- Kept web entitlement/quota checks in the web layer and mirrored the API 20-clip / 20-minute batch guard.
+- Refactored `WebTranscriptProcessor` so web transcription no longer calls speech providers directly; it maps API job results into transcript sections.
+- Added cancel passthrough for queued/processing web transcripts.
+- Added browser-side fixed 60-second audio slicing, WAV re-encode, XHR upload progress, Start/Pause/Continue/Retry/Cancel transport controls, and pending upload clip cards.
+- Trimmed bundled FFmpeg assets to `ffmpeg/bin/ffmpeg.exe` plus license/readme; it is not used for provider work.
+
+Verification:
+
+- Focused workspace/web transcription tests passed: 10 tests, 40 assertions.
+- Full Pest suite passed: 62 tests, 260 assertions.
+- Targeted PHPStan passed for the Phase 2 backend changes.
+- Vue type-check passed.
+- Vite production build passed.
+- Banned-string/class grep for the web workspace/backend slice returned zero matches.
+- Vite build still prints upstream Rolldown annotation warnings from `reka-ui/@vueuse`.
+
+## Phase 3 - Live Recording Parity
+
+Status: Complete
+
+- Added `useLiveRecorder` for isolated live recording state, separate from upload state.
+- Added the two-line Live button states: "Listening" / "Ready to capture", "Recording" / "Stop recording", "Requesting microphone", and unavailable detail behavior.
+- Added 100ms elapsed timer, current segment range, segment progress bar, and support line states.
+- Kept 15-second `MediaRecorder` chunks routed to `/workspace/{project}/chunk`, which now flows through the existing `/api/transcribe` pipeline via Phase 2.
+- Added live pending clip cards with "Clip {n}", range labels, Waiting/Sending/Saved/Error pills, and blue progress bars.
+- Added mic-denial and chunk-failure handling with the required toast strings and automatic recording stop on failed chunk save.
+
+Verification:
+
+- Focused workspace/web transcription tests passed: 10 tests, 40 assertions.
+- Vue type-check passed.
+- Banned-string/class grep for the web workspace/backend slice returned zero matches.
+
+## Phase 4 - Transcript Actions Parity
+
+Status: Complete
+
+- Added transcript action status fields for `polish_status`, `polish_error_message`, `summary_status`, and `summary_error_message`.
+- Converted web polish and summary actions to queued jobs so dialogs can close and polling can reflect progress.
+- Routed web polishing through `/api/polish` with the user's server-side license.
+- Kept summarization in the queued web text-fixer path, as planned.
+- Updated workspace/status payloads with action status and error fields.
+- Rebuilt the polish modal with preset buttons, exact instruction payloads, custom instructions, the required validation copy, and replacement warning.
+- Rebuilt the summary modal around "Ready", "Summarizing...", "Complete", and "Failed" states with source selection and indeterminate progress.
+- Replaced the export dialog with an upward-opening export menu, source toggle, blob downloads, filename detection, and export toasts.
+- Added the shared `Processing...` loader pattern to export while a download is being prepared.
+- Replaced the fake transcript-card progress bar with the planned indeterminate processing indicator and failed-state message/retry surface.
+- Added backend guards so empty transcripts cannot queue polish or summary work if a browser check is bypassed.
+
+Verification:
+
+- Migrations applied locally with `artisan migrate --force`.
+- Focused workspace/web transcription tests passed: 14 tests, 56 assertions.
+- Full Pest suite passed: 66 tests, 276 assertions.
+- Targeted PHPStan passed for Phase 4 backend changes.
+- Vue type-check passed.
+- Vite production build passed.
+- Banned-string/class grep for the web workspace/backend slice returned zero matches.
+- Vite build still prints upstream Rolldown annotation warnings from `reka-ui/@vueuse`.
+
+## Phase 5 - Chrome Parity
+
+Status: Complete
+
+- Added focus handling, ESC close, backdrop close, focus return, `role="dialog"`, `aria-modal`, and body scroll lock for pending clips and processing log slide-overs.
+- Updated no-project empty state copy to "Transcription workspace", "Hi, what are we transcribing today?", and the exact plan body copy.
+- Updated project-with-no-activity empty state copy to "Great. How do you want to add audio?" and the exact plan body copy.
+- Updated processing-log empty copy to "No processing logs found for {project}."
+- Updated `WorkspacePreview.vue` to use the new indeterminate processing indicator.
+
+Verification:
+
+- Focused workspace/web transcription tests passed: 12 tests, 50 assertions.
+- Vue type-check passed.
+
+## Phase 6 - Parity Review & Hardening
+
+Status: Complete for automated checks
+
+- Ran the web workspace/backend exclusion sweep for banned offline/ASTRA strings and removed stale fake progress markers.
+- Re-ran the full Pest suite after Phases 3-5.
+- Re-ran the Vite production build after Phases 3-5.
+
+Verification:
+
+- Full Pest suite passed: 66 tests, 276 assertions.
+- Vite production build passed.
+- Banned-string/class grep for the web workspace/backend slice returned zero matches.
+- Vite build still prints upstream Rolldown annotation warnings from `reka-ui/@vueuse`.
+
+Manual follow-up:
+
+- The side-by-side desktop parity walkthrough from `PROCESSING_UI_PLAN.md` section 10 still needs a browser session and desktop app session to verify interaction feel, focus travel, and real microphone/upload behavior beyond automated checks.

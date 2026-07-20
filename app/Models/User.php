@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
@@ -83,5 +84,13 @@ class User extends Authenticatable implements PasskeyUser
     public function billingTransactions(): HasMany
     {
         return $this->hasMany(BillingTransaction::class);
+    }
+
+    /**
+     * @return HasOne<API, $this>
+     */
+    public function license(): HasOne
+    {
+        return $this->hasOne(API::class);
     }
 }

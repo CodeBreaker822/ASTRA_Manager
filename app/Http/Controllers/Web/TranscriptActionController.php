@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessWebPolishJob;
+use App\Jobs\ProcessWebSummarizeJob;
 use App\Models\Transcript;
 use App\Models\TranscriptProject;
 use App\Services\EntitlementService;
@@ -27,6 +29,10 @@ class TranscriptActionController extends Controller
             return $this->upgradeRequired('Transcript polishing is not included in your current plan.');
         }
 
+        if (! $this->hasRawTranscript($transcript)) {
+            return response()->json(['message' => 'No raw transcript is ready to polish yet.'], 422);
+        }
+
         $validated = $request->validate([
             'instruction' => ['nullable', 'string', 'max:4000'],
             'preset' => ['nullable', 'string', 'in:english,filipino,grammar,translate_fix,custom'],
@@ -37,10 +43,21 @@ class TranscriptActionController extends Controller
             (string) ($validated['instruction'] ?? ''),
         );
 
+        if (trim($instruction) === '' || mb_strlen(trim($instruction)) < 3) {
+            return response()->json(['message' => 'Enter instructions before polishing.'], 422);
+        }
+
+        $transcript->forceFill([
+            'polish_status' => 'processing',
+            'polish_error_message' => null,
+        ])->save();
+        $processor->appendLog($transcript, 'polishing', 'Processing');
+        ProcessWebPolishJob::dispatch($transcript->id, $instruction);
+
         return response()->json([
-            'message' => 'Transcript polished.',
-            'text' => $processor->polish($transcript, $instruction),
-        ]);
+            'message' => 'Polishing',
+            'transcript' => $this->transcriptPayload($transcript->fresh()),
+        ], 202);
     }
 
     public function summarize(
@@ -56,14 +73,25 @@ class TranscriptActionController extends Controller
             return $this->upgradeRequired('Transcript summaries are not included in your current plan.');
         }
 
+        if (! $this->hasRawTranscript($transcript)) {
+            return response()->json(['message' => 'The transcript could not be summarized.'], 422);
+        }
+
         $validated = $request->validate([
             'source' => ['nullable', 'string', 'in:raw,cleaned'],
         ]);
 
+        $transcript->forceFill([
+            'summary_status' => 'processing',
+            'summary_error_message' => null,
+        ])->save();
+        $processor->appendLog($transcript, 'summarizing', 'Processing');
+        ProcessWebSummarizeJob::dispatch($transcript->id, (string) ($validated['source'] ?? 'raw'));
+
         return response()->json([
-            'message' => 'Transcript summarized.',
-            'text' => $processor->summarize($transcript, (string) ($validated['source'] ?? 'raw')),
-        ]);
+            'message' => 'Summarizing...',
+            'transcript' => $this->transcriptPayload($transcript->fresh()),
+        ], 202);
     }
 
     public function export(
@@ -110,14 +138,53 @@ class TranscriptActionController extends Controller
         ], 402);
     }
 
+    private function hasRawTranscript(Transcript $transcript): bool
+    {
+        return filled($transcript->raw_text)
+            || $transcript->sections()->whereNotNull('text')->exists();
+    }
+
     private function polishInstruction(string $preset, string $custom): string
     {
         return match ($preset) {
-            'english' => 'Translate this transcript to English. Preserve names, timestamps, meaning, and speaker intent.',
-            'filipino' => 'Translate this transcript to Filipino. Preserve names, timestamps, meaning, and speaker intent.',
-            'translate_fix' => 'Translate this transcript to English and fix grammar while preserving meaning and names.',
-            'custom' => trim($custom) !== '' ? trim($custom) : 'Polish this transcript while preserving meaning and names.',
-            default => 'Fix grammar, punctuation, and readability while preserving meaning and names.',
+            'english' => 'Translate every non-English part of the transcript into clear English. Treat Cebuano, Bisaya, Filipino, Tagalog, and mixed code-switching as source language. Do not leave source-language words untranslated unless they are names, offices, agencies, titles, acronyms, places, or proper nouns. Preserve meaning, speaker intent, numbers, and time order.',
+            'filipino' => 'Translate every non-Filipino part of the transcript into clear Filipino. Treat English, Cebuano, Bisaya, and mixed code-switching as source language. Do not leave source-language words untranslated unless they are names, offices, agencies, titles, acronyms, places, or proper nouns. Preserve meaning, speaker intent, numbers, and time order.',
+            'translate_fix' => 'Translate every non-English sentence, phrase, or word into polished English, then fix grammar, spelling, punctuation, capitalization, and obvious speech-to-text mistakes. Preserve meaning, speaker intent, names, titles, numbers, and time order.',
+            'custom' => trim($custom),
+            default => 'Fix grammar, spelling, punctuation, capitalization, and obvious speech-to-text mistakes without translating the transcript. Preserve the original language choices, meaning, names, titles, numbers, and time order.',
         };
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function transcriptPayload(Transcript $transcript): array
+    {
+        $transcript->loadMissing(['sections' => fn ($query) => $query->orderBy('position')]);
+
+        return [
+            'id' => $transcript->id,
+            'source' => $transcript->source,
+            'status' => $transcript->status,
+            'duration_seconds' => $transcript->duration_seconds,
+            'raw_text' => $transcript->raw_text,
+            'cleaned_text' => $transcript->cleaned_text,
+            'summary_text' => $transcript->summary_text,
+            'polish_status' => $transcript->polish_status,
+            'polish_error_message' => $transcript->polish_error_message,
+            'summary_status' => $transcript->summary_status,
+            'summary_error_message' => $transcript->summary_error_message,
+            'processing_log' => $transcript->processing_log ?? [],
+            'sections' => $transcript->sections
+                ->map(fn ($section): array => [
+                    'id' => $section->id,
+                    'position' => $section->position,
+                    'text' => $section->text,
+                    'cleaned_text' => $section->cleaned_text,
+                    'started_at_ms' => $section->started_at_ms,
+                    'ended_at_ms' => $section->ended_at_ms,
+                ])
+                ->all(),
+        ];
     }
 }

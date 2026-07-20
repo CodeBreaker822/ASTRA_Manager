@@ -20,6 +20,10 @@ use Illuminate\Support\Carbon;
  * @property string|null $summary_text
  * @property string|null $audio_path
  * @property array<int, array<string, mixed>>|null $processing_log
+ * @property string $polish_status
+ * @property string|null $polish_error_message
+ * @property string $summary_status
+ * @property string|null $summary_error_message
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Collection<int, TranscriptSection> $sections
@@ -34,6 +38,10 @@ use Illuminate\Support\Carbon;
     'summary_text',
     'audio_path',
     'processing_log',
+    'polish_status',
+    'polish_error_message',
+    'summary_status',
+    'summary_error_message',
 ])]
 class Transcript extends Model
 {
