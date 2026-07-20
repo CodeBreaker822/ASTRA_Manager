@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class UserPositions extends Model
 {
@@ -20,13 +21,13 @@ class UserPositions extends Model
     /**
      * The attributes that should be cast.
      *
-     * @var array
+     * @var array<string, string>
      */
     protected $casts = [
         'is_active' => 'boolean',
     ];
 
-    public function setIconAttribute($value)
+    public function setIconAttribute(mixed $value): void
     {
         if ($value === null || $value === '') {
             $this->attributes['icon'] = null;
@@ -41,7 +42,7 @@ class UserPositions extends Model
             : base64_encode($gzipped);
     }
 
-    public function getIconAttribute($value)
+    public function getIconAttribute(mixed $value): mixed
     {
         if ($value === null || $value === '') {
             return $value;
@@ -58,12 +59,18 @@ class UserPositions extends Model
         return $decodedGz === false ? $value : $decodedGz;
     }
 
-    public function user()
+    /**
+     * @return HasMany<User, $this>
+     */
+    public function user(): HasMany
     {
         return $this->hasMany(User::class, 'position_id', 'id');
     }
 
-    public function permissions()
+    /**
+     * @return HasMany<UserPermissions, $this>
+     */
+    public function permissions(): HasMany
     {
         return $this->hasMany(UserPermissions::class, 'position_id', 'id');
     }

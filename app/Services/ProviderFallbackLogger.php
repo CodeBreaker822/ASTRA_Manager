@@ -76,7 +76,7 @@ class ProviderFallbackLogger
             TranscriptionApiRequestLog::query()->create([
                 'request_id' => (string) Str::uuid(),
                 'api_id' => $license?->id,
-                'app_name' => $license?->app_name ?? ($data['operation'] === 'chatbot' ? 'AIMS Chatbot' : null),
+                'app_name' => $license?->app_name ?? ($data['operation'] === 'chatbot' ? 'JERVA Chatbot' : null),
                 'license_token_prefix' => $this->tokenPrefix($request?->bearerToken()),
                 'license_token_hash' => $this->tokenHash($request?->bearerToken()),
                 'operation' => $data['operation'].'_provider',

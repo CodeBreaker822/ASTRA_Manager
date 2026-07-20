@@ -24,7 +24,7 @@ class UserManagerController extends Controller
     {
         Gate::authorize('user.manage-users');
 
-        return Inertia::render('settings/Users', [
+        return Inertia::render('dashboard/Users', [
             'users' => User::query()
                 ->with('position:id,position_name')
                 ->select(['id', 'name', 'email', 'email_verified_at', 'position_id', 'user_status', 'created_at', 'updated_at'])
@@ -157,6 +157,9 @@ class UserManagerController extends Controller
         return back()->with('success', 'Position deleted.');
     }
 
+    /**
+     * @param  array<int, string>  $permissions
+     */
     protected function syncPermissions(UserPositions $position, array $permissions): void
     {
         UserPermissions::query()->where('position_id', $position->id)->delete();

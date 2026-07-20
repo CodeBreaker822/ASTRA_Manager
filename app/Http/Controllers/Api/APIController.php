@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Inertia\Inertia;
+use Inertia\Response;
 use Throwable;
 
 class APIController extends Controller
@@ -23,18 +25,34 @@ class APIController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index(AppSettingsService $settings)
+    public function index(AppSettingsService $settings): Response
     {
-        $apis = API::all();
+        $apis = API::query()
+            ->latest()
+            ->get()
+            ->map(fn (API $api): array => [
+                'id' => $api->id,
+                'app_name' => $api->app_name,
+                'app_token' => $api->app_token,
+                'token_suffix' => Str::of((string) $api->app_token)->substr(-6)->toString(),
+                'can_post' => $api->can_post,
+                'can_get' => $api->can_get,
+                'can_put' => $api->can_put,
+                'can_patch' => $api->can_patch,
+                'can_delete' => $api->can_delete,
+                'blacklisted_ips' => $api->blacklisted_ips ?? [],
+                'blacklisted_routes' => $api->blacklisted_routes ?? [],
+                'is_active' => $api->is_active,
+            ]);
 
-        return view('settings.system_pages.api', [
+        return Inertia::render('dashboard/Api', [
             'apis' => $apis,
-            'transcriptionProviders' => $settings->providerCards(),
+            'transcriptionProviders' => array_values($settings->providerCards()),
             'transcriberPackage' => $this->transcriberPackage(),
         ]);
     }
 
-    public function updateTranscriptionProviders(Request $request, AppSettingsService $settings)
+    public function updateTranscriptionProviders(Request $request, AppSettingsService $settings): JsonResponse
     {
         $validated = $request->validate([
             'providers' => ['required', 'array'],
@@ -193,11 +211,11 @@ class APIController extends Controller
             ->sort()
             ->values()
             ->all();
-        $submittedProviders = collect($validated['providers'])
-            ->map(fn (mixed $settingId): int => (int) $settingId)
-            ->sort()
-            ->values()
-            ->all();
+        $submittedProviders = array_map(
+            fn (mixed $settingId): int => (int) $settingId,
+            $validated['providers'],
+        );
+        sort($submittedProviders);
 
         if ($configuredProviders !== $submittedProviders) {
             throw ValidationException::withMessages([
@@ -291,7 +309,7 @@ class APIController extends Controller
         ]);
     }
 
-    public function generateLicenseKey(LicenseKeyService $licenses)
+    public function generateLicenseKey(LicenseKeyService $licenses): JsonResponse
     {
         return response()->json([
             'success' => true,
@@ -299,7 +317,7 @@ class APIController extends Controller
         ]);
     }
 
-    public function store(Request $request, LicenseKeyService $licenses)
+    public function store(Request $request, LicenseKeyService $licenses): JsonResponse
     {
         $validated = $request->validate([
             'app_name' => 'required|string|max:255|unique:a_p_i_s,app_name',
@@ -317,12 +335,11 @@ class APIController extends Controller
             $validated['app_token'] = $licenses->makeUniqueLicenseKey();
         }
 
-        // Convert checkbox values to integers
-        $validated['can_post'] = isset($validated['can_post']) ? 1 : 0;
-        $validated['can_get'] = isset($validated['can_get']) ? 1 : 0;
-        $validated['can_put'] = isset($validated['can_put']) ? 1 : 0;
-        $validated['can_patch'] = isset($validated['can_patch']) ? 1 : 0;
-        $validated['can_delete'] = isset($validated['can_delete']) ? 1 : 0;
+        $validated['can_post'] = $request->boolean('can_post');
+        $validated['can_get'] = $request->boolean('can_get');
+        $validated['can_put'] = $request->boolean('can_put');
+        $validated['can_patch'] = $request->boolean('can_patch');
+        $validated['can_delete'] = $request->boolean('can_delete');
 
         $api = API::create($validated);
 
@@ -333,10 +350,13 @@ class APIController extends Controller
         ]);
     }
 
-    public function updateStatus(Request $request, $id)
+    public function updateStatus(Request $request, int|string $id): JsonResponse
     {
-        $api = API::findOrFail($id);
-        $api->is_active = $request->is_active;
+        $validated = $request->validate([
+            'is_active' => ['required', 'boolean'],
+        ]);
+        $api = API::query()->findOrFail($id);
+        $api->is_active = (bool) $validated['is_active'];
         $api->save();
 
         return response()->json([
@@ -346,11 +366,15 @@ class APIController extends Controller
         ]);
     }
 
-    public function updateMethod(Request $request, $id)
+    public function updateMethod(Request $request, int|string $id): JsonResponse
     {
-        $api = API::findOrFail($id);
-        $method = 'can_'.$request->method;
-        $api->$method = $request->enabled;
+        $validated = $request->validate([
+            'method' => ['required', 'in:post,get,put,patch,delete'],
+            'enabled' => ['required', 'boolean'],
+        ]);
+        $api = API::query()->findOrFail($id);
+        $method = 'can_'.$validated['method'];
+        $api->{$method} = (bool) $validated['enabled'];
         $api->save();
 
         return response()->json([
@@ -360,7 +384,7 @@ class APIController extends Controller
         ]);
     }
 
-    public function destroy(API $aPI)
+    public function destroy(API $aPI): JsonResponse
     {
         $aPI->delete();
 
@@ -371,6 +395,9 @@ class APIController extends Controller
         ]);
     }
 
+    /**
+     * @return array{version: string|null, zipfile: string|null}
+     */
     private function transcriberPackage(): array
     {
         $directory = Storage::disk('local')->path('transcriber');
@@ -484,9 +511,14 @@ class APIController extends Controller
                     throw new \RuntimeException('The Transcriber App Package directory entry could not be read.');
                 }
 
-                $name = fread($handle, (int) $entry['nameLength']);
+                $nameLength = (int) $entry['nameLength'];
                 $extra = (int) $entry['extraLength'];
                 $comment = (int) $entry['commentLength'];
+                if ($nameLength < 1) {
+                    $name = '';
+                } else {
+                    $name = fread($handle, $nameLength);
+                }
 
                 if ($extra > 0) {
                     fseek($handle, $extra, SEEK_CUR);
@@ -513,7 +545,7 @@ class APIController extends Controller
 
     private function readZipEntryContents(mixed $handle, int $localOffset, int $method, int $compressedSize): string
     {
-        if ($compressedSize > 1024 * 1024) {
+        if ($compressedSize < 0 || $compressedSize > 1024 * 1024) {
             throw new \RuntimeException('The Transcriber App Package version.json file is too large.');
         }
 
@@ -531,7 +563,11 @@ class APIController extends Controller
         }
 
         fseek($handle, (int) $local['nameLength'] + (int) $local['extraLength'], SEEK_CUR);
-        $contents = $compressedSize === 0 ? '' : fread($handle, $compressedSize);
+        if ($compressedSize === 0) {
+            return '';
+        }
+
+        $contents = fread($handle, $compressedSize);
 
         if (! is_string($contents) || strlen($contents) !== $compressedSize) {
             throw new \RuntimeException('The Transcriber App Package version.json file could not be read.');

@@ -28,8 +28,8 @@ class AwsTranscribeSpeechToTextService
     {
         $credential = $this->credential();
         $file = $this->audioFile($audio);
-        $objectKey = 'aims-transcriber/'.Str::uuid().'-'.preg_replace('/[^A-Za-z0-9._-]/', '_', $file['name']);
-        $jobName = 'aims-'.str_replace('-', '', (string) Str::uuid());
+        $objectKey = 'jerva-transcriber/'.Str::uuid().'-'.preg_replace('/[^A-Za-z0-9._-]/', '_', $file['name']);
+        $jobName = 'jerva-'.str_replace('-', '', (string) Str::uuid());
 
         try {
             $this->s3($credential)->putObject([

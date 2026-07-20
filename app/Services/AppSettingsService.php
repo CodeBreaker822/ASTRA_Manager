@@ -9,9 +9,9 @@ class AppSettingsService
 {
     private const RUNPOD_API_BASE_URL = 'https://api.runpod.ai/v2';
 
-    public const PUBLIC_PROVIDER_ID = 'aims_server';
+    public const PUBLIC_PROVIDER_ID = 'jerva_server';
 
-    public const PUBLIC_PROVIDER_NAME = 'AIMS Server';
+    public const PUBLIC_PROVIDER_NAME = 'JERVA Server';
 
     public const PUBLIC_MODEL = 'Free-Model-Fast';
 

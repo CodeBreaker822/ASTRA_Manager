@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { Link, usePage } from '@inertiajs/vue3';
-import { BriefcaseBusiness, LayoutGrid } from '@lucide/vue';
+import {
+    BriefcaseBusiness,
+    FileText,
+    KeyRound,
+    LayoutGrid,
+    Newspaper,
+    Tags,
+    UsersRound,
+} from '@lucide/vue';
 import { computed } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import NavFooter from '@/components/NavFooter.vue';
@@ -37,6 +45,57 @@ const mainNavItems = computed<NavItem[]>(() => [
         : []),
 ]);
 
+const adminNavItems = computed<NavItem[]>(() => [
+    ...(page.props.auth.canManageUsers || page.props.auth.canManagePermissions
+        ? [
+              {
+                  title: 'User Management',
+                  href: '/dashboard/users',
+                  icon: UsersRound,
+              },
+          ]
+        : []),
+    ...(page.props.auth.canManageApi
+        ? [
+              {
+                  title: 'API Management',
+                  href: '/dashboard/api',
+                  icon: KeyRound,
+              },
+          ]
+        : []),
+]);
+
+const cmsNavItems = computed<NavItem[]>(() => [
+    ...(page.props.auth.canManageBlog
+        ? [
+              {
+                  title: 'Blog Manager',
+                  href: '/dashboard/blog',
+                  icon: Newspaper,
+              },
+          ]
+        : []),
+    ...(page.props.auth.canManagePricing
+        ? [
+              {
+                  title: 'Pricing Manager',
+                  href: '/dashboard/pricing',
+                  icon: Tags,
+              },
+          ]
+        : []),
+    ...(page.props.auth.canManagePages
+        ? [
+              {
+                  title: 'Page Manager',
+                  href: '/dashboard/pages/features',
+                  icon: FileText,
+              },
+          ]
+        : []),
+]);
+
 const footerNavItems: NavItem[] = [];
 </script>
 
@@ -62,6 +121,16 @@ const footerNavItems: NavItem[] = [];
 
         <SidebarContent>
             <NavMain :items="mainNavItems" />
+            <NavMain
+                v-if="adminNavItems.length"
+                label="Admin Management"
+                :items="adminNavItems"
+            />
+            <NavMain
+                v-if="cmsNavItems.length"
+                label="CMS Managers"
+                :items="cmsNavItems"
+            />
         </SidebarContent>
 
         <SidebarFooter>

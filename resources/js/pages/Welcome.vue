@@ -21,12 +21,8 @@ import { dashboard, login } from '@/routes';
                     <AppLogoIcon class="size-7 fill-current" />
                 </div>
 
-                <h1 id="portal-title" class="text-xl font-semibold">
-                    ASTRA AI Server
-                </h1>
-                <p class="mt-1 text-sm text-muted-foreground">
-                    Portal
-                </p>
+                <h1 id="portal-title" class="text-xl font-semibold">JERVA</h1>
+                <p class="mt-1 text-sm text-muted-foreground">Portal</p>
             </div>
 
             <Link

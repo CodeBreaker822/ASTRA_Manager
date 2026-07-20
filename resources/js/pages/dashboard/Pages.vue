@@ -11,23 +11,127 @@ import DashboardLayout from '@/layouts/dashboard/Layout.vue';
 const props = defineProps<{
     pageKey: 'features' | 'download';
     title: string;
-    content: Record<string, any>;
+    content: Record<string, unknown>;
 }>();
 
 defineOptions({
     layout: DashboardLayout,
 });
 
-const form = useForm({
-    content: structuredClone(props.content),
-});
-
 const isFeatures = computed(() => props.pageKey === 'features');
 const updateUrl = computed(() => `/dashboard/pages/${props.pageKey}`);
+const form = useForm({
+    content: isFeatures.value
+        ? featuresContent(props.content)
+        : downloadContent(props.content),
+});
 
 const submit = () => {
     form.put(updateUrl.value, { preserveScroll: true });
 };
+
+function objectValue(value: unknown): Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+}
+
+function stringValue(value: unknown): string {
+    return typeof value === 'string' ? value : '';
+}
+
+function stringArray(value: unknown, count = 0): string[] {
+    const items = Array.isArray(value)
+        ? value.map((item) => stringValue(item))
+        : [];
+
+    while (items.length < count) {
+        items.push('');
+    }
+
+    return items;
+}
+
+function heroContent(content: Record<string, unknown>) {
+    const hero = objectValue(content.hero);
+
+    return {
+        eyebrow: stringValue(hero.eyebrow),
+        title: stringValue(hero.title),
+        intro: stringValue(hero.intro),
+    };
+}
+
+function featuresContent(content: Record<string, unknown>) {
+    const rows = Array.isArray(content.feature_rows)
+        ? content.feature_rows.map((item) => {
+              const row = objectValue(item);
+
+              return {
+                  eyebrow: stringValue(row.eyebrow),
+                  icon: stringValue(row.icon) || 'Mic',
+                  title: stringValue(row.title),
+                  body: stringValue(row.body),
+                  bullets: stringArray(row.bullets, 3),
+              };
+          })
+        : [];
+    const cta = objectValue(content.cta);
+
+    return {
+        hero: heroContent(content),
+        feature_rows: rows,
+        cta: {
+            title: stringValue(cta.title),
+            body: stringValue(cta.body),
+            button_label: stringValue(cta.button_label),
+        },
+    };
+}
+
+function downloadContent(content: Record<string, unknown>) {
+    const downloadCard = objectValue(content.download_card);
+    const account = objectValue(content.account);
+    const requirements = Array.isArray(content.requirements)
+        ? content.requirements.map((item) => {
+              const requirement = objectValue(item);
+
+              return {
+                  icon: stringValue(requirement.icon) || 'Laptop',
+                  title: stringValue(requirement.title),
+                  body: stringValue(requirement.body),
+              };
+          })
+        : [];
+    const faq = Array.isArray(content.faq)
+        ? content.faq.map((item) => {
+              const row = objectValue(item);
+
+              return {
+                  question: stringValue(row.question),
+                  answer: stringValue(row.answer),
+              };
+          })
+        : [];
+
+    return {
+        hero: heroContent(content),
+        download_card: {
+            title: stringValue(downloadCard.title),
+            body: stringValue(downloadCard.body),
+            button_label: stringValue(downloadCard.button_label),
+            empty_label: stringValue(downloadCard.empty_label),
+        },
+        requirements,
+        account: {
+            title: stringValue(account.title),
+            body: stringValue(account.body),
+            bullets: stringArray(account.bullets, 2),
+            button_label: stringValue(account.button_label),
+        },
+        faq,
+    };
+}
 </script>
 
 <template>

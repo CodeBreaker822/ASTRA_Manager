@@ -55,6 +55,20 @@ defineOptions({
     layout: DashboardLayout,
 });
 
+const pricingContent = {
+    hero: {
+        eyebrow: props.pricingContent?.hero?.eyebrow ?? '',
+        title: props.pricingContent?.hero?.title ?? '',
+        intro: props.pricingContent?.hero?.intro ?? '',
+    },
+    faq: Array.isArray(props.pricingContent?.faq)
+        ? props.pricingContent.faq.map((item) => ({
+              question: item.question ?? '',
+              answer: item.answer ?? '',
+          }))
+        : [],
+};
+
 const form = useForm({
     tiers: props.tiers.map((tier) => ({
         ...tier,
@@ -72,7 +86,7 @@ const form = useForm({
         label: row.label,
         tier_keys: [...row.tier_keys],
     })),
-    pricingContent: structuredClone(props.pricingContent),
+    pricingContent,
 });
 
 const exportFormats = ['txt', 'docx', 'xlsx'];

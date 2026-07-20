@@ -55,13 +55,16 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('workspace/{project}/transcripts/{transcript}/summarize', [TranscriptActionController::class, 'summarize'])->name('workspace.transcripts.summarize');
     Route::get('workspace/{project}/transcripts/{transcript}/export', [TranscriptActionController::class, 'export'])->name('workspace.transcripts.export');
 
-    Route::get('settings/users', [UserManagerController::class, 'index'])->name('settings.users.index');
-    Route::post('settings/users', [UserManagerController::class, 'store'])->name('settings.users.store');
-    Route::put('settings/users/{user}', [UserManagerController::class, 'update'])->name('settings.users.update');
-    Route::delete('settings/users/{user}', [UserManagerController::class, 'destroy'])->name('settings.users.destroy');
-    Route::post('settings/users/positions', [UserManagerController::class, 'storePosition'])->name('settings.users.positions.store');
-    Route::put('settings/users/positions/{position}', [UserManagerController::class, 'updatePosition'])->name('settings.users.positions.update');
-    Route::delete('settings/users/positions/{position}', [UserManagerController::class, 'destroyPosition'])->name('settings.users.positions.destroy');
+    Route::redirect('settings/users', 'dashboard/users');
+    Route::prefix('dashboard/users')->name('dashboard.users.')->group(function (): void {
+        Route::get('/', [UserManagerController::class, 'index'])->name('index');
+        Route::post('/', [UserManagerController::class, 'store'])->name('store');
+        Route::put('{user}', [UserManagerController::class, 'update'])->name('update');
+        Route::delete('{user}', [UserManagerController::class, 'destroy'])->name('destroy');
+        Route::post('positions', [UserManagerController::class, 'storePosition'])->name('positions.store');
+        Route::put('positions/{position}', [UserManagerController::class, 'updatePosition'])->name('positions.update');
+        Route::delete('positions/{position}', [UserManagerController::class, 'destroyPosition'])->name('positions.destroy');
+    });
 });
 
 require __DIR__.'/settings.php';

@@ -47,6 +47,14 @@ test('content editors can access only blog dashboard sections', function () {
         ->assertForbidden();
 });
 
+test('users with any assigned gate permission can access dashboard overview', function () {
+    $user = createDashboardUserWithPermissions(['certificates.view']);
+
+    $this->actingAs($user)
+        ->get(route('dashboard'))
+        ->assertOk();
+});
+
 test('super admin bypass can access dashboard sections when enabled', function () {
     config([
         'admin.email' => 'admin@example.com',

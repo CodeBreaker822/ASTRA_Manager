@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\DashboardAccessService;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -36,8 +37,10 @@ class HandleInertiaRequests extends Middleware
     public function share(Request $request): array
     {
         $user = $request->user();
+        $canAccessDashboard = app(DashboardAccessService::class)->canAccess($user);
         $canManageApi = $user?->can('API-manage_api') ?? false;
         $canManageUsers = $user?->can('user.manage-users') ?? false;
+        $canManagePermissions = $user?->can('user.manage-permissions') ?? false;
         $canManageBlog = $user?->can('cms.manage-blog') ?? false;
         $canManagePricing = $user?->can('cms.manage-pricing') ?? false;
         $canManagePages = $user?->can('cms.manage-pages') ?? false;
@@ -48,10 +51,11 @@ class HandleInertiaRequests extends Middleware
             'name' => config('app.name'),
             'auth' => [
                 'user' => $user,
-                'isAdmin' => $canManageApi || $canManageUsers || $canManageBlog || $canManagePricing || $canManagePages || $canViewCms,
+                'isAdmin' => $canAccessDashboard,
                 'canManageApi' => $canManageApi,
                 'canManageUsers' => $canManageUsers,
-                'canAccessDashboard' => $canViewCms || $canManageBlog || $canManagePricing || $canManagePages || $canManageUsers || $canManageApi,
+                'canManagePermissions' => $canManagePermissions,
+                'canAccessDashboard' => $canAccessDashboard,
                 'canManageBlog' => $canManageBlog,
                 'canManagePricing' => $canManagePricing,
                 'canManagePages' => $canManagePages,

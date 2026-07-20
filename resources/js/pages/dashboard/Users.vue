@@ -15,17 +15,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
-import {
-    index,
-    store,
-    update,
-    destroy,
-} from '@/routes/settings/users';
-import {
-    store as storePosition,
-    update as updatePosition,
-    destroy as destroyPosition,
-} from '@/routes/settings/users/positions';
+import DashboardLayout from '@/layouts/dashboard/Layout.vue';
 import type { User } from '@/types';
 
 type GateItem = {
@@ -49,14 +39,7 @@ type ManagedUser = User & {
 };
 
 defineOptions({
-    layout: {
-        breadcrumbs: [
-            {
-                title: 'User Manager',
-                href: index().url,
-            },
-        ],
-    },
+    layout: DashboardLayout,
 });
 
 defineProps<{
@@ -92,7 +75,7 @@ const positionForm = useForm({
 });
 
 const submitCreate = () => {
-    createForm.post(store().url, {
+    createForm.post('/dashboard/users', {
         preserveScroll: true,
         onSuccess: () => createForm.reset(),
     });
@@ -118,7 +101,7 @@ const cancelEdit = () => {
 };
 
 const submitEdit = (user: ManagedUser) => {
-    editForm.put(update(user).url, {
+    editForm.put(`/dashboard/users/${user.id}`, {
         preserveScroll: true,
         onSuccess: () => cancelEdit(),
     });
@@ -129,7 +112,7 @@ const deleteUser = (user: ManagedUser) => {
         return;
     }
 
-    router.delete(destroy(user).url, {
+    router.delete(`/dashboard/users/${user.id}`, {
         preserveScroll: true,
     });
 };
@@ -164,29 +147,38 @@ const submitPosition = (position?: Position) => {
     };
 
     if (position) {
-        positionForm.put(updatePosition(position).url, options);
+        positionForm.put(`/dashboard/users/positions/${position.id}`, options);
         return;
     }
 
-    positionForm.post(storePosition().url, options);
+    positionForm.post('/dashboard/users/positions', options);
 };
 
 const removePosition = (position: Position) => {
-    router.delete(destroyPosition(position).url, {
+    router.delete(`/dashboard/users/positions/${position.id}`, {
         preserveScroll: true,
     });
 };
 </script>
 
 <template>
-    <Head title="User Manager" />
+    <Head title="User Management" />
 
     <div class="space-y-4">
+        <div>
+            <h1 class="text-xl font-semibold text-slate-950">
+                User Management
+            </h1>
+            <p class="mt-1 text-sm text-slate-700">
+                Manage users, positions, and gate permissions for JERVA Web.
+            </p>
+        </div>
+
         <Card class="rounded-lg">
             <CardHeader>
-                <CardTitle>User Manager</CardTitle>
+                <CardTitle>Create User</CardTitle>
                 <CardDescription>
-                    Manage users, positions, and gate permissions for ASTRA AI Server.
+                    Add a new account and assign an initial position.
                 </CardDescription>
             </CardHeader>
             <CardContent>
@@ -196,7 +188,11 @@ const removePosition = (position: Position) => {
                 >
                     <div class="grid gap-2">
                         <Label for="new-name">Name</Label>
-                        <Input id="new-name" v-model="createForm.name" placeholder="Full name" />
+                        <Input
+                            id="new-name"
+                            v-model="createForm.name"
+                            placeholder="Full name"
+                        />
                         <InputError :message="createForm.errors.name" />
                     </div>
 
@@ -227,7 +223,7 @@ const removePosition = (position: Position) => {
                         <select
                             id="new-position"
                             v-model="createForm.position_id"
-                            class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                            class="h-9 rounded-md border border-input bg-background px-3 text-sm"
                         >
                             <option value="">No position</option>
                             <option
@@ -246,7 +242,7 @@ const removePosition = (position: Position) => {
                         <select
                             id="new-status"
                             v-model="createForm.user_status"
-                            class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                            class="h-9 rounded-md border border-input bg-background px-3 text-sm"
                         >
                             <option value="active">Active</option>
                             <option value="banned">Banned</option>
@@ -255,7 +251,11 @@ const removePosition = (position: Position) => {
                         <InputError :message="createForm.errors.user_status" />
                     </div>
 
-                    <Button type="submit" class="self-end" :disabled="createForm.processing">
+                    <Button
+                        type="submit"
+                        class="self-end"
+                        :disabled="createForm.processing"
+                    >
                         <Spinner v-if="createForm.processing" />
                         <Plus v-else class="size-4" />
                         Add
@@ -292,7 +292,11 @@ const removePosition = (position: Position) => {
                             <Input v-model="editForm.name" aria-label="Name" />
 
                             <div class="grid gap-2">
-                                <Input v-model="editForm.email" type="email" aria-label="Email" />
+                                <Input
+                                    v-model="editForm.email"
+                                    type="email"
+                                    aria-label="Email"
+                                />
                                 <Input
                                     v-model="editForm.password"
                                     type="password"
@@ -302,7 +306,7 @@ const removePosition = (position: Position) => {
 
                             <select
                                 v-model="editForm.position_id"
-                                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                                class="h-9 rounded-md border border-input bg-background px-3 text-sm"
                             >
                                 <option value="">No position</option>
                                 <option
@@ -316,7 +320,7 @@ const removePosition = (position: Position) => {
 
                             <select
                                 v-model="editForm.user_status"
-                                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                                class="h-9 rounded-md border border-input bg-background px-3 text-sm"
                             >
                                 <option value="active">Active</option>
                                 <option value="banned">Banned</option>
@@ -333,7 +337,12 @@ const removePosition = (position: Position) => {
                                     <Spinner v-if="editForm.processing" />
                                     <Save v-else class="size-4" />
                                 </Button>
-                                <Button type="button" size="icon" variant="outline" @click="cancelEdit">
+                                <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="outline"
+                                    @click="cancelEdit"
+                                >
                                     <X class="size-4" />
                                 </Button>
                             </div>
@@ -341,30 +350,52 @@ const removePosition = (position: Position) => {
 
                         <template v-else>
                             <div class="min-w-0">
-                                <div class="truncate font-medium">{{ user.name }}</div>
-                                <div class="text-sm text-muted-foreground lg:hidden">{{ user.email }}</div>
+                                <div class="truncate font-medium">
+                                    {{ user.name }}
+                                </div>
+                                <div
+                                    class="text-sm text-muted-foreground lg:hidden"
+                                >
+                                    {{ user.email }}
+                                </div>
                             </div>
 
-                            <div class="hidden truncate text-sm lg:block">{{ user.email }}</div>
+                            <div class="hidden truncate text-sm lg:block">
+                                {{ user.email }}
+                            </div>
 
                             <div class="text-sm">
-                                {{ user.position?.position_name || 'No position' }}
+                                {{
+                                    user.position?.position_name ||
+                                    'No position'
+                                }}
                             </div>
 
                             <div>
-                                <Badge :variant="user.user_status === 'active' ? 'default' : 'secondary'">
+                                <Badge
+                                    :variant="
+                                        user.user_status === 'active'
+                                            ? 'default'
+                                            : 'secondary'
+                                    "
+                                >
                                     {{
                                         user.user_status === 'banned'
                                             ? 'Banned'
                                             : user.user_status === 'deactivated'
-                                                ? 'Deactivated'
-                                                : 'Active'
+                                              ? 'Deactivated'
+                                              : 'Active'
                                     }}
                                 </Badge>
                             </div>
 
                             <div class="flex justify-end gap-2">
-                                <Button type="button" size="icon" variant="outline" @click="startEdit(user)">
+                                <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="outline"
+                                    @click="startEdit(user)"
+                                >
                                     <Pencil class="size-4" />
                                 </Button>
                                 <Button
@@ -387,7 +418,8 @@ const removePosition = (position: Position) => {
             <CardHeader>
                 <CardTitle>Positions And Gates</CardTitle>
                 <CardDescription>
-                    Permissions are assigned to positions, then users inherit access from their position.
+                    Permissions are assigned to positions, then users inherit
+                    access from their position.
                 </CardDescription>
             </CardHeader>
             <CardContent class="space-y-5">
@@ -399,7 +431,9 @@ const removePosition = (position: Position) => {
                             v-model="positionForm.position_name"
                             placeholder="Administrator"
                         />
-                        <InputError :message="positionForm.errors.position_name" />
+                        <InputError
+                            :message="positionForm.errors.position_name"
+                        />
                     </div>
 
                     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -408,7 +442,9 @@ const removePosition = (position: Position) => {
                             :key="category"
                             class="rounded-md border p-3"
                         >
-                            <div class="mb-3 flex items-center gap-2 text-sm font-medium">
+                            <div
+                                class="mb-3 flex items-center gap-2 text-sm font-medium"
+                            >
                                 <ShieldCheck class="size-4" />
                                 {{ category }}
                             </div>
@@ -420,17 +456,32 @@ const removePosition = (position: Position) => {
                                 <input
                                     type="checkbox"
                                     class="size-4"
-                                    :checked="positionForm.permissions.includes(gate.name)"
+                                    :checked="
+                                        positionForm.permissions.includes(
+                                            gate.name,
+                                        )
+                                    "
                                     @change="togglePermission(gate.name)"
-                                >
+                                />
                                 <span>{{ gate.label }}</span>
                             </label>
                         </div>
                     </div>
 
                     <div class="flex gap-2">
-                        <Button type="submit" :disabled="positionForm.processing || editingPositionId !== null">
-                            <Spinner v-if="positionForm.processing && editingPositionId === null" />
+                        <Button
+                            type="submit"
+                            :disabled="
+                                positionForm.processing ||
+                                editingPositionId !== null
+                            "
+                        >
+                            <Spinner
+                                v-if="
+                                    positionForm.processing &&
+                                    editingPositionId === null
+                                "
+                            />
                             <Plus v-else class="size-4" />
                             Add Position
                         </Button>
@@ -451,9 +502,13 @@ const removePosition = (position: Position) => {
                         :key="position.id"
                         class="border-b p-4 last:border-b-0"
                     >
-                        <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div
+                            class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"
+                        >
                             <div class="space-y-2">
-                                <div class="font-medium">{{ position.position_name }}</div>
+                                <div class="font-medium">
+                                    {{ position.position_name }}
+                                </div>
                                 <div class="flex flex-wrap gap-2">
                                     <Badge
                                         v-for="permission in position.permissions"
@@ -471,10 +526,20 @@ const removePosition = (position: Position) => {
                                 </div>
                             </div>
                             <div class="flex gap-2">
-                                <Button type="button" size="icon" variant="outline" @click="startPositionEdit(position)">
+                                <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="outline"
+                                    @click="startPositionEdit(position)"
+                                >
                                     <Pencil class="size-4" />
                                 </Button>
-                                <Button type="button" size="icon" variant="destructive" @click="removePosition(position)">
+                                <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="destructive"
+                                    @click="removePosition(position)"
+                                >
                                     <Trash2 class="size-4" />
                                 </Button>
                             </div>
@@ -486,13 +551,17 @@ const removePosition = (position: Position) => {
                             @submit.prevent="submitPosition(position)"
                         >
                             <Input v-model="positionForm.position_name" />
-                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                            <div
+                                class="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+                            >
                                 <div
                                     v-for="(items, category) in gates"
                                     :key="category"
                                     class="rounded-md border bg-background p-3"
                                 >
-                                    <div class="mb-3 text-sm font-medium">{{ category }}</div>
+                                    <div class="mb-3 text-sm font-medium">
+                                        {{ category }}
+                                    </div>
                                     <label
                                         v-for="gate in items"
                                         :key="gate.name"
@@ -501,20 +570,33 @@ const removePosition = (position: Position) => {
                                         <input
                                             type="checkbox"
                                             class="size-4"
-                                            :checked="positionForm.permissions.includes(gate.name)"
-                                            @change="togglePermission(gate.name)"
-                                        >
+                                            :checked="
+                                                positionForm.permissions.includes(
+                                                    gate.name,
+                                                )
+                                            "
+                                            @change="
+                                                togglePermission(gate.name)
+                                            "
+                                        />
                                         <span>{{ gate.label }}</span>
                                     </label>
                                 </div>
                             </div>
                             <div class="flex gap-2">
-                                <Button type="submit" :disabled="positionForm.processing">
+                                <Button
+                                    type="submit"
+                                    :disabled="positionForm.processing"
+                                >
                                     <Spinner v-if="positionForm.processing" />
                                     <Save v-else class="size-4" />
                                     Save Position
                                 </Button>
-                                <Button type="button" variant="outline" @click="cancelPositionEdit">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    @click="cancelPositionEdit"
+                                >
                                     Cancel
                                 </Button>
                             </div>

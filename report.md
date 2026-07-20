@@ -75,7 +75,7 @@ Verification:
 
 - Full PHPStan reports many pre-existing issues in older AI bot/API code.
 - Full Pint reports formatting issues in older services/controllers/tests.
-- Full Prettier reports existing formatting issues in `resources/js/pages/settings/Users.vue` and `resources/js/pages/Welcome.vue`.
+- Full Prettier previously reported existing formatting issues in `resources/js/pages/Welcome.vue`.
 - Vite build succeeds but prints upstream Rolldown annotation warnings from `reka-ui/@vueuse`.
 
 ## Phase 5 - Transcription Features
@@ -371,3 +371,29 @@ Manual follow-up:
 
 - Local CMS migrations and idempotent CMS seeders were applied for testing. Run the same migrations and CMS seeders on the target environment before deployment.
 - Browser review is still useful for final visual inspection of the structured editors, especially long copy wrapping on small screens.
+
+## Phase 6 - Permission Redirects & Management Navigation
+
+Status: Complete
+
+- Added one shared dashboard access rule: configured admin email with `ADMIN_ACESS=true` can access all gated areas, and users with any active assigned gate permission are redirected to `/dashboard`.
+- Updated Fortify login response, dashboard controller access, and Inertia shared auth props to use the same dashboard access rule.
+- Added `canManagePermissions` to shared auth props so user-management navigation can respect the dedicated permissions gate.
+- Moved User Management to `/dashboard/users` and API Management to `/dashboard/api`; old `/settings/users` and `/settings/api` URLs redirect to the dashboard locations.
+- Moved User Management, API Management, and CMS managers into the main app sidebar so permitted users see management areas directly without a second nested dashboard/settings nav.
+- Removed the duplicate dashboard mini-sidebar and widened dashboard management pages to the main content area.
+- Reworked normal Settings into a JERVA-style modal overlay with only profile, security, appearance, and billing tabs. Admin management no longer appears there.
+- Corrected the Vue API manager to preserve the legacy API page structure: API table, add API modal, token modal, provider cards, provider add/edit modal, provider logs, health badges, fallback drag ordering, and ZIP package dropzone.
+- Hardened Pricing Manager and Page Manager against empty or partial CMS content payloads so superadmin/full-access users do not get a blank screen when editable content rows are missing or stale.
+- Kept `/dashboard/api` protected by `can:API-manage_api`, so users without API permission do not see the sidebar item and receive forbidden access if they hit the URL directly.
+
+Verification:
+
+- Targeted login/dashboard/API settings tests passed: 19 tests, 62 assertions.
+- Targeted Pricing/Page/Dashboard manager tests passed: 13 tests, 126 assertions.
+- API settings page test passed after restoring the legacy design in Vue: 3 tests, 20 assertions.
+- Full Pest suite passed: 87 tests, 485 assertions.
+- Targeted PHPStan passed for the dashboard access, auth redirect, settings props, API controller, user manager, and position permission relation slice.
+- Vue type-check passed.
+- Vite production build passed.
+- Vite build still prints upstream Rolldown annotation warnings from `reka-ui/@vueuse`.

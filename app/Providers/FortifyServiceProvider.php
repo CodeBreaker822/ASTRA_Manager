@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Actions\Fortify\CreateNewUser;
 use App\Actions\Fortify\ResetUserPassword;
+use App\Services\DashboardAccessService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -11,6 +12,7 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Inertia\Inertia;
+use Laravel\Fortify\Contracts\LoginResponse as LoginResponseContract;
 use Laravel\Fortify\Features;
 use Laravel\Fortify\Fortify;
 
@@ -21,7 +23,19 @@ class FortifyServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(LoginResponseContract::class, function () {
+            return new class implements LoginResponseContract
+            {
+                public function toResponse($request)
+                {
+                    $home = app(DashboardAccessService::class)->canAccess($request->user())
+                        ? route('dashboard', absolute: false)
+                        : route('workspace.index', absolute: false);
+
+                    return redirect()->intended($home);
+                }
+            };
+        });
     }
 
     /**

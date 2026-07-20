@@ -15,6 +15,7 @@ export type Auth = {
     isAdmin: boolean;
     canManageApi: boolean;
     canManageUsers: boolean;
+    canManagePermissions: boolean;
     canAccessDashboard: boolean;
     canManageBlog: boolean;
     canManagePricing: boolean;
