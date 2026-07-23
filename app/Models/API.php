@@ -2,12 +2,9 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Str;
-use Throwable;
 
 class API extends Model
 {
@@ -39,6 +36,7 @@ class API extends Model
         'blacklisted_ips' => 'array',
         'blacklisted_routes' => 'array',
         'is_active' => 'boolean',
+        'app_token' => 'encrypted',
     ];
 
     protected $hidden = [
@@ -55,39 +53,21 @@ class API extends Model
     {
         return self::query()
             ->where('app_token_hash', self::hashToken($token))
-            ->first()
-            ?? self::query()->where('app_token', $token)->first();
+            ->first();
     }
 
-    /**
-     * @return Attribute<string|null, string|null>
-     */
-    protected function appToken(): Attribute
+    protected static function booted(): void
     {
-        return Attribute::make(
-            get: function (?string $value): ?string {
-                if ($value === null || $value === '') {
-                    return $value;
-                }
+        static::saving(function (self $api): void {
+            if (! $api->isDirty('app_token')) {
+                return;
+            }
 
-                try {
-                    return Crypt::decryptString($value);
-                } catch (Throwable) {
-                    return $value;
-                }
-            },
-            set: fn (?string $value): array => $value === null || $value === ''
-                ? [
-                    'app_token' => $value,
-                    'app_token_hash' => null,
-                    'app_token_suffix' => null,
-                ]
-                : [
-                    'app_token' => Crypt::encryptString($value),
-                    'app_token_hash' => self::hashToken($value),
-                    'app_token_suffix' => Str::of($value)->substr(-12)->toString(),
-                ],
-        );
+            $token = $api->app_token;
+
+            $api->app_token_hash = filled($token) ? self::hashToken((string) $token) : null;
+            $api->app_token_suffix = filled($token) ? Str::of((string) $token)->substr(-12)->toString() : null;
+        });
     }
 
     /**

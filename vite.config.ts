@@ -9,6 +9,20 @@ import { defineConfig } from 'vite';
 const inertiaSsrEnabled = process.env.INERTIA_SSR_ENABLED === 'true';
 
 export default defineConfig({
+    build: {
+        rolldownOptions: {
+            onwarn(warning: { code?: string; id?: string }, defaultHandler: (warning: unknown) => void) {
+                if (
+                    warning.code === 'INVALID_ANNOTATION' &&
+                    String(warning.id || '').includes('node_modules/reka-ui/node_modules/@vueuse/core')
+                ) {
+                    return;
+                }
+
+                defaultHandler(warning);
+            },
+        },
+    },
     plugins: [
         laravel({
             input: ['resources/css/app.css', 'resources/js/app.ts'],
