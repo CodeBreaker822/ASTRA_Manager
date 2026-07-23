@@ -5,13 +5,13 @@ return [
         'pricing' => [
             'hero' => [
                 'eyebrow' => 'Price',
-                'title' => 'Simple pricing',
-                'intro' => 'Start with free upload transcription. Upgrade when your workflow needs live capture, polishing, summaries, and every export format.',
+                'title' => 'Pay as you go',
+                'intro' => 'Every account gets 60 free transcription minutes each day. Buy extra minute credits only when a busy day needs more.',
             ],
             'faq' => [
                 ['question' => 'Can I use JERVA Web offline?', 'answer' => 'No. The web edition is online-only and uses the server provider pipeline. Offline Whisper remains in the desktop app.'],
-                ['question' => 'Is billing active in beta?', 'answer' => 'Not yet. These plan definitions prepare the UI and entitlement structure for the later billing phase.'],
-                ['question' => 'What happens when I reach my quota?', 'answer' => 'The workspace will show a friendly upgrade prompt once quota middleware is added in the workspace phase.'],
+                ['question' => 'Is there recurring billing?', 'answer' => 'No. JERVA Web uses pay-as-you-go minute credits instead of monthly or yearly billing.'],
+                ['question' => 'What happens when I reach my free minutes?', 'answer' => 'Your free 60 minutes reset the next day, or you can buy extra minute credits to keep working today.'],
             ],
         ],
         'features' => [
@@ -66,7 +66,7 @@ return [
             ],
             'cta' => [
                 'title' => 'Build your first online transcript.',
-                'body' => 'Start with upload transcription, then unlock live, polish, summaries, and exports as the workspace grows.',
+                'body' => 'Start with 60 free minutes each day, then add pay-as-you-go credits for heavier transcript days.',
                 'button_label' => 'Create account',
             ],
         ],
@@ -95,7 +95,7 @@ return [
                 'button_label' => 'Create account',
             ],
             'faq' => [
-                ['question' => 'Is the desktop app free?', 'answer' => 'The download channel can publish the desktop app package. Account and plan rules are handled by the web SaaS layer as billing is added.'],
+                ['question' => 'Is the desktop app free?', 'answer' => 'The download channel can publish the desktop app package. Online web transcription uses daily free minutes and pay-as-you-go credits.'],
                 ['question' => 'What is different from the web version?', 'answer' => 'Web transcription is online-only. Desktop keeps the offline-capable model workflow and local processing features.'],
                 ['question' => 'How do offline models work?', 'answer' => 'Offline models are downloaded and managed by the desktop application, not by the web workspace.'],
             ],

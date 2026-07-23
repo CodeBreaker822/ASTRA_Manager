@@ -144,13 +144,14 @@ class HandleInertiaRequests extends Middleware
         return [
             'billing' => [
                 'provider' => config('services.billing.provider'),
-                'pro_checkout_url' => config('services.billing.pro_checkout_url'),
-                'team_checkout_url' => config('services.billing.team_checkout_url'),
-                'checkout_available' => $payMongo->isConfiguredFor('pro') || $payMongo->isConfiguredFor('team'),
+                'checkout_available' => $payMongo->isConfiguredFor('payg', 'audio')
+                    || $payMongo->isConfiguredFor('payg', 'polish')
+                    || $payMongo->isConfiguredFor('payg', 'summary'),
                 'portal_available' => false,
                 'paymongo_ready' => [
-                    'pro' => $payMongo->isConfiguredFor('pro'),
-                    'team' => $payMongo->isConfiguredFor('team'),
+                    'audio' => $payMongo->isConfiguredFor('payg', 'audio'),
+                    'polish' => $payMongo->isConfiguredFor('payg', 'polish'),
+                    'summary' => $payMongo->isConfiguredFor('payg', 'summary'),
                 ],
             ],
             'entitlements' => app(EntitlementService::class)->summaryFor($user),

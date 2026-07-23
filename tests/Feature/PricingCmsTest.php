@@ -15,11 +15,11 @@ beforeEach(function () {
 test('pricing uses config fallback when database rows are empty', function () {
     $this->withoutVite();
 
-    $user = User::factory()->create(['plan' => 'pro']);
+    $user = User::factory()->create(['plan' => 'payg']);
 
     expect(app(EntitlementService::class)->planFor($user))
         ->toMatchArray([
-            'key' => 'pro',
+            'key' => 'payg',
             'minutes' => 600,
         ]);
 
@@ -28,8 +28,8 @@ test('pricing uses config fallback when database rows are empty', function () {
         ->assertInertia(fn (AssertableInertia $page) => $page
             ->component('marketing/Price')
             ->where('plans.0.key', 'free')
-            ->where('plans.1.key', 'pro')
-            ->where('content.hero.title', 'Simple pricing')
+            ->where('plans.1.key', 'payg')
+            ->where('content.hero.title', 'Pay as you go')
             ->where('comparison.Upload audio transcription.0', 'free')
         );
 });
@@ -39,22 +39,56 @@ test('pricing managers can update tiers and comparison rows', function () {
 
     $manager = createPricingManagerUser();
     $payload = pricingPayload();
+    $payload['tiers'][0]['minutes'] = 45;
     $payload['tiers'][1]['minutes'] = 750;
     $payload['tiers'][1]['price_label'] = '$25';
-    $payload['tiers'][1]['features'][0] = '750 transcription minutes each month';
+    $payload['tiers'][1]['upload_price_per_hour'] = 220;
+    $payload['tiers'][1]['live_price_per_hour'] = 260;
+    $payload['tiers'][1]['llm_price'] = 8;
+    $payload['tiers'][0]['free_polish_uses_per_day'] = 3;
+    $payload['tiers'][0]['free_summary_uses_per_day'] = 3;
+    $payload['tiers'][1]['polish_characters'] = 125000;
+    $payload['tiers'][1]['summary_characters'] = 90000;
+    $payload['tiers'][1]['polish_price_per_character'] = 0.0003;
+    $payload['tiers'][1]['summary_price_per_character'] = 0.0004;
+    $payload['tiers'][1]['features'][0] = '750 one-time transcription minutes';
+    $payload['tiers'][1]['entitlements'] = [
+        'upload' => false,
+        'live' => false,
+        'polish' => false,
+        'summarize' => false,
+        'exports' => [],
+    ];
     $payload['pricingContent']['hero']['title'] = 'Managed pricing copy';
     $payload['comparisonRows'] = [
-        ['label' => 'Live browser transcription', 'tier_keys' => ['pro', 'team']],
-        ['label' => 'Team seats', 'tier_keys' => ['team']],
+        ['label' => 'Live browser transcription', 'tier_keys' => ['payg']],
+        ['label' => 'One-time minute credits', 'tier_keys' => ['payg']],
     ];
 
     $this->actingAs($manager)
         ->put(route('dashboard.pricing.update'), $payload)
         ->assertRedirect();
 
-    expect(PlanTier::query()->where('key', 'pro')->firstOrFail()->minutes)->toBe(750);
+    $proTier = PlanTier::query()->where('key', 'payg')->firstOrFail();
 
-    $proUser = User::factory()->create(['plan' => 'pro']);
+    expect($proTier->minutes)->toBe(750)
+        ->and($proTier->price_per_second)->toBe(round(220 / 3600, 8))
+        ->and($proTier->upload_price_per_hour)->toBe(220.0)
+        ->and($proTier->live_price_per_hour)->toBe(260.0)
+        ->and($proTier->llm_price)->toBe(8.0)
+        ->and($proTier->polish_characters)->toBe(125000)
+        ->and($proTier->summary_characters)->toBe(90000)
+        ->and($proTier->polish_price_per_character)->toBe(0.0003)
+        ->and($proTier->summary_price_per_character)->toBe(0.0004)
+        ->and($proTier->entitlements)->toMatchArray([
+            'upload' => true,
+            'live' => true,
+            'polish' => true,
+            'summarize' => true,
+            'exports' => ['txt', 'docx', 'xlsx'],
+        ]);
+
+    $proUser = User::factory()->create(['plan' => 'payg']);
 
     expect(app(EntitlementService::class)->planFor($proUser)['minutes'])->toBe(750);
 
@@ -62,11 +96,11 @@ test('pricing managers can update tiers and comparison rows', function () {
         ->assertOk()
         ->assertInertia(fn (AssertableInertia $page) => $page
             ->component('marketing/Price')
-            ->where('plans.1.key', 'pro')
+            ->where('plans.1.key', 'payg')
             ->where('plans.1.minutes', 750)
             ->where('plans.1.price_label', '$25')
             ->where('content.hero.title', 'Managed pricing copy')
-            ->where('comparison.Live browser transcription.0', 'pro')
+            ->where('comparison.Live browser transcription.0', 'payg')
         );
 
     $this->actingAs($proUser)
@@ -74,8 +108,16 @@ test('pricing managers can update tiers and comparison rows', function () {
         ->assertOk()
         ->assertInertia(fn (AssertableInertia $page) => $page
             ->component('settings/Billing')
-            ->where('entitlements.plan.minutes', 750)
-            ->where('plans.1.key', 'pro')
+            ->where('entitlements.plan.key', 'payg')
+            ->where('entitlements.plan.minutes', 45)
+            ->where('plans.1.key', 'payg')
+            ->where('plans.1.upload_price_per_hour', 220)
+            ->where('plans.1.live_price_per_hour', 260)
+            ->where('plans.1.llm_price', 8)
+            ->where('plans.1.polish_characters', 125000)
+            ->where('plans.1.summary_characters', 90000)
+            ->where('plans.1.polish_price_per_character', 0.0003)
+            ->where('plans.1.summary_price_per_character', 0.0004)
         );
 });
 
@@ -128,7 +170,16 @@ function pricingPayload(): array
                 'monthly_price' => $tier['monthly_price'],
                 'yearly_price' => $tier['yearly_price'],
                 'price_label' => $tier['price_label'],
+                'upload_price_per_hour' => $tier['upload_price_per_hour'],
+                'live_price_per_hour' => $tier['live_price_per_hour'],
+                'llm_price' => $tier['llm_price'],
+                'polish_price_per_character' => $tier['polish_price_per_character'],
+                'summary_price_per_character' => $tier['summary_price_per_character'],
                 'minutes' => $tier['minutes'],
+                'free_polish_uses_per_day' => $tier['free_polish_uses_per_day'],
+                'free_summary_uses_per_day' => $tier['free_summary_uses_per_day'],
+                'polish_characters' => $tier['polish_characters'],
+                'summary_characters' => $tier['summary_characters'],
                 'cta' => $tier['cta'],
                 'featured' => $tier['featured'],
                 'features' => $tier['features'],
@@ -137,7 +188,6 @@ function pricingPayload(): array
                     'live' => (bool) data_get($tier, 'entitlements.live', false),
                     'polish' => (bool) data_get($tier, 'entitlements.polish', false),
                     'summarize' => (bool) data_get($tier, 'entitlements.summarize', false),
-                    'team' => (bool) data_get($tier, 'entitlements.team', false),
                     'exports' => data_get($tier, 'entitlements.exports', []),
                 ],
             ])

@@ -12,6 +12,13 @@ type Plan = {
     minutes: number;
     cta: string;
     featured: boolean;
+    price_per_second: number;
+    polish_characters: number;
+    summary_characters: number;
+    polish_price_per_character: number;
+    summary_price_per_character: number;
+    free_polish_uses_per_day: number;
+    free_summary_uses_per_day: number;
     features: string[];
 };
 
@@ -27,15 +34,23 @@ const props = defineProps<{
             key: string;
             name: string;
             minutes: number;
+            free_polish_uses_per_day: number;
+            free_summary_uses_per_day: number;
             features: Record<string, unknown>;
         };
         usage: {
             period: string;
             minutes_used: number;
             minutes_remaining: number;
+            minutes_credit_balance: number;
             seconds_transcribed: number;
+            seconds_credit_balance: number;
             polish_count: number;
             summary_count: number;
+            free_polish_remaining: number;
+            free_summary_remaining: number;
+            polish_credit_characters: number;
+            summary_credit_characters: number;
         };
     };
     plans: Plan[];
@@ -56,7 +71,11 @@ const usagePercent = Math.min(
     100,
     Math.round(
         (props.entitlements.usage.minutes_used /
-            Math.max(1, props.entitlements.plan.minutes)) *
+            Math.max(
+                1,
+                props.entitlements.plan.minutes +
+                    props.entitlements.usage.minutes_credit_balance,
+            )) *
             100,
     ),
 );
@@ -71,7 +90,7 @@ const usagePercent = Math.min(
         <Heading
             variant="small"
             title="Billing"
-            description="Review your plan, usage, and SaaS billing status"
+            description="Review today's free minutes and buy pay-as-you-go credits"
         />
 
         <section
@@ -81,19 +100,28 @@ const usagePercent = Math.min(
                 <p
                     class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
                 >
-                    Current plan
+                    Today's allowance
                 </p>
                 <h2 class="mt-2 text-xl font-semibold">
-                    {{ entitlements.plan.name }} Plan
+                    {{ entitlements.plan.name }}
                 </h2>
                 <p class="mt-2 text-sm leading-6 text-blue-900">
                     {{ entitlements.usage.minutes_remaining }} of
-                    {{ entitlements.plan.minutes }} transcription minutes remain
-                    for {{ entitlements.usage.period }}.
+                    {{
+                        entitlements.plan.minutes +
+                        entitlements.usage.minutes_credit_balance
+                    }}
+                    transcription minutes remain for
+                    {{ entitlements.usage.period }}. Polish free uses:
+                    {{ entitlements.usage.free_polish_remaining }} of
+                    {{ entitlements.plan.free_polish_uses_per_day }}. Summarize
+                    free uses:
+                    {{ entitlements.usage.free_summary_remaining }} of
+                    {{ entitlements.plan.free_summary_uses_per_day }}.
                 </p>
             </div>
             <Button as-child>
-                <Link href="/price">Compare plans</Link>
+                <Link href="/price">View credits</Link>
             </Button>
         </section>
 
@@ -101,7 +129,7 @@ const usagePercent = Math.min(
             <article class="rounded-lg border border-slate-200 bg-white p-5">
                 <Gauge class="size-5 text-blue-600" />
                 <p class="mt-4 text-sm font-semibold text-slate-950">
-                    Monthly usage
+                    Daily usage
                 </p>
                 <div class="mt-3 h-2 overflow-hidden rounded-full bg-blue-100">
                     <div
@@ -117,10 +145,14 @@ const usagePercent = Math.min(
             <article class="rounded-lg border border-slate-200 bg-white p-5">
                 <CreditCard class="size-5 text-blue-600" />
                 <p class="mt-4 text-sm font-semibold text-slate-950">
-                    Payment provider
+                    Credit balance
                 </p>
                 <p class="mt-2 text-sm leading-6 text-slate-700">
-                    {{ billing.provider ?? 'paymongo' }}
+                    {{ entitlements.usage.minutes_credit_balance }} paid
+                    minutes, {{ entitlements.usage.polish_credit_characters }}
+                    polish characters, and
+                    {{ entitlements.usage.summary_credit_characters }} summarize
+                    characters available
                 </p>
             </article>
 
@@ -130,9 +162,8 @@ const usagePercent = Math.min(
                     Account management
                 </p>
                 <p class="mt-2 text-sm leading-6 text-slate-700">
-                    PayMongo checkout links and webhook handling will appear
-                    here after live keys, amounts, and webhook secret are
-                    configured.
+                    PayMongo checkout adds minute credits after payment
+                    confirmation. No recurring payment is created.
                 </p>
             </article>
         </section>
@@ -141,12 +172,7 @@ const usagePercent = Math.min(
             <article
                 v-for="plan in plans"
                 :key="plan.key"
-                class="rounded-lg border bg-white p-5"
-                :class="
-                    plan.key === entitlements.plan.key
-                        ? 'border-blue-600 ring-2 ring-blue-100'
-                        : 'border-slate-200'
-                "
+                class="rounded-lg border border-slate-200 bg-white p-5"
             >
                 <div class="flex items-start justify-between gap-4">
                     <div>
@@ -158,10 +184,10 @@ const usagePercent = Math.min(
                         </p>
                     </div>
                     <span
-                        v-if="plan.key === entitlements.plan.key"
+                        v-if="plan.key === 'free'"
                         class="rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-xs font-semibold text-green-700"
                     >
-                        Active
+                        Daily free
                     </span>
                 </div>
 
@@ -169,7 +195,11 @@ const usagePercent = Math.min(
                     {{ plan.price_label }}
                 </p>
                 <p class="mt-1 text-sm text-slate-600">
-                    {{ plan.minutes }} minutes per month
+                    {{
+                        plan.key === 'free'
+                            ? `${plan.minutes} minutes reset every day`
+                            : `${plan.minutes} one-time minutes`
+                    }}
                 </p>
 
                 <div class="mt-5 grid gap-2">
@@ -183,39 +213,62 @@ const usagePercent = Math.min(
                     </p>
                 </div>
 
-                <Button
-                    v-if="plan.key === entitlements.plan.key"
-                    class="mt-6 w-full"
-                    variant="outline"
-                    disabled
-                >
-                    Current plan
-                </Button>
-                <Button
-                    v-else-if="plan.key === 'free'"
-                    class="mt-6 w-full"
-                    variant="outline"
-                    disabled
-                >
-                    Free plan
-                </Button>
-                <Button
-                    v-else-if="billing.paymongo_ready[plan.key]"
-                    as-child
-                    class="mt-6 w-full"
-                >
-                    <Link
-                        href="/settings/billing/checkout"
-                        method="post"
-                        as="button"
-                        :data="{ plan: plan.key }"
+                <div v-if="plan.key === 'free'" class="mt-6">
+                    <Button class="w-full" variant="outline" disabled>
+                        Included daily
+                    </Button>
+                </div>
+                <div v-else class="mt-6 grid gap-2">
+                    <Button v-if="billing.paymongo_ready.audio" as-child>
+                        <Link
+                            href="/settings/billing/checkout"
+                            method="post"
+                            as="button"
+                            :data="{ plan: plan.key, credit_type: 'audio' }"
+                        >
+                            Buy minutes
+                        </Link>
+                    </Button>
+                    <Button v-else variant="outline" disabled>
+                        Configure audio checkout
+                    </Button>
+
+                    <Button
+                        v-if="billing.paymongo_ready.polish"
+                        as-child
+                        variant="outline"
                     >
-                        Pay with PayMongo
-                    </Link>
-                </Button>
-                <Button v-else class="mt-6 w-full" variant="outline" disabled>
-                    Configure PayMongo
-                </Button>
+                        <Link
+                            href="/settings/billing/checkout"
+                            method="post"
+                            as="button"
+                            :data="{ plan: plan.key, credit_type: 'polish' }"
+                        >
+                            Buy polish characters
+                        </Link>
+                    </Button>
+                    <Button v-else variant="outline" disabled>
+                        Configure polish checkout
+                    </Button>
+
+                    <Button
+                        v-if="billing.paymongo_ready.summary"
+                        as-child
+                        variant="outline"
+                    >
+                        <Link
+                            href="/settings/billing/checkout"
+                            method="post"
+                            as="button"
+                            :data="{ plan: plan.key, credit_type: 'summary' }"
+                        >
+                            Buy summarize characters
+                        </Link>
+                    </Button>
+                    <Button v-else variant="outline" disabled>
+                        Configure summarize checkout
+                    </Button>
+                </div>
             </article>
         </section>
     </div>

@@ -989,10 +989,6 @@ class TranscriptionController extends Controller
             $clips = $this->storedClipsWithAudio($payload['clips'] ?? []);
             $results = $service->normalizeSubmittedBatch($runPodPayload, $clips);
 
-            if (! collect($results)->contains(fn (mixed $result): bool => is_array($result) && trim((string) ($result['text'] ?? '')) !== '')) {
-                throw new \RuntimeException(ServiceUserMessage::emptyTranscriptionResponse('RunPod'));
-            }
-
             $clipTranscripts = array_map(function (array $clip, int $index) use ($results): array {
                 $result = $this->resultForBatchClip($results, $clip, $index);
 
@@ -1266,10 +1262,6 @@ class TranscriptionController extends Controller
                 $clips,
             ));
 
-            if (! collect($results)->contains(fn (mixed $result): bool => is_array($result) && trim((string) ($result['text'] ?? '')) !== '')) {
-                throw new \RuntimeException(ServiceUserMessage::emptyTranscriptionResponse((string) $provider['provider']));
-            }
-
             return [
                 'clips' => array_map(function (array $clip, int $index) use ($results): array {
                     $result = $this->resultForBatchClip($results, $clip, $index);
@@ -1385,10 +1377,7 @@ class TranscriptionController extends Controller
             $attemptedProviders[] = $provider['provider'];
 
             try {
-                $result = $this->retryEmptyTranscriptionResponse(
-                    fn (): array => $this->transcribeUsingProvider($provider, $clip['audio'], $clip),
-                    $provider,
-                );
+                $result = $this->transcribeUsingProvider($provider, $clip['audio'], $clip);
 
                 if ($offset > 0) {
                     app(ProviderFallbackLogger::class)->recovered('transcriber', 'transcribe', $provider, $offset, $request, $license);
@@ -1472,31 +1461,6 @@ class TranscriptionController extends Controller
         }
 
         return max(0, (int) $clipEndMs - (int) $clipStartMs);
-    }
-
-    private function retryEmptyTranscriptionResponse(callable $callback, array $provider): array
-    {
-        $attempts = max(1, (int) config('services.transcription_processing.response_attempts', 3));
-
-        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
-            $result = $callback();
-
-            if (trim((string) ($result['text'] ?? '')) !== '') {
-                return $result;
-            }
-
-            if ($attempt < $attempts) {
-                Log::warning('Transcription provider returned empty text; retrying the same provider.', [
-                    'provider' => $provider['provider'],
-                    'model' => $provider['model'],
-                    'attempt' => $attempt,
-                    'max_attempts' => $attempts,
-                ]);
-                usleep(250000 * $attempt);
-            }
-        }
-
-        throw new \RuntimeException(ServiceUserMessage::emptyTranscriptionResponse((string) $provider['provider']));
     }
 
     private function summarizeAcrossProviders(

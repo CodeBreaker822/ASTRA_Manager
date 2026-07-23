@@ -55,6 +55,12 @@ class ProviderConnectionService
                 continue;
             }
 
+            if ($provider['provider'] === AppSettingsService::PROVIDER_GROQ_TRANSCRIPTION) {
+                $results[$provider['setting_id']] = $this->checkGroqTranscriptionProvider($setting->api_key, $provider['model']);
+
+                continue;
+            }
+
             $request = $this->requestFor(
                 $provider['provider'],
                 $provider['model'],
@@ -266,6 +272,53 @@ class ProviderConnectionService
         return $this->result('online', 'Online', 'The RunPod endpoint is reachable; workers may be scaled to zero while idle.');
     }
 
+    private function checkGroqTranscriptionProvider(string $apiKey, string $model): array
+    {
+        $stream = fopen('php://temp', 'w+b');
+
+        if ($stream === false) {
+            return $this->result('offline', 'Check failed', 'The server could not prepare a provider health check.');
+        }
+
+        try {
+            fwrite($stream, $this->wavProbe());
+            rewind($stream);
+
+            $response = Http::withToken(trim($apiKey))
+                ->acceptJson()
+                ->connectTimeout((int) config('services.provider_health.connect_timeout', 3))
+                ->timeout((int) config('services.provider_health.timeout', 6))
+                ->attach('file', $stream, 'jerva-health.wav')
+                ->post((string) config('services.groq.transcription_url'), [
+                    'model' => $model,
+                    'response_format' => 'json',
+                    'temperature' => '0',
+                ]);
+        } catch (ConnectionException|RequestException) {
+            return $this->result('offline', 'Offline', 'The Groq transcription endpoint could not be reached.');
+        } finally {
+            fclose($stream);
+        }
+
+        if ($response->status() === 429) {
+            return $this->result('limited', 'Rate limited', 'Groq is reachable but is currently rate limited or out of quota.');
+        }
+
+        if (in_array($response->status(), [401, 403], true)) {
+            return $this->result('offline', 'Authentication failed', 'The Groq API key was rejected by the transcription endpoint.');
+        }
+
+        if (in_array($response->status(), [400, 404, 422], true)) {
+            return $this->result('offline', 'Probe rejected', 'Groq rejected the transcription probe or configured model.');
+        }
+
+        if ($response->failed()) {
+            return $this->result('offline', 'Offline', 'Groq transcription returned HTTP '.$response->status().'.');
+        }
+
+        return $this->result('online', 'Online', 'The Groq transcription endpoint accepted the configured model.');
+    }
+
     private function runPodEndpointUrl(array $metadata = []): string
     {
         $runsyncUrl = trim((string) ($metadata['runsync_url'] ?? ''));
@@ -327,5 +380,34 @@ class ProviderConnectionService
             'message' => $message,
             'checked_at' => now()->toIso8601String(),
         ];
+    }
+
+    private function wavProbe(): string
+    {
+        $sampleRate = 16_000;
+        $seconds = 1;
+        $sampleCount = $sampleRate * $seconds;
+        $data = '';
+
+        for ($index = 0; $index < $sampleCount; $index++) {
+            $sample = (int) round(sin(2 * M_PI * 440 * ($index / $sampleRate)) * 8000);
+            $data .= pack('v', $sample < 0 ? 65536 + $sample : $sample);
+        }
+
+        $dataSize = strlen($data);
+
+        return 'RIFF'
+            .pack('V', 36 + $dataSize)
+            .'WAVEfmt '
+            .pack('V', 16)
+            .pack('v', 1)
+            .pack('v', 1)
+            .pack('V', $sampleRate)
+            .pack('V', $sampleRate * 2)
+            .pack('v', 2)
+            .pack('v', 16)
+            .'data'
+            .pack('V', $dataSize)
+            .$data;
     }
 }

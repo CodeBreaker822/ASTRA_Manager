@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
 import { Check } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { Button } from '@/components/ui/button';
 
 type Plan = {
@@ -11,7 +11,12 @@ type Plan = {
     monthly_price: number | null;
     yearly_price: number | null;
     price_label: string;
+    price_per_second: number;
     minutes: number;
+    free_polish_uses_per_day: number;
+    free_summary_uses_per_day: number;
+    polish_characters: number;
+    summary_characters: number;
     cta: string;
     featured: boolean;
     features: string[];
@@ -33,19 +38,8 @@ const props = defineProps<{
     };
 }>();
 
-const billingPeriod = ref<'monthly' | 'yearly'>('monthly');
-
 const planPrice = (plan: Plan): string => {
-    if (plan.monthly_price === null) {
-        return plan.price_label;
-    }
-
-    const price =
-        billingPeriod.value === 'yearly'
-            ? plan.yearly_price
-            : plan.monthly_price;
-
-    return `$${price}`;
+    return plan.price_label;
 };
 
 const comparisonRows = computed(() => Object.entries(props.comparison));
@@ -72,36 +66,6 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                 >
                     {{ content.hero.intro }}
                 </p>
-
-                <div
-                    class="mx-auto mt-8 inline-flex rounded-lg border border-slate-200 bg-white p-1"
-                    aria-label="Billing period"
-                >
-                    <button
-                        type="button"
-                        class="h-10 rounded-lg px-4 text-sm font-semibold transition-colors"
-                        :class="
-                            billingPeriod === 'monthly'
-                                ? 'bg-blue-600 text-white'
-                                : 'text-slate-700 hover:bg-blue-50 hover:text-blue-700'
-                        "
-                        @click="billingPeriod = 'monthly'"
-                    >
-                        Monthly
-                    </button>
-                    <button
-                        type="button"
-                        class="h-10 rounded-lg px-4 text-sm font-semibold transition-colors"
-                        :class="
-                            billingPeriod === 'yearly'
-                                ? 'bg-blue-600 text-white'
-                                : 'text-slate-700 hover:bg-blue-50 hover:text-blue-700'
-                        "
-                        @click="billingPeriod = 'yearly'"
-                    >
-                        Yearly
-                    </button>
-                </div>
             </div>
         </section>
 
@@ -138,15 +102,13 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                         <span class="text-4xl font-semibold text-slate-950">
                             {{ planPrice(plan) }}
                         </span>
-                        <span
-                            v-if="plan.monthly_price !== null"
-                            class="text-sm text-slate-600"
-                        >
-                            /month
-                        </span>
                     </div>
                     <p class="mt-2 text-sm text-slate-600">
-                        {{ plan.minutes.toLocaleString() }} minutes included
+                        {{
+                            plan.key === 'free'
+                                ? `${plan.minutes.toLocaleString()} minutes, ${plan.free_polish_uses_per_day} polish, and ${plan.free_summary_uses_per_day} summarize reset every day`
+                                : `${plan.minutes.toLocaleString()} minutes, ${plan.polish_characters.toLocaleString()} polish characters, or ${plan.summary_characters.toLocaleString()} summarize characters`
+                        }}
                     </p>
 
                     <Button as-child class="mt-8 w-full">
@@ -172,13 +134,13 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                 <h2
                     class="text-3xl font-semibold tracking-tight text-slate-950"
                 >
-                    Compare plans
+                    Compare credit packs
                 </h2>
                 <div
                     class="mt-8 overflow-hidden rounded-lg border border-slate-200 bg-white"
                 >
                     <div
-                        class="grid grid-cols-[1.4fr_repeat(3,1fr)] border-b border-slate-200 bg-slate-50"
+                        class="grid grid-cols-[1.4fr_repeat(2,1fr)] border-b border-slate-200 bg-slate-50"
                     >
                         <div class="p-4 text-sm font-semibold text-slate-950">
                             Feature
@@ -194,7 +156,7 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                     <div
                         v-for="[feature, enabledPlans] in comparisonRows"
                         :key="feature"
-                        class="grid grid-cols-[1.4fr_repeat(3,1fr)] border-b border-slate-200 last:border-b-0"
+                        class="grid grid-cols-[1.4fr_repeat(2,1fr)] border-b border-slate-200 last:border-b-0"
                     >
                         <div class="p-4 text-sm text-slate-700">
                             {{ feature }}

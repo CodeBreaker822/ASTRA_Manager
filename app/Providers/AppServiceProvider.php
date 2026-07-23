@@ -11,11 +11,14 @@ use App\Models\User;
 use App\Policies\TranscriptPolicy;
 use App\Policies\TranscriptProjectPolicy;
 use Carbon\CarbonImmutable;
+use GuzzleHttp\Utils as GuzzleUtils;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
+use Throwable;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -41,6 +44,7 @@ class AppServiceProvider extends ServiceProvider
     protected function configureDefaults(): void
     {
         Date::use(CarbonImmutable::class);
+        $this->configureHttpCertificateAuthority();
 
         Gate::before(fn (User $user, string $ability): ?bool => $this->isConfiguredAdmin($user) ? true : null);
 
@@ -65,6 +69,59 @@ class AppServiceProvider extends ServiceProvider
                 ->uncompromised()
             : null,
         );
+    }
+
+    protected function configureHttpCertificateAuthority(): void
+    {
+        $configuredCaBundle = $this->configuredCertificateAuthorityBundle();
+
+        if ($configuredCaBundle !== null) {
+            Http::globalOptions([
+                'verify' => $configuredCaBundle,
+            ]);
+
+            return;
+        }
+
+        if (defined('CURLOPT_SSL_OPTIONS') && defined('CURLSSLOPT_NATIVE_CA')) {
+            Http::globalOptions([
+                'curl' => [
+                    constant('CURLOPT_SSL_OPTIONS') => constant('CURLSSLOPT_NATIVE_CA'),
+                ],
+            ]);
+
+            return;
+        }
+
+        $caBundle = $this->defaultCertificateAuthorityBundle();
+
+        if ($caBundle !== null) {
+            Http::globalOptions([
+                'verify' => $caBundle,
+            ]);
+        }
+    }
+
+    protected function configuredCertificateAuthorityBundle(): ?string
+    {
+        foreach ([ini_get('curl.cainfo'), ini_get('openssl.cafile')] as $caBundle) {
+            if (is_string($caBundle) && $caBundle !== '' && is_file($caBundle)) {
+                return $caBundle;
+            }
+        }
+
+        return null;
+    }
+
+    protected function defaultCertificateAuthorityBundle(): ?string
+    {
+        try {
+            $caBundle = GuzzleUtils::defaultCaBundle();
+        } catch (Throwable) {
+            return null;
+        }
+
+        return is_file($caBundle) ? $caBundle : null;
     }
 
     protected function isConfiguredAdmin(User $user): bool

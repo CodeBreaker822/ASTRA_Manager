@@ -38,8 +38,6 @@ return [
 
     'billing' => [
         'provider' => env('BILLING_PROVIDER', 'paymongo'),
-        'pro_amount' => env('PAYMONGO_PRO_AMOUNT'),
-        'team_amount' => env('PAYMONGO_TEAM_AMOUNT'),
     ],
 
     'paymongo' => [

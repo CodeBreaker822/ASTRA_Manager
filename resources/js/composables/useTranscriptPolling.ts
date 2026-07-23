@@ -1,5 +1,5 @@
-import { onUnmounted, ref  } from 'vue';
-import type {Ref} from 'vue';
+import { onUnmounted, ref } from 'vue';
+import type { Ref } from 'vue';
 
 export const useTranscriptPolling = (
     hasWork: Ref<boolean>,
@@ -18,12 +18,23 @@ export const useTranscriptPolling = (
     };
 
     const tick = async () => {
-        await refresh();
+        try {
+            await refresh();
+        } catch {
+            return;
+        }
+
         lastUpdated.value = new Date().toISOString();
 
         if (!hasWork.value) {
             stopPolling();
-            await refresh();
+
+            try {
+                await refresh();
+            } catch {
+                return;
+            }
+
             lastUpdated.value = new Date().toISOString();
         }
     };

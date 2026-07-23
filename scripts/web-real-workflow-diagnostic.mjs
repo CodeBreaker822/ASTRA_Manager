@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
 const args = Object.fromEntries(process.argv.slice(2).map((arg) => {
     const [key, ...value] = arg.replace(/^--/, '').split('=');
+
     return [key, value.join('=') || 'true'];
 }));
 const baseUrl = String(args.base || process.env.JERVA_WEB_DIAGNOSTIC_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
@@ -17,7 +18,7 @@ const user = {
 };
 const audioRoot = path.join(root, 'storage/app/private/diagnostics/web-real-workflow');
 const reportRoot = path.join(root, 'storage/app/private/diagnostics/reports');
-const uploadAudio = path.join(audioRoot, `${runId}-upload-61s.wav`);
+const uploadAudio = path.join(audioRoot, `${runId}-upload-near-minute.wav`);
 const liveAudio = path.join(audioRoot, `${runId}-live-2s.wav`);
 const cookieJar = new Map();
 
@@ -168,7 +169,7 @@ const messageFrom = (payload, text, status) => payload?.message || text.slice(0,
 async function main() {
     mkdirSync(audioRoot, { recursive: true });
     mkdirSync(reportRoot, { recursive: true });
-    writeFileSync(uploadAudio, wavContent(61));
+    writeFileSync(uploadAudio, wavContent(60.5));
     writeFileSync(liveAudio, wavContent(2));
 
     console.log('web diagnostic step: create verified pro user');
@@ -197,7 +198,6 @@ async function main() {
 
     console.log('web diagnostic step: upload audio with server chunking');
     const upload = await formJson(`/workspace/${projectId}/upload`, token, {
-        duration_seconds: 61,
         server_chunk: 1,
     }, [{
         key: 'audio',
@@ -364,5 +364,6 @@ main().catch((error) => {
     } else {
         console.error(error.stack || error.message);
     }
+
     process.exitCode = 1;
 });

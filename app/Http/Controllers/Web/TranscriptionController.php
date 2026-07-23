@@ -3,18 +3,15 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
-use App\Jobs\ProcessWebTranscriptJob;
 use App\Models\Transcript;
 use App\Models\TranscriptProject;
 use App\Services\EntitlementService;
+use App\Services\Web\TranscriptionWorkflowService;
 use App\Services\Web\TranscriptPayloadPresenter;
 use App\Services\WebApiTranscriptionClient;
-use App\Services\WebAudioChunkerService;
 use App\Services\WebTranscriptProcessor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Str;
 use RuntimeException;
 
 class TranscriptionController extends Controller
@@ -24,6 +21,7 @@ class TranscriptionController extends Controller
         TranscriptProject $project,
         EntitlementService $entitlements,
         TranscriptPayloadPresenter $payloads,
+        TranscriptionWorkflowService $workflow,
     ): JsonResponse {
         $this->authorizeProject($request, $project);
 
@@ -47,38 +45,33 @@ class TranscriptionController extends Controller
             'server_chunk' => ['nullable', 'boolean'],
         ]));
 
-        $chunker = app(WebAudioChunkerService::class);
         $cleanup = null;
 
         try {
-            $clips = $this->normalizeClips($request, $validated);
+            $prepared = $workflow->prepareUploadClips($request, $validated);
+            $clips = $prepared['clips'];
+            $cleanup = $prepared['cleanup'];
 
-            if (($validated['server_chunk'] ?? false) && $request->file('audio') instanceof UploadedFile) {
-                $prepared = $chunker->clipsFromUpload($request->file('audio'), (int) ($validated['duration_seconds'] ?? 0));
-                $clips = $prepared['clips'];
-                $cleanup = $prepared['cleanup'];
-            }
-
-            if (app(WebApiTranscriptionClient::class)->batchIsTooLarge($clips)) {
+            if ($workflow->batchIsTooLarge($clips)) {
                 return response()->json(['message' => 'Audio is too big.'], 422);
             }
 
-            $durationSeconds = $this->durationSeconds($clips, (int) ($validated['duration_seconds'] ?? 0));
+            $durationSeconds = $workflow->durationSeconds($clips, (int) ($validated['duration_seconds'] ?? 0));
 
             if (! $entitlements->allows($request->user(), 'upload')) {
-                return $this->upgradeRequired('Upload transcription is not included in your current plan.');
+                return $this->upgradeRequired('Upload transcription is not available for this account.');
             }
 
             if (! $entitlements->canTranscribe($request->user(), $durationSeconds)) {
-                return $this->upgradeRequired('You have reached this month\'s transcription quota.');
+                return $this->upgradeRequired('You have used today\'s free transcription minutes. Buy more minutes to continue today.');
             }
 
-            $transcript = $this->createQueuedTranscript($request, $project, 'upload', $clips, $durationSeconds);
-
-            ProcessWebTranscriptJob::dispatch($transcript->id, [
-                'language_code' => is_string($validated['language_code'] ?? null) ? $validated['language_code'] : null,
-                'clips' => $this->storedClipPayloads($transcript),
-            ]);
+            $transcript = $workflow->queueTranscript($request, $project, 'upload', $clips, $durationSeconds);
+            $workflow->startApiTranscription(
+                $request,
+                $transcript,
+                is_string($validated['language_code'] ?? null) ? $validated['language_code'] : null,
+            );
 
             return response()->json([
                 'message' => 'Upload queued for transcription.',
@@ -87,7 +80,7 @@ class TranscriptionController extends Controller
         } catch (RuntimeException) {
             return response()->json(['message' => 'Audio upload could not be processed.'], 422);
         } finally {
-            $chunker->cleanup($cleanup);
+            $workflow->cleanupPreparedUpload($cleanup);
         }
     }
 
@@ -96,6 +89,7 @@ class TranscriptionController extends Controller
         TranscriptProject $project,
         EntitlementService $entitlements,
         TranscriptPayloadPresenter $payloads,
+        TranscriptionWorkflowService $workflow,
     ): JsonResponse {
         $this->authorizeProject($request, $project);
 
@@ -109,26 +103,22 @@ class TranscriptionController extends Controller
         ]);
 
         if (! $entitlements->allows($request->user(), 'live')) {
-            return $this->upgradeRequired('Live transcription is not included in your current plan.');
+            return $this->upgradeRequired('Live transcription is not available for this account.');
         }
 
         if (! $entitlements->canTranscribe($request->user(), (int) ($validated['duration_seconds'] ?? 0))) {
-            return $this->upgradeRequired('You have reached this month\'s transcription quota.');
+            return $this->upgradeRequired('You have used today\'s free transcription minutes. Buy more minutes to continue today.');
         }
 
-        $clips = $this->normalizeClips($request, $validated);
-        $durationSeconds = $this->durationSeconds($clips, (int) ($validated['duration_seconds'] ?? 0));
+        $clips = $workflow->normalizeClips($request, $validated);
+        $durationSeconds = $workflow->durationSeconds($clips, (int) ($validated['duration_seconds'] ?? 0));
 
-        if (app(WebApiTranscriptionClient::class)->batchIsTooLarge($clips)) {
+        if ($workflow->batchIsTooLarge($clips)) {
             return response()->json(['message' => 'Audio is too big.'], 422);
         }
 
-        $transcript = $this->createQueuedTranscript($request, $project, 'live', $clips, $durationSeconds);
-
-        ProcessWebTranscriptJob::dispatch($transcript->id, [
-            'language_code' => $validated['language_code'] ?? null,
-            'clips' => $this->storedClipPayloads($transcript),
-        ]);
+        $transcript = $workflow->queueTranscript($request, $project, 'live', $clips, $durationSeconds);
+        $workflow->startApiTranscription($request, $transcript, $validated['language_code'] ?? null);
 
         return response()->json([
             'message' => 'Live clip queued for transcription.',
@@ -141,8 +131,10 @@ class TranscriptionController extends Controller
         TranscriptProject $project,
         EntitlementService $entitlements,
         TranscriptPayloadPresenter $payloads,
+        TranscriptionWorkflowService $workflow,
     ): JsonResponse {
         $this->authorizeProject($request, $project);
+        $workflow->syncApiTranscriptionJobs($request, $project);
 
         $project->load(['transcripts.sections' => fn ($query) => $query->orderBy('position')]);
 
@@ -167,7 +159,7 @@ class TranscriptionController extends Controller
         TranscriptPayloadPresenter $payloads,
     ): JsonResponse {
         $this->authorizeProject($request, $project);
-        abort_unless($transcript->project_id === $project->id, 404);
+        $this->authorizeTranscript($project, $transcript);
 
         app(WebTranscriptProcessor::class)->appendLog($transcript, 'cancelled', 'Cancelled');
 
@@ -177,118 +169,15 @@ class TranscriptionController extends Controller
         ]);
     }
 
-    /**
-     * @param  array<int, array<string, mixed>>  $clips
-     */
-    private function createQueuedTranscript(Request $request, TranscriptProject $project, string $source, array $clips, int $durationSeconds): Transcript
-    {
-        $transcript = $project->transcripts()->create([
-            'source' => $source,
-            'status' => 'queued',
-            'duration_seconds' => $durationSeconds,
-            'processing_log' => [],
-        ]);
-
-        $storedClips = [];
-
-        foreach ($clips as $queueIndex => $clip) {
-            $audio = $clip['audio'];
-            $extension = $audio?->getClientOriginalExtension() ?: 'webm';
-            $filename = 'clip-'.$queueIndex.'-'.Str::uuid().'.'.$extension;
-            $path = $audio->storeAs(
-                'web-transcripts/'.$request->user()->id.'/'.$project->id.'/'.$transcript->id,
-                $filename,
-                'local',
-            );
-
-            $storedClips[] = [
-                ...$clip,
-                'audio' => null,
-                'path' => $path,
-                'name' => $audio?->getClientOriginalName() ?: $filename,
-            ];
-        }
-
-        $transcript->forceFill([
-            'audio_path' => (string) ($storedClips[0]['path'] ?? ''),
-            'processing_log' => [
-                [
-                    'status' => 'queued',
-                    'message' => 'Queued',
-                    'context' => ['clips' => $storedClips],
-                    'created_at' => now()->toISOString(),
-                ],
-            ],
-        ])->save();
-
-        return $transcript;
-    }
-
-    /**
-     * @param  array<string, mixed>  $validated
-     * @return array<int, array<string, mixed>>
-     */
-    private function normalizeClips(Request $request, array $validated): array
-    {
-        $audio = $request->file('audio');
-        $files = is_array($audio) ? array_values($audio) : [$audio];
-
-        return array_map(function ($file, int $index) use ($validated): array {
-            return [
-                'audio' => $file,
-                'clip_index' => $this->indexedValue($validated, 'clip_index', $index) ?? $index,
-                'clip_start_ms' => $this->indexedValue($validated, 'clip_start_ms', $index) ?? 0,
-                'clip_end_ms' => $this->indexedValue($validated, 'clip_end_ms', $index) ?? (int) ($validated['duration_seconds'] ?? 0) * 1000,
-                'language_code' => $this->indexedValue($validated, 'language_code', $index),
-            ];
-        }, $files, array_keys($files));
-    }
-
-    /**
-     * @param  array<string, mixed>  $validated
-     */
-    private function indexedValue(array $validated, string $key, int $index): mixed
-    {
-        $value = $validated[$key] ?? null;
-
-        return is_array($value) ? ($value[$index] ?? null) : ($index === 0 ? $value : null);
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $clips
-     */
-    private function durationSeconds(array $clips, int $fallback): int
-    {
-        $durationMs = 0;
-
-        foreach ($clips as $clip) {
-            $startMs = $clip['clip_start_ms'] ?? null;
-            $endMs = $clip['clip_end_ms'] ?? null;
-
-            if (! is_numeric($startMs) || ! is_numeric($endMs)) {
-                return $fallback;
-            }
-
-            $durationMs += max(0, (int) $endMs - (int) $startMs);
-        }
-
-        return $durationMs > 0 ? (int) ceil($durationMs / 1000) : $fallback;
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function storedClipPayloads(Transcript $transcript): array
-    {
-        $log = $transcript->processing_log ?? [];
-        $first = $log[0]['context']['clips'] ?? [];
-
-        return is_array($first) ? array_values(array_filter($first, 'is_array')) : [];
-    }
-
     private function authorizeProject(Request $request, TranscriptProject $project): void
     {
         $this->authorize('view', $project);
+    }
+
+    private function authorizeTranscript(TranscriptProject $project, Transcript $transcript): void
+    {
+        abort_unless($transcript->project_id === $project->id, 404);
+        $this->authorize('update', $transcript);
     }
 
     private function upgradeRequired(string $message): JsonResponse

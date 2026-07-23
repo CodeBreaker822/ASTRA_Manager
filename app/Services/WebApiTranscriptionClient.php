@@ -29,22 +29,56 @@ class WebApiTranscriptionClient
         $license = $this->licenses->provisionForUser($user);
 
         $response = $this->api->transcribe(
-            $this->transcribeRequest($clips, $license->app_token, $languageCode),
+            $this->transcribeRequest($clips, $license->app_token, $languageCode, 'sync'),
             app(AppSettingsService::class),
         );
         $payload = $this->payload($response);
 
-        if ($response->getStatusCode() !== 202) {
+        if ($response->getStatusCode() >= 400) {
             throw new \RuntimeException('Audio upload could not be processed.');
         }
 
-        $jobId = (string) ($payload['job_id'] ?? '');
+        return $payload;
+    }
 
-        if ($jobId === '') {
+    /**
+     * @param  array<int, array<string, mixed>>  $clips
+     * @return array<string, mixed>
+     */
+    public function queue(User $user, array $clips, ?string $languageCode = null): array
+    {
+        $license = $this->licenses->provisionForUser($user);
+
+        $response = $this->api->transcribe(
+            $this->transcribeRequest($clips, $license->app_token, $languageCode, 'async'),
+            app(AppSettingsService::class),
+        );
+        $payload = $this->payload($response);
+
+        if ($response->getStatusCode() !== 202 || blank($payload['job_id'] ?? null)) {
             throw new \RuntimeException('Transcription job could not be created.');
         }
 
-        return $this->pollJob($jobId, $license->app_token);
+        return $payload;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function jobStatus(User $user, string $jobId): array
+    {
+        $license = $this->licenses->provisionForUser($user);
+        $response = $this->api->transcriptionJobStatus(
+            Request::create('/api/transcribe/jobs/'.$jobId, 'GET', [], [], [], $this->server($license->app_token)),
+            $jobId,
+        );
+        $payload = $this->payload($response);
+
+        if ($response->getStatusCode() >= 500 && ($payload['status'] ?? null) !== 'failed') {
+            throw new \RuntimeException('Audio upload could not be processed.');
+        }
+
+        return $payload;
     }
 
     /**
@@ -106,7 +140,7 @@ class WebApiTranscriptionClient
     /**
      * @param  array<int, array<string, mixed>>  $clips
      */
-    private function transcribeRequest(array $clips, string $licenseKey, ?string $languageCode): Request
+    private function transcribeRequest(array $clips, string $licenseKey, ?string $languageCode, string $responseMode): Request
     {
         $files = [];
         $clipIndex = [];
@@ -136,7 +170,7 @@ class WebApiTranscriptionClient
         }
 
         return Request::create('/api/transcribe', 'POST', [
-            'response_mode' => 'async',
+            'response_mode' => $responseMode,
             'clip_index' => $clipIndex,
             'clip_start_ms' => $clipStartMs,
             'clip_end_ms' => $clipEndMs,
@@ -144,35 +178,6 @@ class WebApiTranscriptionClient
         ], [], [
             'audio' => $files,
         ], $this->server($licenseKey));
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function pollJob(string $jobId, string $licenseKey): array
-    {
-        $deadline = time() + 300;
-
-        do {
-            $response = $this->api->transcriptionJobStatus(
-                Request::create('/api/transcribe/jobs/'.$jobId, 'GET', [], [], [], $this->server($licenseKey)),
-                $jobId,
-            );
-            $payload = $this->payload($response);
-            $status = (string) ($payload['status'] ?? '');
-
-            if ($status === 'completed') {
-                return is_array($payload['result'] ?? null) ? $payload['result'] : [];
-            }
-
-            if ($status === 'failed' || $response->getStatusCode() >= 400) {
-                throw new \RuntimeException('Audio upload could not be processed.');
-            }
-
-            sleep(2);
-        } while (time() < $deadline);
-
-        throw new \RuntimeException('Audio upload could not be processed.');
     }
 
     /**

@@ -30,13 +30,14 @@ class BillingController extends Controller
         return Inertia::render('settings/Billing', [
             'billing' => [
                 'provider' => config('services.billing.provider'),
-                'pro_checkout_url' => config('services.billing.pro_checkout_url'),
-                'team_checkout_url' => config('services.billing.team_checkout_url'),
-                'checkout_available' => $payMongo->isConfiguredFor('pro') || $payMongo->isConfiguredFor('team'),
+                'checkout_available' => $payMongo->isConfiguredFor('payg', 'audio')
+                    || $payMongo->isConfiguredFor('payg', 'polish')
+                    || $payMongo->isConfiguredFor('payg', 'summary'),
                 'portal_available' => false,
                 'paymongo_ready' => [
-                    'pro' => $payMongo->isConfiguredFor('pro'),
-                    'team' => $payMongo->isConfiguredFor('team'),
+                    'audio' => $payMongo->isConfiguredFor('payg', 'audio'),
+                    'polish' => $payMongo->isConfiguredFor('payg', 'polish'),
+                    'summary' => $payMongo->isConfiguredFor('payg', 'summary'),
                 ],
             ],
             'entitlements' => $entitlements->summaryFor($user),
@@ -50,19 +51,17 @@ class BillingController extends Controller
         abort_unless($user instanceof User, 403);
 
         $validated = $request->validate([
-            'plan' => ['required', 'string', 'in:pro,team'],
+            'plan' => ['required', 'string', 'in:payg'],
+            'credit_type' => ['nullable', 'string', 'in:audio,polish,summary'],
         ]);
         $planKey = $validated['plan'];
+        $creditType = (string) ($validated['credit_type'] ?? 'audio');
         $plan = $plans->plan($planKey);
 
         if (! is_array($plan)) {
             return back()->withErrors([
-                'billing' => 'Selected plan is not available.',
+                'billing' => 'Selected credit pack is not available.',
             ]);
-        }
-
-        if ($user->plan === $planKey) {
-            return back()->with('success', 'That plan is already active.');
         }
 
         $transaction = BillingTransaction::query()->create([
@@ -71,12 +70,12 @@ class BillingController extends Controller
             'plan' => $planKey,
             'reference' => 'JERVA-'.$user->id.'-'.Str::upper(Str::random(12)),
             'status' => 'pending',
-            'amount' => $payMongo->amountFor($planKey),
+            'amount' => $payMongo->amountFor($planKey, $plan, $creditType),
             'currency' => 'PHP',
         ]);
 
         try {
-            $checkout = $payMongo->createCheckoutSession($user, $planKey, $plan, $transaction);
+            $checkout = $payMongo->createCheckoutSession($user, $planKey, $plan, $transaction, $creditType);
         } catch (RuntimeException $exception) {
             Log::warning('PayMongo checkout could not be created.', [
                 'user_id' => $user->id,
@@ -108,7 +107,7 @@ class BillingController extends Controller
     {
         return redirect()
             ->route('billing.edit')
-            ->with('success', 'PayMongo checkout completed. Your plan will update after payment confirmation.');
+            ->with('success', 'PayMongo checkout completed. Your credits will appear after payment confirmation.');
     }
 
     public function cancel(): RedirectResponse

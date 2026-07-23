@@ -36,6 +36,7 @@ type UploadClip = {
     rangeLabel: string;
     status:
         | 'Waiting'
+        | 'Queued'
         | 'Sending'
         | 'Processing'
         | 'Complete'
@@ -51,8 +52,6 @@ type UploadResponse = {
 };
 
 const MAX_BATCH_CLIPS = 20;
-const MAX_BATCH_DURATION_MS = 1_200_000;
-const SECTION_MS = 60_000;
 
 export const useAudioUpload = (options: {
     csrfToken: () => string;
@@ -70,6 +69,7 @@ export const useAudioUpload = (options: {
         | 'Ready'
         | 'Preparing source'
         | 'Uploading source'
+        | 'Queued'
         | 'Processing'
         | 'Pausing'
         | 'Paused'
@@ -100,11 +100,27 @@ export const useAudioUpload = (options: {
     const completedCount = computed(
         () => clips.value.filter((clip) => clip.status === 'Complete').length,
     );
-    const progressPercent = computed(() =>
-        clips.value.length === 0
-            ? 0
-            : Math.round((completedCount.value / clips.value.length) * 100),
-    );
+    const progressPercent = computed(() => {
+        if (clips.value.length === 0) {
+            return 0;
+        }
+
+        if (status.value === 'Uploading source') {
+            return uploadPercent.value;
+        }
+
+        if (status.value === 'Queued') {
+            return 0;
+        }
+
+        if (status.value === 'Processing') {
+            return Math.round(
+                (completedCount.value / clips.value.length) * 100,
+            );
+        }
+
+        return Math.round((completedCount.value / clips.value.length) * 100);
+    });
     const statusLine = computed(() =>
         status.value === 'Uploading source'
             ? `Uploading source ${uploadPercent.value}%`
@@ -122,6 +138,7 @@ export const useAudioUpload = (options: {
         () =>
             hasSession.value &&
             !inFlight.value &&
+            status.value === 'Paused' &&
             unfinishedClips().length > 0 &&
             !retryable.value,
     );
@@ -141,13 +158,7 @@ export const useAudioUpload = (options: {
         metaLine.value = `${formatBytes(file.size)} selected`;
         status.value = 'Ready';
 
-        try {
-            await prepareClips(file);
-        } catch {
-            status.value = 'Failed';
-            retryable.value = true;
-            options.onError('Audio upload could not be processed.');
-        }
+        prepareClips();
     };
 
     const start = async () => {
@@ -260,11 +271,11 @@ export const useAudioUpload = (options: {
                 }
 
                 batch.forEach((clip) => {
-                    clip.status = 'Processing';
-                    clip.meta = 'Queued from FFmpeg chunk';
+                    clip.status = 'Queued';
+                    clip.meta = 'Queued for server processing';
                 });
-                status.value = 'Processing';
-                metaLine.value = `Processing ${batch[0].index + 1} of ${clips.value.length}`;
+                status.value = 'Queued';
+                metaLine.value = 'Queued for server processing';
 
                 if (payload.transcript) {
                     queuedTranscriptIds.value.push(payload.transcript.id);
@@ -299,7 +310,7 @@ export const useAudioUpload = (options: {
         }
 
         inFlight.value = false;
-        status.value = 'Processing';
+        status.value = 'Queued';
     };
 
     const finish = () => {
@@ -322,6 +333,60 @@ export const useAudioUpload = (options: {
         options.onSuccess('Audio transcription completed.');
     };
 
+    const syncTranscripts = (transcripts: Transcript[]) => {
+        if (queuedTranscriptIds.value.length === 0) {
+            return;
+        }
+
+        const tracked = transcripts.filter((transcript) =>
+            queuedTranscriptIds.value.includes(transcript.id),
+        );
+
+        if (tracked.length === 0) {
+            return;
+        }
+
+        if (tracked.some((transcript) => transcript.status === 'failed')) {
+            markFailed(clips.value);
+
+            return;
+        }
+
+        if (tracked.every((transcript) => transcript.status === 'completed')) {
+            finish();
+
+            return;
+        }
+
+        if (tracked.every((transcript) => transcript.status === 'queued')) {
+            status.value = 'Queued';
+            metaLine.value = `Queued ${clips.value.length} ${clips.value.length === 1 ? 'clip' : 'clips'}`;
+            clips.value.forEach((clip) => {
+                if (
+                    !['Failed', 'Cancelled', 'Complete'].includes(clip.status)
+                ) {
+                    clip.status = 'Queued';
+                    clip.meta = 'Queued for server processing';
+                }
+            });
+
+            return;
+        }
+
+        if (tracked.some((transcript) => transcript.status === 'processing')) {
+            status.value = 'Processing';
+            metaLine.value = `Processing ${clips.value.length} ${clips.value.length === 1 ? 'clip' : 'clips'}`;
+            clips.value.forEach((clip) => {
+                if (
+                    !['Failed', 'Cancelled', 'Complete'].includes(clip.status)
+                ) {
+                    clip.status = 'Processing';
+                    clip.meta = 'Server processing';
+                }
+            });
+        }
+    };
+
     const postBatch = (projectId: number) =>
         new Promise<UploadResponse>((resolve, reject) => {
             const form = new FormData();
@@ -335,10 +400,13 @@ export const useAudioUpload = (options: {
 
             form.append('audio', file);
             form.append('server_chunk', '1');
-            form.append(
-                'duration_seconds',
-                String(Math.ceil(selectedDurationMs.value / 1000)),
-            );
+
+            if (selectedDurationMs.value > 0) {
+                form.append(
+                    'duration_seconds',
+                    String(Math.ceil(selectedDurationMs.value / 1000)),
+                );
+            }
 
             const xhr = new XMLHttpRequest();
             currentXhr.value = xhr;
@@ -373,9 +441,7 @@ export const useAudioUpload = (options: {
                     return;
                 }
 
-                reject(
-                    new Error('Audio upload could not be processed.'),
-                );
+                reject(new Error('Audio upload could not be processed.'));
             };
             xhr.onerror = () =>
                 reject(new Error('Audio upload could not be processed.'));
@@ -408,40 +474,24 @@ export const useAudioUpload = (options: {
         options.onQueued();
     };
 
-    const prepareClips = async (file: File) => {
+    const prepareClips = () => {
         isPreparing.value = true;
         status.value = 'Preparing source';
 
         try {
-            const totalMs = await audioDurationMs(file);
-            const prepared: UploadClip[] = [];
-            selectedDurationMs.value = totalMs;
-
-            for (let startMs = 0; startMs < totalMs; startMs += SECTION_MS) {
-                const endMs = Math.min(totalMs, startMs + SECTION_MS);
-                prepared.push({
-                    index: prepared.length,
-                    startMs,
-                    endMs,
-                    durationMs: endMs - startMs,
-                    rangeLabel: `${formatTime(startMs)}-${formatTime(endMs)}`,
+            selectedDurationMs.value = 0;
+            clips.value = [
+                {
+                    index: 0,
+                    startMs: 0,
+                    endMs: 0,
+                    durationMs: 0,
+                    rangeLabel: 'Server chunking',
                     status: 'Waiting',
                     meta: 'Waiting for source upload',
-                });
-            }
-
-            if (
-                prepared.length > MAX_BATCH_CLIPS ||
-                totalDurationMs(prepared) > MAX_BATCH_DURATION_MS
-            ) {
-                resetSession();
-                options.onError('Audio is too big.');
-
-                return;
-            }
-
-            clips.value = prepared;
-            durationLabel.value = formatTime(totalMs);
+                },
+            ];
+            durationLabel.value = 'Server measured';
             status.value = 'Ready';
         } finally {
             isPreparing.value = false;
@@ -456,6 +506,7 @@ export const useAudioUpload = (options: {
             }
         });
         status.value = 'Failed';
+        metaLine.value = 'Audio upload could not be processed.';
         inFlight.value = false;
         retryable.value = true;
     };
@@ -506,6 +557,7 @@ export const useAudioUpload = (options: {
         retry,
         cancel,
         finish,
+        syncTranscripts,
     };
 };
 
@@ -519,34 +571,10 @@ const parseJson = (value: string): UploadResponse => {
     }
 };
 
-const totalDurationMs = (clips: UploadClip[]) =>
-    clips.reduce((total, clip) => total + clip.durationMs, 0);
-
 const formatBytes = (bytes: number) => {
     if (bytes < 1024 * 1024) {
         return `${Math.max(1, Math.round(bytes / 1024))} KB`;
     }
 
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-};
-
-const formatTime = (ms: number) => {
-    const seconds = Math.max(0, Math.round(ms / 1000));
-    const minutes = Math.floor(seconds / 60);
-    const rest = String(seconds % 60).padStart(2, '0');
-
-    return `${minutes}:${rest}`;
-};
-
-const audioDurationMs = async (file: File) => {
-    const context = new AudioContext();
-
-    try {
-        const buffer = await file.arrayBuffer();
-        const audio = await context.decodeAudioData(buffer.slice(0));
-
-        return Math.max(1, Math.round(audio.duration * 1000));
-    } finally {
-        await context.close();
-    }
 };

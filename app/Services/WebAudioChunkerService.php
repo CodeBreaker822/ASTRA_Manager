@@ -11,37 +11,43 @@ class WebAudioChunkerService
 {
     private const CHUNK_SECONDS = 60;
 
+    private const CHUNK_MS = self::CHUNK_SECONDS * 1000;
+
+    private const MIN_CHUNK_MS = 1000;
+
     /**
      * @return array{clips: array<int, array<string, mixed>>, cleanup: string|null}
      */
     public function clipsFromUpload(UploadedFile $file, int $durationSeconds): array
     {
-        if ($durationSeconds <= self::CHUNK_SECONDS) {
-            return [
-                'clips' => [[
-                    'audio' => $file,
-                    'clip_index' => 0,
-                    'clip_start_ms' => 0,
-                    'clip_end_ms' => max(0, $durationSeconds * 1000),
-                    'language_code' => null,
-                ]],
-                'cleanup' => null,
-            ];
-        }
-
         $sourcePath = $file->getRealPath();
 
         if (! is_string($sourcePath) || ! is_file($sourcePath)) {
             throw new RuntimeException('Audio upload could not be processed.');
         }
 
+        $durationMs = $this->audioDurationMs($sourcePath);
+
+        if ($durationMs <= self::CHUNK_MS) {
+            return [
+                'clips' => [[
+                    'audio' => $file,
+                    'clip_index' => 0,
+                    'clip_start_ms' => 0,
+                    'clip_end_ms' => max(0, $durationMs),
+                    'language_code' => null,
+                ]],
+                'cleanup' => null,
+            ];
+        }
+
         $directory = storage_path('app/private/web-upload-chunks/'.uniqid('web-', true));
         File::ensureDirectoryExists($directory);
 
         $clips = [];
+        $ranges = $this->chunkRanges($durationMs);
 
-        for ($startMs = 0, $index = 0; $startMs < ($durationSeconds * 1000); $startMs += self::CHUNK_SECONDS * 1000, $index++) {
-            $endMs = min($durationSeconds * 1000, $startMs + self::CHUNK_SECONDS * 1000);
+        foreach ($ranges as $index => [$startMs, $endMs]) {
             $durationMs = max(1, $endMs - $startMs);
             $outputPath = $directory.DIRECTORY_SEPARATOR.sprintf('chunk_%05d.wav', $index + 1);
 
@@ -106,5 +112,51 @@ class WebAudioChunkerService
         if (! $process->isSuccessful() || ! is_file($outputPath)) {
             throw new RuntimeException('Audio upload could not be processed.');
         }
+    }
+
+    /**
+     * @return array<int, array{0: int, 1: int}>
+     */
+    private function chunkRanges(int $durationMs): array
+    {
+        $ranges = [];
+
+        for ($startMs = 0; $startMs < $durationMs; $startMs += self::CHUNK_MS) {
+            $endMs = min($durationMs, $startMs + self::CHUNK_MS);
+
+            if (($endMs - $startMs) < self::MIN_CHUNK_MS && $ranges !== []) {
+                $ranges[array_key_last($ranges)][1] = $endMs;
+
+                continue;
+            }
+
+            $ranges[] = [$startMs, $endMs];
+        }
+
+        return $ranges;
+    }
+
+    private function audioDurationMs(string $sourcePath): int
+    {
+        $process = new Process([
+            base_path('ffmpeg/bin/ffmpeg.exe'),
+            '-hide_banner',
+            '-i',
+            $sourcePath,
+        ]);
+        $process->setTimeout(30);
+        $process->run();
+
+        $output = $process->getErrorOutput()."\n".$process->getOutput();
+
+        if (! preg_match('/Duration:\s*(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/', $output, $matches)) {
+            throw new RuntimeException('Audio upload could not be processed.');
+        }
+
+        $seconds = ((int) $matches[1] * 3600)
+            + ((int) $matches[2] * 60)
+            + (float) $matches[3];
+
+        return max(1, (int) ceil($seconds * 1000));
     }
 }

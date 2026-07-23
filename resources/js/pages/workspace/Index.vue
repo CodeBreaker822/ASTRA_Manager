@@ -1,17 +1,13 @@
 <script setup lang="ts">
-import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
+import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
 import {
-    Clock3,
     Download,
     FileText,
     ListChecks,
-    Mic,
-    Pencil,
     Play,
     Settings,
     Sparkles,
     Square,
-    Trash2,
     X,
 } from '@lucide/vue';
 import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue';
@@ -86,15 +82,23 @@ const props = defineProps<{
             key: string;
             name: string;
             minutes: number;
+            free_polish_uses_per_day: number;
+            free_summary_uses_per_day: number;
             features: Record<string, unknown>;
         };
         usage: {
             period: string;
             minutes_used: number;
             minutes_remaining: number;
+            minutes_credit_balance: number;
             seconds_transcribed: number;
+            seconds_credit_balance: number;
             polish_count: number;
             summary_count: number;
+            free_polish_remaining: number;
+            free_summary_remaining: number;
+            polish_credit_characters: number;
+            summary_credit_characters: number;
         };
     };
 }>();
@@ -103,13 +107,9 @@ const page = usePage();
 const toast = useWorkspaceToast();
 const { settingsHref } = useSettingsModal();
 const createOpen = ref(false);
-const renameOpen = ref(false);
-const onboardingOpen = ref(false);
-const pendingOpen = ref(false);
 const polishOpen = ref(false);
 const summaryOpen = ref(false);
 const logOpen = ref(false);
-const deleteOpen = ref(false);
 const workspaceMode = ref<'choose' | 'live' | 'upload'>('choose');
 const polishPreset = ref<
     'english' | 'filipino' | 'grammar' | 'translate_fix' | 'custom'
@@ -121,9 +121,7 @@ const exportOpen = ref(false);
 const exportSource = ref<'raw' | 'cleaned' | 'summary'>('raw');
 const isExporting = ref(false);
 const uploadInput = useTemplateRef<HTMLInputElement>('uploadInput');
-const pendingTrigger = useTemplateRef<HTMLButtonElement>('pendingTrigger');
 const logTrigger = useTemplateRef<HTMLButtonElement>('logTrigger');
-const pendingPanel = useTemplateRef<HTMLElement>('pendingPanel');
 const logPanel = useTemplateRef<HTMLElement>('logPanel');
 const localProject = ref<ActiveProject | null>(props.activeProject);
 const isActing = ref(false);
@@ -135,38 +133,85 @@ const userName = computed(() => {
     return user?.name ?? 'JERVA user';
 });
 
-const projectTitle = computed(() => displayProject.value?.title ?? 'Welcome');
+const totalTranscriptionMinutes = computed(
+    () =>
+        props.entitlements.plan.minutes +
+        props.entitlements.usage.minutes_credit_balance,
+);
+
+const projectTitle = computed(() => {
+    if (!displayProject.value) {
+        return 'Welcome';
+    }
+
+    if (workspaceMode.value === 'upload') {
+        return `${displayProject.value.title} - Upload transcript`;
+    }
+
+    if (workspaceMode.value === 'live') {
+        return `${displayProject.value.title} - Live transcript`;
+    }
+
+    return displayProject.value.title;
+});
 
 const displayProject = computed(
     () => localProject.value ?? props.activeProject,
 );
 
 const hasTranscriptContent = computed(
+    () => transcriptDisplayItems.value.length > 0,
+);
+
+const transcriptDisplayItems = computed(
     () =>
-        displayProject.value?.transcripts.some(
+        displayProject.value?.transcripts.filter(
             (transcript) =>
                 transcript.raw_text ||
                 transcript.cleaned_text ||
                 transcript.summary_text ||
-                ['queued', 'processing', 'failed'].includes(
-                    transcript.status,
-                ) ||
                 transcript.sections.length > 0,
-        ) ?? false,
+        ) ?? [],
+);
+
+const transcriptRows = computed(() =>
+    transcriptDisplayItems.value.flatMap((transcript) => {
+        if (transcript.sections.length > 0) {
+            return transcript.sections.map((section) => ({
+                id: `${transcript.id}-${section.id}`,
+                range: sectionRangeLabel(section),
+                text: section.cleaned_text ?? section.text,
+                transcript,
+            }));
+        }
+
+        return [
+            {
+                id: `${transcript.id}-raw`,
+                range: '',
+                text:
+                    transcript.cleaned_text ??
+                    transcript.raw_text ??
+                    transcript.summary_text ??
+                    '',
+                transcript,
+            },
+        ];
+    }),
 );
 
 const liveTranscriptCount = computed(
     () =>
-        displayProject.value?.transcripts.filter(
+        transcriptDisplayItems.value.filter(
             (transcript) => transcript.source === 'live',
-        ).length ?? 0,
+        ).length,
 );
 
 const uploadTranscriptCount = computed(
     () =>
-        displayProject.value?.transcripts.filter(
+        transcriptDisplayItems.value.filter(
             (transcript) => transcript.source === 'upload',
-        ).length ?? 0,
+        ).length,
 );
 
 const activeTranscriptActionMode = computed(() => {
@@ -215,6 +260,14 @@ const emptyPanel = computed(() => {
 
 const primaryTranscript = computed(
     () =>
+        displayProject.value?.transcripts.find(
+            (transcript) =>
+                transcript.source === workspaceMode.value &&
+                transcript.status === 'completed',
+        ) ??
+        displayProject.value?.transcripts.find(
+            (transcript) => transcript.source === workspaceMode.value,
+        ) ??
         displayProject.value?.transcripts.find(
             (transcript) => transcript.status === 'completed',
         ) ??
@@ -286,10 +339,6 @@ const createForm = useForm({
     title: '',
 });
 
-const renameForm = useForm({
-    title: props.activeProject?.title ?? '',
-});
-
 const polishPresets = [
     {
         key: 'english',
@@ -316,13 +365,6 @@ const polishPresets = [
             'Translate every non-English sentence, phrase, or word into polished English, then fix grammar, spelling, punctuation, capitalization, and obvious speech-to-text mistakes. Preserve meaning, speaker intent, names, titles, numbers, and time order.',
     },
 ] as const;
-
-watch(
-    () => props.activeProject?.title,
-    (title) => {
-        renameForm.title = title ?? '';
-    },
-);
 
 watch(
     () => props.activeProject,
@@ -392,7 +434,7 @@ watch(
 );
 
 watch(
-    () => pendingOpen.value || logOpen.value,
+    () => logOpen.value,
     (open) => {
         document.body.style.overflow = open ? 'hidden' : '';
     },
@@ -411,32 +453,6 @@ const createProject = () => {
             createForm.reset();
             createOpen.value = false;
             workspaceMode.value = 'choose';
-        },
-    });
-};
-
-const renameProject = () => {
-    if (!props.activeProject) {
-        return;
-    }
-
-    renameForm.put(`/workspace/${props.activeProject.id}`, {
-        preserveScroll: true,
-        onSuccess: () => {
-            renameOpen.value = false;
-        },
-    });
-};
-
-const deleteProject = () => {
-    if (!props.activeProject) {
-        return;
-    }
-
-    router.delete(`/workspace/${props.activeProject.id}`, {
-        preserveScroll: true,
-        onSuccess: () => {
-            deleteOpen.value = false;
         },
     });
 };
@@ -495,6 +511,7 @@ const refreshStatus = async () => {
         updated_at: displayProject.value.updated_at,
         transcripts_count: payload.project.transcripts.length,
     };
+    upload.syncTranscripts(payload.project.transcripts);
 };
 
 const addTranscriptToLocal = (transcript: Transcript) => {
@@ -533,7 +550,6 @@ const upload = useAudioUpload({
         toast.error(message);
     },
 });
-const uploadClips = computed(() => upload.clips.value);
 const live = useLiveRecorder({
     csrfToken,
     projectId: () => displayProject.value?.id ?? null,
@@ -547,7 +563,6 @@ const live = useLiveRecorder({
         toast.error(message);
     },
 });
-const liveClips = computed(() => live.clips.value);
 
 const chooseUpload = () => {
     workspaceMode.value = 'upload';
@@ -567,7 +582,7 @@ const toggleLive = async () => {
 
     if (!canUseLive.value && !live.isRecording.value) {
         upgradeBanner.value =
-            'Live transcription is not included in your current plan.';
+            'Live transcription is not available for this account.';
 
         return;
     }
@@ -794,19 +809,20 @@ const filenameFromDisposition = (header: string | null, fallback: string) => {
     return match?.[1] ?? fallback;
 };
 
-const latestProcessingMessage = (transcript: Transcript) =>
-    [...transcript.processing_log].reverse().find((entry) => entry.message)
-        ?.message ?? 'Transcribing';
+const formatTranscriptTime = (ms: number | null) => {
+    const seconds = Math.max(0, Math.floor((ms ?? 0) / 1000));
+    const minutes = Math.floor(seconds / 60);
+    const rest = String(seconds % 60).padStart(2, '0');
 
-const openPending = async () => {
-    pendingOpen.value = true;
-    await nextTick();
-    pendingPanel.value?.focus();
+    return `${String(minutes).padStart(2, '0')}:${rest}`;
 };
 
-const closePending = () => {
-    pendingOpen.value = false;
-    pendingTrigger.value?.focus();
+const sectionRangeLabel = (section: TranscriptSection) => {
+    if (section.started_at_ms === null && section.ended_at_ms === null) {
+        return '';
+    }
+
+    return `${formatTranscriptTime(section.started_at_ms)}-${formatTranscriptTime(section.ended_at_ms)}`;
 };
 
 const openLog = async () => {
@@ -820,15 +836,8 @@ const closeLog = () => {
     logTrigger.value?.focus();
 };
 
-const dismissOnboarding = () => {
-    onboardingOpen.value = false;
-    localStorage.setItem('jerva.workspace.onboarded', 'true');
-};
-
 onMounted(() => {
     showFlashToast();
-    onboardingOpen.value =
-        localStorage.getItem('jerva.workspace.onboarded') !== 'true';
 
     if (pendingTranscripts.value.length > 0) {
         startPolling();
@@ -861,77 +870,20 @@ watch(() => page.props.flash, showFlashToast);
         </div>
 
         <div class="hidden min-h-screen lg:flex">
-            <Dialog v-model:open="onboardingOpen">
-                <DialogContent class="border-slate-200 bg-white shadow-2xl">
-                    <DialogHeader>
-                        <DialogTitle
-                            class="text-base font-semibold text-slate-950"
-                        >
-                            Welcome to JERVA Web
-                        </DialogTitle>
-                        <DialogDescription class="text-sm text-slate-600">
-                            Your browser workspace is online-only and uses the
-                            server transcription pipeline.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div class="grid gap-3">
-                        <div
-                            class="rounded-lg border border-blue-100 bg-blue-50 p-4"
-                        >
-                            <p class="text-sm font-semibold text-blue-950">
-                                Create or open a transcript project
-                            </p>
-                            <p class="mt-1 text-sm leading-6 text-blue-900">
-                                Projects keep uploads, live clips, exports, and
-                                processing logs together.
-                            </p>
-                        </div>
-                        <div
-                            class="rounded-lg border border-blue-100 bg-blue-50 p-4"
-                        >
-                            <p class="text-sm font-semibold text-blue-950">
-                                Capture audio online
-                            </p>
-                            <p class="mt-1 text-sm leading-6 text-blue-900">
-                                Use Live for browser chunks or Upload Audio for
-                                an existing file.
-                            </p>
-                        </div>
-                        <div
-                            class="rounded-lg border border-blue-100 bg-blue-50 p-4"
-                        >
-                            <p class="text-sm font-semibold text-blue-950">
-                                Finish the transcript
-                            </p>
-                            <p class="mt-1 text-sm leading-6 text-blue-900">
-                                Polish, summarize, export, or inspect the
-                                processing log from the dock.
-                            </p>
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button @click="dismissOnboarding">Start work</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
             <aside
                 class="flex w-[19rem] shrink-0 flex-col border-r border-slate-200 bg-slate-50"
             >
                 <div class="border-b border-slate-200 p-4">
-                    <div class="flex items-center gap-3">
-                        <span
-                            class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white"
-                        >
-                            <Mic class="size-5" />
-                        </span>
-                        <div>
+                    <div class="flex h-[72px] items-center gap-3 px-2">
+                        <img
+                            src="/JervaLogo.png"
+                            alt="JERVA Transcriber"
+                            class="h-10 w-10 shrink-0 object-contain"
+                        />
+                        <div class="min-w-0">
                             <h1 class="text-base font-semibold text-slate-950">
                                 JERVA Transcriber
                             </h1>
-                            <p class="text-xs text-slate-600">
-                                Online workspace
-                            </p>
                         </div>
                     </div>
 
@@ -1035,11 +987,11 @@ watch(() => page.props.flash, showFlashToast);
                         class="block rounded-lg border border-blue-100 bg-blue-50 p-4 transition-colors hover:border-blue-200 hover:bg-blue-100"
                     >
                         <p class="text-sm font-semibold text-blue-950">
-                            {{ entitlements.plan.name }} Plan
+                            Today's allowance
                         </p>
                         <p class="mt-1 text-xs text-blue-900">
                             {{ entitlements.usage.minutes_remaining }} of
-                            {{ entitlements.plan.minutes }} minutes remaining
+                            {{ totalTranscriptionMinutes }} minutes remaining
                         </p>
                     </Link>
                     <div class="mt-4 flex items-center justify-between gap-3">
@@ -1082,104 +1034,8 @@ watch(() => page.props.flash, showFlashToast);
                             {{ projectTitle }}
                         </h2>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <Dialog v-if="displayProject" v-model:open="renameOpen">
-                            <DialogTrigger as-child>
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    aria-label="Rename transcript"
-                                >
-                                    <Pencil class="size-4" />
-                                </Button>
-                            </DialogTrigger>
-                            <DialogContent
-                                class="border-slate-200 bg-white shadow-2xl"
-                            >
-                                <DialogHeader>
-                                    <DialogTitle
-                                        class="text-base font-semibold text-slate-950"
-                                    >
-                                        Rename Transcript
-                                    </DialogTitle>
-                                    <DialogDescription
-                                        class="text-sm text-slate-600"
-                                    >
-                                        Update the project title shown in the
-                                        sidebar and header.
-                                    </DialogDescription>
-                                </DialogHeader>
-                                <form
-                                    class="grid gap-4"
-                                    @submit.prevent="renameProject"
-                                >
-                                    <div class="grid gap-2">
-                                        <Label for="rename-title">Title</Label>
-                                        <Input
-                                            id="rename-title"
-                                            v-model="renameForm.title"
-                                            placeholder="Transcript title"
-                                        />
-                                        <InputError
-                                            :message="renameForm.errors.title"
-                                        />
-                                    </div>
-                                    <DialogFooter>
-                                        <ProcessingButton
-                                            type="submit"
-                                            :loading="renameForm.processing"
-                                        >
-                                            Save changes
-                                        </ProcessingButton>
-                                    </DialogFooter>
-                                </form>
-                            </DialogContent>
-                        </Dialog>
-                        <Dialog v-if="displayProject" v-model:open="deleteOpen">
-                            <DialogTrigger as-child>
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    aria-label="Delete transcript"
-                                >
-                                    <Trash2 class="size-4 text-red-700" />
-                                </Button>
-                            </DialogTrigger>
-                            <DialogContent
-                                class="border-slate-200 bg-white shadow-2xl"
-                            >
-                                <DialogHeader>
-                                    <DialogTitle
-                                        class="text-base font-semibold text-slate-950"
-                                    >
-                                        Delete transcript?
-                                    </DialogTitle>
-                                    <DialogDescription
-                                        class="text-sm text-slate-600"
-                                    >
-                                        This permanently deletes '{{
-                                            displayProject.title
-                                        }}' and its transcripts. This cannot be
-                                        undone.
-                                    </DialogDescription>
-                                </DialogHeader>
-                                <DialogFooter>
-                                    <Button
-                                        variant="outline"
-                                        @click="deleteOpen = false"
-                                    >
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        class="border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
-                                        @click="deleteProject"
-                                    >
-                                        Delete
-                                    </Button>
-                                </DialogFooter>
-                            </DialogContent>
-                        </Dialog>
-                        <Button as-child variant="ghost" size="icon">
+                    <div class="flex shrink-0 items-center gap-2">
+                        <Button as-child variant="outline" size="icon">
                             <Link
                                 :href="settingsHref('profile')"
                                 preserve-scroll
@@ -1194,7 +1050,7 @@ watch(() => page.props.flash, showFlashToast);
                 </header>
 
                 <div class="flex-1 overflow-y-auto pb-28">
-                    <div class="mx-auto max-w-3xl px-8 py-6">
+                    <div class="h-full px-8 py-6">
                         <div
                             v-if="upgradeBanner"
                             class="mb-4 flex items-center justify-between gap-4 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900"
@@ -1212,176 +1068,52 @@ watch(() => page.props.flash, showFlashToast);
                         </div>
 
                         <template v-if="hasTranscriptContent && displayProject">
-                            <div
-                                v-for="transcript in displayProject.transcripts"
-                                :key="transcript.id"
-                                class="mb-6 rounded-lg border border-slate-200 bg-white p-5"
+                            <article
+                                v-for="row in transcriptRows"
+                                :key="row.id"
+                                class="w-full border-b border-slate-200 py-4 last:border-b-0"
                             >
                                 <div
-                                    class="flex items-center justify-between gap-4"
-                                >
-                                    <div>
-                                        <p
-                                            class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
-                                        >
-                                            {{ transcript.source }}
-                                        </p>
-                                        <h3
-                                            class="mt-1 text-base font-semibold text-slate-950"
-                                        >
-                                            {{ transcript.status }}
-                                        </h3>
-                                    </div>
-                                    <span
-                                        class="rounded-lg border px-3 py-1 text-xs font-semibold"
-                                        :class="
-                                            transcript.status === 'failed'
-                                                ? 'border-red-200 bg-red-50 text-red-700'
-                                                : [
-                                                        'queued',
-                                                        'processing',
-                                                    ].includes(
-                                                        transcript.status,
-                                                    )
-                                                  ? 'border-blue-200 bg-blue-50 text-blue-900'
-                                                  : 'border-green-200 bg-green-50 text-green-700'
-                                        "
-                                    >
-                                        {{ transcript.status }}
-                                    </span>
-                                </div>
-                                <div
-                                    v-if="
-                                        ['queued', 'processing'].includes(
-                                            transcript.status,
-                                        )
-                                    "
-                                    class="mt-4 rounded-lg border border-blue-100 bg-blue-50 p-4"
+                                    class="flex w-full flex-col gap-3 md:flex-row md:items-start md:gap-6"
                                 >
                                     <div
-                                        class="flex items-center justify-between gap-3"
+                                        class="shrink-0 text-sm leading-6 font-medium tracking-[0.02em] text-blue-600 md:w-60"
                                     >
-                                        <p
-                                            class="text-sm font-semibold text-blue-950"
-                                        >
-                                            {{
-                                                latestProcessingMessage(
-                                                    transcript,
-                                                )
-                                            }}
-                                        </p>
-                                        <span
-                                            class="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[0.68rem] font-semibold text-blue-700 uppercase"
-                                        >
-                                            Processing
-                                        </span>
+                                        {{ row.range }}
                                     </div>
-                                    <div
-                                        class="mt-3 h-1 overflow-hidden rounded-full bg-blue-100"
+                                    <p
+                                        class="min-w-0 flex-1 text-sm leading-6 break-words whitespace-pre-line text-slate-950"
                                     >
-                                        <div
-                                            class="h-full w-full animate-pulse bg-blue-600"
-                                        />
-                                    </div>
+                                        {{ row.text }}
+                                    </p>
                                 </div>
-                                <div
-                                    v-if="transcript.status === 'failed'"
-                                    class="mt-4 rounded-lg border border-red-200 bg-red-50 p-4"
+                            </article>
+                            <div
+                                v-if="
+                                    displayProject.transcripts.some(
+                                        (transcript) =>
+                                            transcript.status === 'failed',
+                                    )
+                                "
+                                class="mt-4 rounded-lg border border-red-200 bg-red-50 p-4"
+                            >
+                                <p class="text-sm font-semibold text-red-700">
+                                    Audio upload could not be processed.
+                                </p>
+                                <Button
+                                    v-if="upload.canRetry.value"
+                                    class="mt-3 border border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
+                                    variant="outline"
+                                    @click="upload.retry"
                                 >
-                                    <p
-                                        class="text-sm font-semibold text-red-700"
-                                    >
-                                        Failed
-                                    </p>
-                                    <p class="mt-2 text-sm text-red-700">
-                                        {{
-                                            latestProcessingMessage(transcript)
-                                        }}
-                                    </p>
-                                    <Button
-                                        v-if="upload.canRetry.value"
-                                        class="mt-3 border border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
-                                        variant="outline"
-                                        @click="upload.retry"
-                                    >
-                                        Retry
-                                    </Button>
-                                </div>
-                                <div
-                                    v-if="
-                                        transcript.polish_status ===
-                                            'processing' ||
-                                        transcript.summary_status ===
-                                            'processing'
-                                    "
-                                    class="mt-4 rounded-lg border border-blue-100 bg-blue-50 p-4"
-                                >
-                                    <p
-                                        class="text-sm font-semibold text-blue-950"
-                                    >
-                                        Processing
-                                    </p>
-                                    <div
-                                        class="mt-3 h-1 overflow-hidden rounded-full bg-blue-100"
-                                    >
-                                        <div
-                                            class="h-full w-full animate-pulse bg-blue-600"
-                                        />
-                                    </div>
-                                </div>
-                                <div class="mt-4 grid gap-4">
-                                    <p
-                                        v-if="transcript.raw_text"
-                                        class="text-sm leading-6 text-slate-700"
-                                    >
-                                        {{ transcript.raw_text }}
-                                    </p>
-                                    <div
-                                        v-if="transcript.cleaned_text"
-                                        class="rounded-lg border border-blue-100 bg-blue-50 p-4"
-                                    >
-                                        <p
-                                            class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
-                                        >
-                                            Cleaned
-                                        </p>
-                                        <p
-                                            class="mt-2 text-sm leading-6 text-blue-950"
-                                        >
-                                            {{ transcript.cleaned_text }}
-                                        </p>
-                                    </div>
-                                    <div
-                                        v-if="transcript.summary_text"
-                                        class="rounded-lg border border-slate-200 bg-white p-4"
-                                    >
-                                        <p
-                                            class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
-                                        >
-                                            Summary
-                                        </p>
-                                        <p
-                                            class="mt-2 text-sm leading-6 text-slate-700"
-                                        >
-                                            {{ transcript.summary_text }}
-                                        </p>
-                                    </div>
-                                    <p
-                                        v-for="section in transcript.sections"
-                                        :key="section.id"
-                                        class="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-blue-950"
-                                    >
-                                        {{
-                                            section.cleaned_text ?? section.text
-                                        }}
-                                    </p>
-                                </div>
+                                    Retry
+                                </Button>
                             </div>
                         </template>
 
                         <div
                             v-else
-                            class="flex min-h-[calc(100vh-14rem)] flex-col items-center justify-center text-center"
+                            class="mx-auto flex min-h-[calc(100vh-14rem)] max-w-3xl flex-col items-center justify-center text-center"
                         >
                             <p
                                 class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
@@ -1407,7 +1139,7 @@ watch(() => page.props.flash, showFlashToast);
                     class="pointer-events-none absolute inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 px-6 py-4"
                 >
                     <div
-                        class="pointer-events-auto mx-auto flex max-w-[calc(100%-2rem)] flex-wrap items-center justify-center gap-3"
+                        class="pointer-events-auto mx-auto flex max-w-[calc(100%-2rem)] flex-col items-center justify-center gap-4"
                     >
                         <input
                             ref="uploadInput"
@@ -1470,14 +1202,6 @@ watch(() => page.props.flash, showFlashToast);
                                             {{ live.buttonBottom.value }}
                                         </span>
                                     </span>
-                                </button>
-                                <button
-                                    ref="pendingTrigger"
-                                    type="button"
-                                    class="h-12 min-w-32 cursor-pointer rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50"
-                                    @click="openPending"
-                                >
-                                    Pending clips
                                 </button>
                                 <div
                                     v-if="live.isPanelVisible.value"
@@ -1575,11 +1299,28 @@ watch(() => page.props.flash, showFlashToast);
                                     </div>
                                 </div>
                                 <span
-                                    class="max-w-28 truncate text-xs font-semibold text-slate-600"
+                                    v-if="
+                                        upload.hasFile.value ||
+                                        upload.isActive.value
+                                    "
+                                    class="max-w-28 truncate text-xs font-semibold text-slate-700"
                                 >
                                     {{ upload.statusLine.value }}
                                 </span>
+                                <span
+                                    v-if="
+                                        upload.hasFile.value ||
+                                        upload.isActive.value
+                                    "
+                                    class="w-10 text-right text-xs font-semibold text-blue-700"
+                                >
+                                    {{ upload.progressPercent.value }}%
+                                </span>
                                 <button
+                                    v-if="
+                                        upload.hasFile.value ||
+                                        upload.isActive.value
+                                    "
                                     type="button"
                                     class="h-12 min-w-20 cursor-pointer rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
                                     :disabled="!upload.canStart.value"
@@ -1588,6 +1329,7 @@ watch(() => page.props.flash, showFlashToast);
                                     Start
                                 </button>
                                 <button
+                                    v-if="upload.canPause.value"
                                     type="button"
                                     class="h-12 min-w-20 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
                                     :disabled="!upload.canPause.value"
@@ -1596,6 +1338,7 @@ watch(() => page.props.flash, showFlashToast);
                                     Pause
                                 </button>
                                 <button
+                                    v-if="upload.canContinue.value"
                                     type="button"
                                     class="h-12 min-w-24 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
                                     :disabled="!upload.canContinue.value"
@@ -1604,6 +1347,7 @@ watch(() => page.props.flash, showFlashToast);
                                     Continue
                                 </button>
                                 <button
+                                    v-if="upload.canRetry.value"
                                     type="button"
                                     class="h-12 min-w-20 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
                                     :disabled="!upload.canRetry.value"
@@ -1612,20 +1356,13 @@ watch(() => page.props.flash, showFlashToast);
                                     Retry
                                 </button>
                                 <button
+                                    v-if="upload.canCancel.value"
                                     type="button"
                                     class="h-12 min-w-20 cursor-pointer rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 transition hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                                     :disabled="!upload.canCancel.value"
                                     @click="upload.cancel"
                                 >
                                     Cancel
-                                </button>
-                                <button
-                                    ref="pendingTrigger"
-                                    type="button"
-                                    class="h-12 min-w-32 cursor-pointer rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50"
-                                    @click="openPending"
-                                >
-                                    Pending clips
                                 </button>
                             </div>
                         </template>
@@ -1777,14 +1514,6 @@ watch(() => page.props.flash, showFlashToast);
                                             </DialogDescription>
                                         </DialogHeader>
                                         <div class="grid gap-4">
-                                            <div
-                                                v-if="isSummarizing"
-                                                class="h-1 overflow-hidden rounded-full bg-blue-100"
-                                            >
-                                                <div
-                                                    class="h-full w-full animate-pulse bg-blue-600"
-                                                />
-                                            </div>
                                             <div
                                                 v-if="
                                                     primaryTranscript?.summary_text
@@ -1971,180 +1700,16 @@ watch(() => page.props.flash, showFlashToast);
                                     :disabled="!primaryTranscript"
                                     aria-label="Processing log"
                                     title="Processing log"
-                                    class="inline-flex h-11 min-w-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    class="inline-flex h-11 min-w-11 cursor-pointer items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                                     @click="openLog"
                                 >
                                     <ListChecks class="size-4" />
-                                    Log
                                 </button>
                             </div>
                         </template>
                     </div>
                 </div>
             </section>
-
-            <div
-                class="fixed inset-0 z-50 bg-slate-950/40 transition-opacity"
-                :class="
-                    pendingOpen
-                        ? 'opacity-100'
-                        : 'pointer-events-none opacity-0'
-                "
-                @click="closePending"
-            />
-            <aside
-                ref="pendingPanel"
-                class="fixed top-0 right-0 z-50 h-full w-96 border-l border-slate-200 bg-white shadow-2xl transition duration-300"
-                :class="pendingOpen ? 'translate-x-0' : 'translate-x-full'"
-                aria-label="Pending clips"
-                role="dialog"
-                aria-modal="true"
-                tabindex="-1"
-                @keydown.esc="closePending"
-            >
-                <header
-                    class="flex h-[72px] items-center justify-between border-b border-slate-200 px-6"
-                >
-                    <div>
-                        <p
-                            class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
-                        >
-                            Queue
-                        </p>
-                        <h2 class="text-lg font-semibold text-slate-950">
-                            Pending clips
-                        </h2>
-                    </div>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label="Close pending clips"
-                        @click="closePending"
-                    >
-                        <X class="size-5" />
-                    </Button>
-                </header>
-                <div class="p-6">
-                    <div
-                        v-if="
-                            pendingTranscripts.length === 0 &&
-                            uploadClips.length === 0 &&
-                            liveClips.length === 0
-                        "
-                        class="rounded-lg border border-dashed border-blue-200 bg-blue-50 p-4"
-                    >
-                        <Clock3 class="size-5 text-blue-600" />
-                        <p class="mt-3 text-sm text-blue-900">
-                            No recordings yet.
-                        </p>
-                    </div>
-                    <div v-else class="grid gap-3">
-                        <article
-                            v-for="clip in liveClips"
-                            :key="`live-${clip.index}`"
-                            class="rounded-lg border border-blue-100 bg-blue-50 p-4"
-                        >
-                            <p
-                                class="text-xs font-semibold text-blue-600 uppercase"
-                            >
-                                Clip {{ clip.index + 1 }}
-                            </p>
-                            <p
-                                class="mt-1 text-lg font-semibold text-slate-900"
-                            >
-                                {{ clip.rangeLabel }}
-                            </p>
-                            <div class="mt-3 flex items-center justify-between">
-                                <span
-                                    class="rounded-full border px-2.5 py-1 text-[0.68rem] font-semibold uppercase"
-                                    :class="
-                                        clip.status === 'Waiting'
-                                            ? 'border-slate-200 bg-white text-slate-600'
-                                            : clip.status === 'Sending'
-                                              ? 'border-blue-200 bg-blue-50 text-blue-700'
-                                              : clip.status === 'Saved'
-                                                ? 'border-green-200 bg-green-50 text-green-800'
-                                                : 'border-red-200 bg-red-50 text-red-700'
-                                    "
-                                >
-                                    {{ clip.status }}
-                                </span>
-                            </div>
-                            <div
-                                class="mt-3 h-1.5 overflow-hidden rounded-full bg-blue-100"
-                            >
-                                <div
-                                    class="h-full rounded-full bg-blue-600"
-                                    :style="{ width: `${clip.progress}%` }"
-                                />
-                            </div>
-                        </article>
-                        <article
-                            v-for="clip in uploadClips"
-                            :key="`upload-${clip.index}`"
-                            class="rounded-lg border border-blue-100 bg-blue-50 p-4"
-                        >
-                            <p
-                                class="text-xs font-semibold text-blue-600 uppercase"
-                            >
-                                Clip {{ clip.index + 1 }}
-                            </p>
-                            <p
-                                class="mt-1 text-lg font-semibold text-slate-900"
-                            >
-                                {{ clip.rangeLabel }}
-                            </p>
-                            <div class="mt-3 flex items-center justify-between">
-                                <span
-                                    class="rounded-full border px-2.5 py-1 text-[0.68rem] font-semibold uppercase"
-                                    :class="
-                                        clip.status === 'Waiting'
-                                            ? 'border-slate-200 bg-white text-slate-600'
-                                            : clip.status === 'Sending' ||
-                                                clip.status === 'Processing'
-                                              ? 'border-blue-200 bg-blue-50 text-blue-700'
-                                              : clip.status === 'Complete'
-                                                ? 'border-green-200 bg-green-50 text-green-800'
-                                                : 'border-red-200 bg-red-50 text-red-700'
-                                    "
-                                >
-                                    {{ clip.status }}
-                                </span>
-                                <span class="text-xs text-blue-900">
-                                    {{ clip.meta }}
-                                </span>
-                            </div>
-                            <div
-                                class="mt-3 h-1.5 overflow-hidden rounded-full bg-blue-100"
-                            >
-                                <div
-                                    class="h-full rounded-full bg-blue-600"
-                                    :style="{
-                                        width:
-                                            clip.status === 'Complete'
-                                                ? '100%'
-                                                : clip.status === 'Waiting'
-                                                  ? '0%'
-                                                  : '66%',
-                                    }"
-                                />
-                            </div>
-                        </article>
-                        <article
-                            v-for="transcript in pendingTranscripts"
-                            :key="transcript.id"
-                            class="rounded-lg border border-blue-100 bg-blue-50 p-4"
-                        >
-                            <p class="text-sm font-semibold text-blue-950">
-                                {{ transcript.source }} clip
-                            </p>
-                            <p class="mt-1 text-sm text-blue-900">
-                                {{ transcript.status }}
-                            </p>
-                        </article>
-                    </div>
-                </div>
-            </aside>
 
             <div
                 class="fixed inset-0 z-50 bg-slate-950/40 transition-opacity"

@@ -318,10 +318,6 @@ class RunPodSpeechToTextService
 
         $text = $this->textFrom($output);
 
-        if ($text === '') {
-            throw new RuntimeException(ServiceUserMessage::emptyTranscriptionResponse('RunPod'));
-        }
-
         return [
             'text' => $text,
             'timestamps' => $this->timestampsFrom($output),

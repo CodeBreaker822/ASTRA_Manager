@@ -39,10 +39,18 @@ class PayMongoWebhookController extends Controller
         }
 
         $plan = is_string($plan) && $plan !== '' ? $plan : $transaction->plan;
+        $creditType = data_get($resource, 'attributes.metadata.credit_type');
+        $creditType = in_array($creditType, ['audio', 'polish', 'summary'], true) ? $creditType : 'audio';
+        $creditMinutes = data_get($resource, 'attributes.metadata.credit_minutes');
+        $polishCharacters = data_get($resource, 'attributes.metadata.polish_characters');
+        $summaryCharacters = data_get($resource, 'attributes.metadata.summary_characters');
+        $planKey = in_array($plan, ['pro', 'team'], true) ? 'payg' : $plan;
 
-        if ($plans->plan($plan) === null) {
+        if ($plans->plan($planKey) === null) {
             return response()->json(['message' => 'Unknown plan.'], 422);
         }
+
+        $alreadyPaid = $transaction->status === 'paid';
 
         $transaction->update([
             'payment_id' => is_string($paymentId) ? $paymentId : $transaction->payment_id,
@@ -51,9 +59,31 @@ class PayMongoWebhookController extends Controller
             'paid_at' => Carbon::now(),
         ]);
 
-        $transaction->user()->update(['plan' => $plan]);
+        if (! $alreadyPaid) {
+            $plan = $plans->plan($planKey) ?? [];
 
-        return response()->json(['message' => 'Payment recorded.']);
+            if ($creditType === 'polish') {
+                $characters = is_numeric($polishCharacters)
+                    ? (int) $polishCharacters
+                    : (int) ($plan['polish_characters'] ?? 0);
+
+                $transaction->user()->increment('polish_credit_characters', $characters);
+            } elseif ($creditType === 'summary') {
+                $characters = is_numeric($summaryCharacters)
+                    ? (int) $summaryCharacters
+                    : (int) ($plan['summary_characters'] ?? 0);
+
+                $transaction->user()->increment('summary_credit_characters', $characters);
+            } else {
+                $minutes = is_numeric($creditMinutes)
+                    ? (int) $creditMinutes
+                    : (int) ($plan['minutes'] ?? 0);
+
+                $transaction->user()->increment('credit_seconds', $minutes * 60);
+            }
+        }
+
+        return response()->json(['message' => 'Payment recorded. Credits added.']);
     }
 
     private function hasValidSignature(Request $request): bool

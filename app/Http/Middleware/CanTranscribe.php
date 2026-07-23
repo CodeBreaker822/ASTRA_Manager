@@ -19,12 +19,12 @@ class CanTranscribe
         if (! app(EntitlementService::class)->canTranscribe($user)) {
             if ($request->expectsJson()) {
                 return response()->json([
-                    'message' => 'You have reached this month\'s transcription quota. Choose a higher plan to continue.',
+                    'message' => 'You have used today\'s free transcription minutes. Buy more minutes to continue today.',
                     'upgrade' => true,
                 ], 402);
             }
 
-            return back()->with('error', 'You have reached this month\'s transcription quota. Choose a higher plan to continue.');
+            return back()->with('error', 'You have used today\'s free transcription minutes. Buy more minutes to continue today.');
         }
 
         return $next($request);

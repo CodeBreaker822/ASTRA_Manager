@@ -116,6 +116,49 @@ it('uses provider priority for every batched clip and wraps fallback attempts', 
         ->assertJsonPath('fallback.used', true);
 });
 
+it('accepts successful empty transcription text as completed audio with no speech', function () {
+    $license = API::query()->create([
+        'app_name' => 'Empty Audio Test '.uniqid(),
+        'app_token' => 'empty-audio-license-'.uniqid(),
+        'can_post' => true,
+        'can_get' => true,
+        'is_active' => true,
+    ]);
+
+    TranscriptionProviderSetting::query()->create([
+        'provider' => 'deepgram',
+        'api_key' => 'deepgram-key',
+        'model' => 'nova-3',
+        'is_enabled' => true,
+        'sort_order' => 0,
+    ]);
+
+    Http::fake([
+        config('services.deepgram.listen_url').'*' => Http::response([
+            'results' => [
+                'channels' => [[
+                    'alternatives' => [[
+                        'transcript' => '',
+                        'words' => [],
+                    ]],
+                ]],
+            ],
+        ]),
+    ]);
+
+    $this->withToken($license->app_token)
+        ->post('/api/transcribe', [
+            'audio' => UploadedFile::fake()->createWithContent('silence.wav', 'silent audio'),
+            'clip_index' => 0,
+            'clip_start_ms' => 0,
+            'clip_end_ms' => 2000,
+        ], ['Accept' => 'application/json'])
+        ->assertOk()
+        ->assertJsonPath('text', '')
+        ->assertJsonPath('clips.0.text', '')
+        ->assertJsonPath('clips.0.fallback.used', false);
+});
+
 it('sends batched clips to runpod when runpod is the first provider', function () {
     $license = API::query()->create([
         'app_name' => 'RunPod Batch Test '.uniqid(),

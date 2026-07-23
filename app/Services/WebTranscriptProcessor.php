@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\Transcript;
 use App\Models\TranscriptSection;
-use App\Models\UsageRecord;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -55,6 +54,26 @@ class WebTranscriptProcessor
         }
     }
 
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    public function completeTranscription(Transcript $transcript, array $result): void
+    {
+        if ($transcript->fresh()?->status === 'cancelled') {
+            return;
+        }
+
+        $this->appendLog($transcript, 'processing', 'Finalizing');
+        $this->persistTranscriptionResult($transcript, $result);
+        $this->recordUsage($transcript);
+        $this->appendLog($transcript, 'completed', 'Complete');
+    }
+
+    public function failTranscription(Transcript $transcript): void
+    {
+        $this->fail($transcript, 'Audio upload could not be processed.');
+    }
+
     public function polish(Transcript $transcript, string $instruction): string
     {
         $text = $this->sourceText($transcript);
@@ -78,7 +97,7 @@ class WebTranscriptProcessor
         ])->save();
         $this->appendLog($transcript, 'polished', 'Transcript polished.');
 
-        $this->usageRecord($transcript)->increment('polish_count');
+        app(EntitlementService::class)->recordPolishUsage($user, mb_strlen($text));
 
         return $cleaned;
     }
@@ -88,6 +107,11 @@ class WebTranscriptProcessor
         $text = $source === 'cleaned'
             ? trim((string) ($transcript->cleaned_text ?? $transcript->raw_text))
             : trim((string) $transcript->raw_text);
+        $user = $transcript->project()->first()?->user()->first();
+
+        if (! $user instanceof User) {
+            throw new \RuntimeException('Transcript owner could not be resolved.');
+        }
 
         $result = $this->cleanText(
             $text,
@@ -103,7 +127,7 @@ class WebTranscriptProcessor
         ])->save();
         $this->appendLog($transcript, 'summarized', 'Transcript summarized.');
 
-        $this->usageRecord($transcript)->increment('summary_count');
+        app(EntitlementService::class)->recordSummaryUsage($user, mb_strlen($text));
 
         return $summary;
     }
@@ -295,17 +319,12 @@ class WebTranscriptProcessor
             return;
         }
 
-        $this->usageRecord($transcript)->increment('seconds_transcribed', $seconds);
-    }
-
-    private function usageRecord(Transcript $transcript): UsageRecord
-    {
         $user = $transcript->project()->first()?->user()->first();
 
         if (! $user instanceof User) {
             throw new \RuntimeException('Transcript owner could not be resolved.');
         }
 
-        return app(EntitlementService::class)->usageForCurrentPeriod($user);
+        app(EntitlementService::class)->recordTranscriptionUsage($user, $seconds);
     }
 }

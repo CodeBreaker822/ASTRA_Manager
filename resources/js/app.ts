@@ -1,4 +1,5 @@
 import { createInertiaApp } from '@inertiajs/vue3';
+import type { DefineComponent } from 'vue';
 import { initializeTheme } from '@/composables/useAppearance';
 import AppLayout from '@/layouts/AppLayout.vue';
 import AuthLayout from '@/layouts/AuthLayout.vue';
@@ -7,8 +8,23 @@ import SettingsLayout from '@/layouts/settings/Layout.vue';
 import { initializeFlashToast } from '@/lib/flashToast';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
+const pages = import.meta.glob<{ default: DefineComponent }>(
+    './pages/**/*.vue',
+    {
+        eager: true,
+    },
+);
 
 createInertiaApp({
+    resolve: (name) => {
+        const page = pages[`./pages/${name}.vue`];
+
+        if (!page) {
+            throw new Error(`Page not found: ${name}`);
+        }
+
+        return page.default;
+    },
     title: (title) => (title ? `${title} - ${appName}` : appName),
     layout: (name) => {
         switch (true) {

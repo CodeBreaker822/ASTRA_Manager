@@ -28,7 +28,7 @@ class TranscriptActionController extends Controller
         $this->authorizeTranscript($request, $project, $transcript);
 
         if (! $entitlements->allows($request->user(), 'polish')) {
-            return $this->upgradeRequired('Transcript polishing is not included in your current plan.');
+            return $this->upgradeRequired('Transcript polishing is not available for this account.');
         }
 
         if (! $this->hasRawTranscript($transcript)) {
@@ -49,12 +49,16 @@ class TranscriptActionController extends Controller
             return response()->json(['message' => 'Enter instructions before polishing.'], 422);
         }
 
+        if (! $entitlements->canPolish($request->user(), mb_strlen($this->sourceText($transcript)))) {
+            return $this->upgradeRequired('Daily free polishing is used up. Add polish character credits to continue.');
+        }
+
         $transcript->forceFill([
             'polish_status' => 'processing',
             'polish_error_message' => null,
         ])->save();
         $processor->appendLog($transcript, 'polishing', 'Processing');
-        ProcessWebPolishJob::dispatch($transcript->id, $instruction);
+        ProcessWebPolishJob::dispatchAfterResponse($transcript->id, $instruction);
 
         return response()->json([
             'message' => 'Polishing',
@@ -73,7 +77,7 @@ class TranscriptActionController extends Controller
         $this->authorizeTranscript($request, $project, $transcript);
 
         if (! $entitlements->allows($request->user(), 'summarize')) {
-            return $this->upgradeRequired('Transcript summaries are not included in your current plan.');
+            return $this->upgradeRequired('Transcript summaries are not available for this account.');
         }
 
         if (! $this->hasRawTranscript($transcript)) {
@@ -83,13 +87,18 @@ class TranscriptActionController extends Controller
         $validated = $request->validate([
             'source' => ['nullable', 'string', 'in:raw,cleaned'],
         ]);
+        $source = (string) ($validated['source'] ?? 'raw');
+
+        if (! $entitlements->canSummarize($request->user(), mb_strlen($this->summarySourceText($transcript, $source)))) {
+            return $this->upgradeRequired('Daily free summarizing is used up. Add summarize character credits to continue.');
+        }
 
         $transcript->forceFill([
             'summary_status' => 'processing',
             'summary_error_message' => null,
         ])->save();
         $processor->appendLog($transcript, 'summarizing', 'Processing');
-        ProcessWebSummarizeJob::dispatch($transcript->id, (string) ($validated['source'] ?? 'raw'));
+        ProcessWebSummarizeJob::dispatchAfterResponse($transcript->id, (string) ($validated['source'] ?? 'raw'));
 
         return response()->json([
             'message' => 'Summarizing...',
@@ -113,7 +122,7 @@ class TranscriptActionController extends Controller
         $format = (string) $validated['format'];
 
         if (! $entitlements->allowsExport($request->user(), $format)) {
-            return $this->upgradeRequired('This export format is not included in your current plan.');
+            return $this->upgradeRequired('This export format is not available for this account.');
         }
 
         $file = $exports->export($transcript, $format, (string) ($validated['source'] ?? 'raw'));
@@ -144,6 +153,18 @@ class TranscriptActionController extends Controller
     {
         return filled($transcript->raw_text)
             || $transcript->sections()->whereNotNull('text')->exists();
+    }
+
+    private function sourceText(Transcript $transcript): string
+    {
+        return trim((string) ($transcript->raw_text ?: $transcript->sections()->orderBy('position')->pluck('text')->implode("\n\n")));
+    }
+
+    private function summarySourceText(Transcript $transcript, string $source): string
+    {
+        return $source === 'cleaned'
+            ? trim((string) ($transcript->cleaned_text ?? $transcript->raw_text))
+            : trim((string) $transcript->raw_text);
     }
 
     private function polishInstruction(string $preset, string $custom): string
