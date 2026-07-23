@@ -3,7 +3,9 @@
 use App\Models\API;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 return new class extends Migration
 {
@@ -34,19 +36,24 @@ return new class extends Migration
             });
         }
 
-        API::query()
+        DB::table('a_p_i_s')
             ->select(['id', 'app_token', 'app_token_hash', 'app_token_suffix'])
             ->orderBy('id')
-            ->each(function (API $license): void {
+            ->each(function (object $license): void {
                 if (filled($license->app_token_hash) && filled($license->app_token_suffix)) {
                     return;
                 }
 
-                $storedToken = (string) $license->getRawOriginal('app_token');
+                $plainToken = (string) $license->app_token;
+                $api = new API;
 
-                $license->forceFill([
-                    'app_token' => $storedToken,
-                ])->save();
+                $api->exists = true;
+                $api->setRawAttributes(['id' => $license->id], true);
+                $api->forceFill([
+                    'app_token' => $plainToken,
+                    'app_token_hash' => API::hashToken($plainToken),
+                    'app_token_suffix' => Str::of($plainToken)->substr(-12)->toString(),
+                ])->saveQuietly();
             });
     }
 

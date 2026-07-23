@@ -11,10 +11,12 @@ const inertiaSsrEnabled = process.env.INERTIA_SSR_ENABLED === 'true';
 export default defineConfig({
     build: {
         rolldownOptions: {
-            onwarn(warning: { code?: string; id?: string }, defaultHandler: (warning: unknown) => void) {
+            onwarn(warning: { code?: string; id?: string; message?: string }, defaultHandler: (warning: unknown) => void) {
+                const warningText = `${warning.id || ''} ${warning.message || ''} ${JSON.stringify(warning)}`;
+
                 if (
                     warning.code === 'INVALID_ANNOTATION' &&
-                    String(warning.id || '').includes('node_modules/reka-ui/node_modules/@vueuse/core')
+                    warningText.includes('node_modules/reka-ui/node_modules/@vueuse/core')
                 ) {
                     return;
                 }
