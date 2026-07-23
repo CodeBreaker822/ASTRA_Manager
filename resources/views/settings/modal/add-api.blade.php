@@ -129,8 +129,8 @@
                     $('#app_token').val(response.license_key || '');
                     showNotification('Secure license key generated', 'success');
                 },
-                error: function(xhr) {
-                    showNotification(xhr.responseJSON?.message || 'Failed to generate license key', 'error');
+                error: function() {
+                    showNotification('Failed to generate license key', 'error');
                 },
                 complete: function() {
                     button.prop('disabled', false).text(originalText);

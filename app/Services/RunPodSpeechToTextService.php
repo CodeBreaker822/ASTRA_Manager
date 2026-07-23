@@ -10,11 +10,11 @@ use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use RuntimeException;
 use SplFileInfo;
-use Throwable;
 
 class RunPodSpeechToTextService
 {
     public const MODEL_CEBUANO_BISAYA_EPOCH1_CT2 = 'cebuano-bisaya-epoch1-ct2';
+
     public const MODEL_SERVERLESS_TRANSCRIPTOR = self::MODEL_CEBUANO_BISAYA_EPOCH1_CT2;
 
     public function __construct(

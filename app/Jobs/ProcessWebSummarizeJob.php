@@ -6,7 +6,6 @@ use App\Models\Transcript;
 use App\Services\WebTranscriptProcessor;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Throwable;
 
 class ProcessWebSummarizeJob implements ShouldQueue
 {
@@ -37,7 +36,7 @@ class ProcessWebSummarizeJob implements ShouldQueue
         $processor->summarize($transcript, $this->source);
     }
 
-    public function failed(?Throwable $exception): void
+    public function failed(): void
     {
         $transcript = Transcript::query()->find($this->transcriptId);
 
@@ -45,7 +44,7 @@ class ProcessWebSummarizeJob implements ShouldQueue
             return;
         }
 
-        $message = $exception?->getMessage() ?: 'The transcript could not be summarized.';
+        $message = 'The transcript could not be summarized.';
 
         $transcript->forceFill([
             'summary_status' => 'failed',

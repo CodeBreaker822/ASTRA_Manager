@@ -20,11 +20,9 @@ class DeepgramSpeechToTextService
         private readonly ?string $endpoint = null,
         private readonly ?string $modelId = null,
         private readonly ?int $timeout = null,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param  UploadedFile|string|SplFileInfo  $audio
      * @return array{text: string, timestamps: array<int, array<string, mixed>>}
      */
     public function transcribe(UploadedFile|string|SplFileInfo $audio, array $options = []): array
@@ -83,6 +81,7 @@ class DeepgramSpeechToTextService
 
                 if ($attempt < $maxAttempts) {
                     sleep($attempt);
+
                     continue;
                 }
 

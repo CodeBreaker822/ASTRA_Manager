@@ -1,7 +1,7 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AIBot\AIController;
+use Illuminate\Support\Facades\Route;
 
 // Chatbot API routes
 Route::prefix('api/chatbot')->middleware(['web', 'auth'])->group(function () {

@@ -30,6 +30,11 @@ type Tier = {
     };
 };
 
+type EditableTier = Omit<Tier, 'monthly_price' | 'yearly_price'> & {
+    monthly_price: string | number;
+    yearly_price: string | number;
+};
+
 type ComparisonRow = {
     label: string;
     tier_keys: TierKey[];
@@ -72,6 +77,8 @@ const pricingContent = {
 const form = useForm({
     tiers: props.tiers.map((tier) => ({
         ...tier,
+        monthly_price: tier.monthly_price ?? '',
+        yearly_price: tier.yearly_price ?? '',
         features: [...tier.features, '', '', '', ''].slice(0, 6),
         entitlements: {
             upload: Boolean(tier.entitlements.upload),
@@ -100,13 +107,13 @@ const entitlementKeys: Array<Exclude<keyof Tier['entitlements'], 'exports'>> = [
 ];
 
 const toggleEntitlement = (
-    tier: Tier,
+    tier: EditableTier,
     key: Exclude<keyof Tier['entitlements'], 'exports'>,
 ) => {
     tier.entitlements[key] = !tier.entitlements[key];
 };
 
-const toggleExport = (tier: Tier, format: string) => {
+const toggleExport = (tier: EditableTier, format: string) => {
     const exports = tier.entitlements.exports ?? [];
     tier.entitlements.exports = exports.includes(format)
         ? exports.filter((item) => item !== format)

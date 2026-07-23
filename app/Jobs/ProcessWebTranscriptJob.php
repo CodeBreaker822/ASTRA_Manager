@@ -6,7 +6,6 @@ use App\Models\Transcript;
 use App\Services\WebTranscriptProcessor;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Throwable;
 
 class ProcessWebTranscriptJob implements ShouldQueue
 {
@@ -40,7 +39,7 @@ class ProcessWebTranscriptJob implements ShouldQueue
         $processor->transcribe($transcript, $this->options);
     }
 
-    public function failed(?Throwable $exception): void
+    public function failed(): void
     {
         $transcript = Transcript::query()->find($this->transcriptId);
 
@@ -51,7 +50,7 @@ class ProcessWebTranscriptJob implements ShouldQueue
         app(WebTranscriptProcessor::class)->appendLog(
             $transcript,
             'failed',
-            $exception?->getMessage() ?: 'Transcription job failed.',
+            'Audio upload could not be processed.',
         );
     }
 }

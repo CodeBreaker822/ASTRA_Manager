@@ -714,7 +714,7 @@
             error: function(xhr) {
                 const validationErrors = xhr.responseJSON?.errors;
                 const firstError = validationErrors ? Object.values(validationErrors).flat()[0] : null;
-                showNotification(firstError || xhr.responseJSON?.message || 'Failed to save provider settings', 'error');
+                showNotification(firstError || 'Failed to save provider settings', 'error');
             },
             complete: function() {
                 submitBtn.prop('disabled', false).text(originalBtnText);
@@ -805,7 +805,7 @@
                 },
                 error: function(xhr) {
                     restoreOrder(originalOrder);
-                    showNotification(xhr.responseJSON?.message || 'Failed to update provider fallback order', 'error');
+                    showNotification('Failed to update provider fallback order', 'error');
                 },
                 complete: function() {
                     list.classList.remove('pointer-events-none', 'opacity-70');
@@ -910,24 +910,20 @@
             return validationMessage;
         }
 
-        if (xhr.responseJSON?.message) {
-            return xhr.responseJSON.message;
-        }
-
         const messages = {
             0: 'The upload connection was interrupted before the server returned a response.',
             408: 'The upload timed out before the server received the complete package.',
             413: 'The package upload returned HTTP 413 because the submitted request was considered too large.',
             419: 'Your session expired during the upload. Refresh this page and try again.',
             422: 'The server rejected the package or version. Verify that the selected file is a valid ZIP.',
-            500: 'The server failed while storing or publishing the package. Check the server log for the matching upload error.',
+            500: 'The package could not be published. Please try again later.',
             502: 'The gateway lost contact with the application while uploading the package.',
             503: 'The upload service is temporarily unavailable.',
             504: 'The gateway timed out while waiting for the package upload to finish.'
         };
 
         return messages[xhr.status]
-            || `Package upload failed with HTTP ${xhr.status || 'network'}${xhr.statusText ? `: ${xhr.statusText}` : ''}.`;
+            || 'Package upload failed. Please try again later.';
     }
 
     $('#transcriberPackageForm').on('submit', function(e) {

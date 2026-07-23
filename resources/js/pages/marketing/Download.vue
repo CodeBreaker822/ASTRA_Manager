@@ -132,8 +132,8 @@ const requirements = computed(() =>
                             {{ release.published_at ?? 'unknown date' }}
                         </template>
                         <template v-else>
-                            Upload a package from the admin API settings page to
-                            publish a desktop release.
+                            The desktop release is not available yet. Please
+                            check back later.
                         </template>
                     </div>
 

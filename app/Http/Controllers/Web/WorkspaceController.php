@@ -3,10 +3,9 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
-use App\Models\Transcript;
 use App\Models\TranscriptProject;
-use App\Models\TranscriptSection;
 use App\Services\EntitlementService;
+use App\Services\Web\WorkspacePayloadPresenter;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -14,16 +13,20 @@ use Inertia\Response;
 
 class WorkspaceController extends Controller
 {
-    public function index(Request $request, EntitlementService $entitlements): Response
+    public function index(Request $request, EntitlementService $entitlements, WorkspacePayloadPresenter $presenter): Response
     {
-        return $this->renderWorkspace($request, $entitlements);
+        return $this->renderWorkspace($request, $entitlements, $presenter);
     }
 
-    public function show(Request $request, EntitlementService $entitlements, TranscriptProject $project): Response
-    {
-        abort_unless($project->user_id === $request->user()->id, 404);
+    public function show(
+        Request $request,
+        EntitlementService $entitlements,
+        WorkspacePayloadPresenter $presenter,
+        TranscriptProject $project,
+    ): Response {
+        $this->authorize('view', $project);
 
-        return $this->renderWorkspace($request, $entitlements, $project);
+        return $this->renderWorkspace($request, $entitlements, $presenter, $project);
     }
 
     public function store(Request $request): RedirectResponse
@@ -42,7 +45,7 @@ class WorkspaceController extends Controller
 
     public function update(Request $request, TranscriptProject $project): RedirectResponse
     {
-        abort_unless($project->user_id === $request->user()->id, 404);
+        $this->authorize('update', $project);
 
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:120'],
@@ -55,7 +58,7 @@ class WorkspaceController extends Controller
 
     public function destroy(Request $request, TranscriptProject $project): RedirectResponse
     {
-        abort_unless($project->user_id === $request->user()->id, 404);
+        $this->authorize('delete', $project);
 
         $project->delete();
 
@@ -66,6 +69,7 @@ class WorkspaceController extends Controller
     private function renderWorkspace(
         Request $request,
         EntitlementService $entitlements,
+        WorkspacePayloadPresenter $presenter,
         ?TranscriptProject $activeProject = null,
     ): Response {
         $projects = $request->user()
@@ -73,51 +77,12 @@ class WorkspaceController extends Controller
             ->withCount('transcripts')
             ->latest('updated_at')
             ->get()
-            ->map(fn (TranscriptProject $project): array => [
-                'id' => $project->id,
-                'title' => $project->title,
-                'updated_at' => $project->updated_at?->diffForHumans(),
-                'transcripts_count' => (int) $project->getAttribute('transcripts_count'),
-            ])
+            ->map(fn (TranscriptProject $project): array => $presenter->projectSummary($project))
             ->all();
-
-        $activeProject?->load(['transcripts.sections' => fn ($query) => $query->orderBy('position')]);
 
         return Inertia::render('workspace/Index', [
             'projects' => $projects,
-            'activeProject' => $activeProject ? [
-                'id' => $activeProject->id,
-                'title' => $activeProject->title,
-                'updated_at' => $activeProject->updated_at?->diffForHumans(),
-                'transcripts' => $activeProject->transcripts
-                    ->sortByDesc('created_at')
-                    ->values()
-                    ->map(fn (Transcript $transcript): array => [
-                        'id' => $transcript->id,
-                        'source' => $transcript->source,
-                        'status' => $transcript->status,
-                        'duration_seconds' => $transcript->duration_seconds,
-                        'raw_text' => $transcript->raw_text,
-                        'cleaned_text' => $transcript->cleaned_text,
-                        'summary_text' => $transcript->summary_text,
-                        'polish_status' => $transcript->polish_status,
-                        'polish_error_message' => $transcript->polish_error_message,
-                        'summary_status' => $transcript->summary_status,
-                        'summary_error_message' => $transcript->summary_error_message,
-                        'processing_log' => $transcript->processing_log ?? [],
-                        'sections' => $transcript->sections
-                            ->map(fn (TranscriptSection $section): array => [
-                                'id' => $section->id,
-                                'position' => $section->position,
-                                'text' => $section->text,
-                                'cleaned_text' => $section->cleaned_text,
-                                'started_at_ms' => $section->started_at_ms,
-                                'ended_at_ms' => $section->ended_at_ms,
-                            ])
-                            ->all(),
-                    ])
-                    ->all(),
-            ] : null,
+            'activeProject' => $activeProject ? $presenter->activeProject($activeProject) : null,
             'entitlements' => $entitlements->summaryFor($request->user()),
         ]);
     }

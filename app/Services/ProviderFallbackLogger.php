@@ -4,13 +4,35 @@ namespace App\Services;
 
 use App\Models\API;
 use App\Models\TranscriptionApiRequestLog;
+use App\Services\Security\LicenseTokenFingerprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
 
+/**
+ * @phpstan-type ProviderPayload array{provider?: string|null, model?: string|null}
+ * @phpstan-type FallbackLogData array{
+ *     category: string,
+ *     operation: string,
+ *     provider: ProviderPayload,
+ *     position: int,
+ *     request: Request|null,
+ *     license: API|null,
+ *     status: string,
+ *     severity: string,
+ *     http_status: int|null,
+ *     error_message: string|null,
+ *     exception: string|null
+ * }
+ */
 class ProviderFallbackLogger
 {
+    public function __construct(private readonly LicenseTokenFingerprint $tokens) {}
+
+    /**
+     * @param  ProviderPayload  $provider
+     */
     public function failure(
         string $category,
         string $operation,
@@ -37,6 +59,9 @@ class ProviderFallbackLogger
         ]);
     }
 
+    /**
+     * @param  ProviderPayload  $provider
+     */
     public function recovered(
         string $category,
         string $operation,
@@ -64,21 +89,23 @@ class ProviderFallbackLogger
         ]);
     }
 
+    /**
+     * @param  FallbackLogData  $data
+     */
     private function write(array $data): void
     {
-        /** @var Request|null $request */
         $request = $data['request'];
-        /** @var API|null $license */
         $license = $data['license'];
         $provider = $data['provider'];
+        $appName = $license instanceof API ? $license->app_name : null;
 
         try {
             TranscriptionApiRequestLog::query()->create([
                 'request_id' => (string) Str::uuid(),
                 'api_id' => $license?->id,
-                'app_name' => $license?->app_name ?? ($data['operation'] === 'chatbot' ? 'JERVA Chatbot' : null),
-                'license_token_prefix' => $this->tokenPrefix($request?->bearerToken()),
-                'license_token_hash' => $this->tokenHash($request?->bearerToken()),
+                'app_name' => $appName ?? ($data['operation'] === 'chatbot' ? 'JERVA Chatbot' : null),
+                'license_token_prefix' => $this->tokens->prefix($request?->bearerToken()),
+                'license_token_hash' => $this->tokens->hash($request?->bearerToken()),
                 'operation' => $data['operation'].'_provider',
                 'endpoint' => $request ? '/'.$request->path() : '/chatbot',
                 'http_method' => $request?->method() ?? 'INTERNAL',
@@ -137,15 +164,5 @@ class ProviderFallbackLogger
         $code = $exception->getCode();
 
         return is_int($code) && $code >= 100 && $code <= 599 ? $code : null;
-    }
-
-    private function tokenPrefix(?string $token): ?string
-    {
-        return is_string($token) && $token !== '' ? Str::limit($token, 24, '') : null;
-    }
-
-    private function tokenHash(?string $token): ?string
-    {
-        return is_string($token) && $token !== '' ? hash('sha256', $token) : null;
     }
 }

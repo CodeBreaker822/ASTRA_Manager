@@ -24,11 +24,9 @@ class SpeechmaticsSpeechToTextService
         private readonly ?int $timeout = null,
         private readonly ?int $pollIntervalMs = null,
         private readonly ?int $maxWaitSeconds = null,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param  UploadedFile|string|SplFileInfo  $audio
      * @return array{text: string, timestamps: array<int, array<string, mixed>>}
      */
     public function transcribe(UploadedFile|string|SplFileInfo $audio, array $options = []): array
@@ -340,6 +338,7 @@ class SpeechmaticsSpeechToTextService
 
             if ($type === 'punctuation') {
                 $text .= $content;
+
                 continue;
             }
 

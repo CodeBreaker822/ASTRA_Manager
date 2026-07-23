@@ -51,7 +51,7 @@ class WebTranscriptProcessor
                 'error' => $exception->getMessage(),
             ]);
 
-            $this->fail($transcript, $exception->getMessage() ?: 'Audio upload could not be processed.');
+            $this->fail($transcript, 'Audio upload could not be processed.');
         }
     }
 

@@ -7,16 +7,24 @@ use App\Jobs\ProcessWebTranscriptJob;
 use App\Models\Transcript;
 use App\Models\TranscriptProject;
 use App\Services\EntitlementService;
+use App\Services\Web\TranscriptPayloadPresenter;
 use App\Services\WebApiTranscriptionClient;
+use App\Services\WebAudioChunkerService;
 use App\Services\WebTranscriptProcessor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 class TranscriptionController extends Controller
 {
-    public function upload(Request $request, TranscriptProject $project, EntitlementService $entitlements): JsonResponse
-    {
+    public function upload(
+        Request $request,
+        TranscriptProject $project,
+        EntitlementService $entitlements,
+        TranscriptPayloadPresenter $payloads,
+    ): JsonResponse {
         $this->authorizeProject($request, $project);
 
         $audioRules = is_array($request->file('audio'))
@@ -36,39 +44,59 @@ class TranscriptionController extends Controller
             'clip_start_ms.*' => ['nullable', 'integer', 'min:0'],
             'clip_end_ms' => ['nullable'],
             'clip_end_ms.*' => ['nullable', 'integer', 'min:0'],
+            'server_chunk' => ['nullable', 'boolean'],
         ]));
 
-        $clips = $this->normalizeClips($request, $validated);
+        $chunker = app(WebAudioChunkerService::class);
+        $cleanup = null;
 
-        if (app(WebApiTranscriptionClient::class)->batchIsTooLarge($clips)) {
-            return response()->json(['message' => 'Audio is too big.'], 422);
+        try {
+            $clips = $this->normalizeClips($request, $validated);
+
+            if (($validated['server_chunk'] ?? false) && $request->file('audio') instanceof UploadedFile) {
+                $prepared = $chunker->clipsFromUpload($request->file('audio'), (int) ($validated['duration_seconds'] ?? 0));
+                $clips = $prepared['clips'];
+                $cleanup = $prepared['cleanup'];
+            }
+
+            if (app(WebApiTranscriptionClient::class)->batchIsTooLarge($clips)) {
+                return response()->json(['message' => 'Audio is too big.'], 422);
+            }
+
+            $durationSeconds = $this->durationSeconds($clips, (int) ($validated['duration_seconds'] ?? 0));
+
+            if (! $entitlements->allows($request->user(), 'upload')) {
+                return $this->upgradeRequired('Upload transcription is not included in your current plan.');
+            }
+
+            if (! $entitlements->canTranscribe($request->user(), $durationSeconds)) {
+                return $this->upgradeRequired('You have reached this month\'s transcription quota.');
+            }
+
+            $transcript = $this->createQueuedTranscript($request, $project, 'upload', $clips, $durationSeconds);
+
+            ProcessWebTranscriptJob::dispatch($transcript->id, [
+                'language_code' => is_string($validated['language_code'] ?? null) ? $validated['language_code'] : null,
+                'clips' => $this->storedClipPayloads($transcript),
+            ]);
+
+            return response()->json([
+                'message' => 'Upload queued for transcription.',
+                'transcript' => $payloads->present($transcript->fresh()),
+            ], 202);
+        } catch (RuntimeException) {
+            return response()->json(['message' => 'Audio upload could not be processed.'], 422);
+        } finally {
+            $chunker->cleanup($cleanup);
         }
-
-        $durationSeconds = $this->durationSeconds($clips, (int) ($validated['duration_seconds'] ?? 0));
-
-        if (! $entitlements->allows($request->user(), 'upload')) {
-            return $this->upgradeRequired('Upload transcription is not included in your current plan.');
-        }
-
-        if (! $entitlements->canTranscribe($request->user(), $durationSeconds)) {
-            return $this->upgradeRequired('You have reached this month\'s transcription quota.');
-        }
-
-        $transcript = $this->createQueuedTranscript($request, $project, 'upload', $clips, $durationSeconds);
-
-        ProcessWebTranscriptJob::dispatch($transcript->id, [
-            'language_code' => is_string($validated['language_code'] ?? null) ? $validated['language_code'] : null,
-            'clips' => $this->storedClipPayloads($transcript),
-        ]);
-
-        return response()->json([
-            'message' => 'Upload queued for transcription.',
-            'transcript' => $this->transcriptPayload($transcript->fresh()),
-        ], 202);
     }
 
-    public function chunk(Request $request, TranscriptProject $project, EntitlementService $entitlements): JsonResponse
-    {
+    public function chunk(
+        Request $request,
+        TranscriptProject $project,
+        EntitlementService $entitlements,
+        TranscriptPayloadPresenter $payloads,
+    ): JsonResponse {
         $this->authorizeProject($request, $project);
 
         $validated = $request->validate([
@@ -104,12 +132,16 @@ class TranscriptionController extends Controller
 
         return response()->json([
             'message' => 'Live clip queued for transcription.',
-            'transcript' => $this->transcriptPayload($transcript->fresh()),
+            'transcript' => $payloads->present($transcript->fresh()),
         ], 202);
     }
 
-    public function status(Request $request, TranscriptProject $project, EntitlementService $entitlements): JsonResponse
-    {
+    public function status(
+        Request $request,
+        TranscriptProject $project,
+        EntitlementService $entitlements,
+        TranscriptPayloadPresenter $payloads,
+    ): JsonResponse {
         $this->authorizeProject($request, $project);
 
         $project->load(['transcripts.sections' => fn ($query) => $query->orderBy('position')]);
@@ -121,15 +153,19 @@ class TranscriptionController extends Controller
                 'transcripts' => $project->transcripts
                     ->sortByDesc('created_at')
                     ->values()
-                    ->map(fn (Transcript $transcript): array => $this->transcriptPayload($transcript))
+                    ->map(fn (Transcript $transcript): array => $payloads->present($transcript))
                     ->all(),
             ],
             'entitlements' => $entitlements->summaryFor($request->user()),
         ]);
     }
 
-    public function cancel(Request $request, TranscriptProject $project, Transcript $transcript): JsonResponse
-    {
+    public function cancel(
+        Request $request,
+        TranscriptProject $project,
+        Transcript $transcript,
+        TranscriptPayloadPresenter $payloads,
+    ): JsonResponse {
         $this->authorizeProject($request, $project);
         abort_unless($transcript->project_id === $project->id, 404);
 
@@ -137,7 +173,7 @@ class TranscriptionController extends Controller
 
         return response()->json([
             'message' => 'Cancelled',
-            'transcript' => $this->transcriptPayload($transcript->fresh()),
+            'transcript' => $payloads->present($transcript->fresh()),
         ]);
     }
 
@@ -252,7 +288,7 @@ class TranscriptionController extends Controller
 
     private function authorizeProject(Request $request, TranscriptProject $project): void
     {
-        abort_unless($project->user_id === $request->user()?->id, 404);
+        $this->authorize('view', $project);
     }
 
     private function upgradeRequired(string $message): JsonResponse
@@ -261,42 +297,5 @@ class TranscriptionController extends Controller
             'message' => $message,
             'upgrade' => true,
         ], 402);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function transcriptPayload(?Transcript $transcript): array
-    {
-        if (! $transcript) {
-            return [];
-        }
-
-        $transcript->loadMissing(['sections' => fn ($query) => $query->orderBy('position')]);
-
-        return [
-            'id' => $transcript->id,
-            'source' => $transcript->source,
-            'status' => $transcript->status,
-            'duration_seconds' => $transcript->duration_seconds,
-            'raw_text' => $transcript->raw_text,
-            'cleaned_text' => $transcript->cleaned_text,
-            'summary_text' => $transcript->summary_text,
-            'polish_status' => $transcript->polish_status,
-            'polish_error_message' => $transcript->polish_error_message,
-            'summary_status' => $transcript->summary_status,
-            'summary_error_message' => $transcript->summary_error_message,
-            'processing_log' => $transcript->processing_log ?? [],
-            'sections' => $transcript->sections
-                ->map(fn ($section): array => [
-                    'id' => $section->id,
-                    'position' => $section->position,
-                    'text' => $section->text,
-                    'cleaned_text' => $section->cleaned_text,
-                    'started_at_ms' => $section->started_at_ms,
-                    'ended_at_ms' => $section->ended_at_ms,
-                ])
-                ->all(),
-        ];
     }
 }

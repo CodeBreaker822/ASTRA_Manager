@@ -3,17 +3,20 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\StoreApiTokenRequest;
+use App\Http\Requests\Api\UpdateApiMethodRequest;
+use App\Http\Requests\Api\UpdateApiStatusRequest;
 use App\Models\API;
 use App\Models\TranscriptionApiRequestLog;
 use App\Models\TranscriptionProviderSetting;
+use App\Services\Api\ApiTokenService;
+use App\Services\Api\TranscriberPackageService;
 use App\Services\AppSettingsService;
 use App\Services\LicenseKeyService;
 use App\Services\ProviderConnectionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -25,30 +28,15 @@ class APIController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index(AppSettingsService $settings): Response
-    {
-        $apis = API::query()
-            ->latest()
-            ->get()
-            ->map(fn (API $api): array => [
-                'id' => $api->id,
-                'app_name' => $api->app_name,
-                'app_token' => $api->app_token,
-                'token_suffix' => Str::of((string) $api->app_token)->substr(-6)->toString(),
-                'can_post' => $api->can_post,
-                'can_get' => $api->can_get,
-                'can_put' => $api->can_put,
-                'can_patch' => $api->can_patch,
-                'can_delete' => $api->can_delete,
-                'blacklisted_ips' => $api->blacklisted_ips ?? [],
-                'blacklisted_routes' => $api->blacklisted_routes ?? [],
-                'is_active' => $api->is_active,
-            ]);
-
+    public function index(
+        AppSettingsService $settings,
+        ApiTokenService $tokens,
+        TranscriberPackageService $packages,
+    ): Response {
         return Inertia::render('dashboard/Api', [
-            'apis' => $apis,
+            'apis' => $tokens->listForManager(),
             'transcriptionProviders' => array_values($settings->providerCards()),
-            'transcriberPackage' => $this->transcriberPackage(),
+            'transcriberPackage' => $packages->current(),
         ]);
     }
 
@@ -235,7 +223,7 @@ class APIController extends Controller
         ]);
     }
 
-    public function uploadTranscriberPackage(Request $request): JsonResponse
+    public function uploadTranscriberPackage(Request $request, TranscriberPackageService $packages): JsonResponse
     {
         $validated = $request->validate([
             'version' => ['required', 'string', 'max:50', 'regex:/^[0-9A-Za-z](?:[0-9A-Za-z._+\-]{0,48}[0-9A-Za-z])?$/'],
@@ -246,46 +234,11 @@ class APIController extends Controller
             'package.max' => 'The Transcriber App Package must not exceed 500 MB.',
         ]);
 
-        $directory = Storage::disk('local')->path('transcriber');
         $version = $validated['version'];
-        $filename = 'standalone-transcriber-'.$version.'.zip';
-        $temporaryPackage = $directory.DIRECTORY_SEPARATOR.'.upload-'.bin2hex(random_bytes(12)).'.tmp';
-        $temporaryVersion = $directory.DIRECTORY_SEPARATOR.'.version-'.bin2hex(random_bytes(12)).'.json';
 
         try {
-            $embeddedVersion = $this->transcriberPackageVersionFromZip((string) $request->file('package')->getRealPath());
-
-            if ($embeddedVersion === null) {
-                throw new \RuntimeException('The Transcriber App Package must include a root version.json file.');
-            }
-
-            if (! hash_equals($version, $embeddedVersion)) {
-                throw new \RuntimeException("The Transcriber App Package version.json version [{$embeddedVersion}] does not match the published version [{$version}].");
-            }
-
-            File::ensureDirectoryExists($directory);
-            $request->file('package')->move($directory, basename($temporaryPackage));
-
-            File::put($temporaryVersion, json_encode(
-                ['version' => $version],
-                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
-            ).PHP_EOL);
-
-            foreach (File::files($directory) as $file) {
-                if (strtolower($file->getExtension()) === 'zip' && $file->getPathname() !== $temporaryPackage) {
-                    File::delete($file->getPathname());
-                }
-            }
-
-            if (! File::move($temporaryPackage, $directory.DIRECTORY_SEPARATOR.$filename)) {
-                throw new \RuntimeException('Unable to publish the Transcriber App Package.');
-            }
-
-            if (! File::move($temporaryVersion, $directory.DIRECTORY_SEPARATOR.'version.json')) {
-                throw new \RuntimeException('Unable to publish the Transcriber App version.');
-            }
+            $published = $packages->publish($version, $request->file('package'));
         } catch (Throwable $exception) {
-            File::delete([$temporaryPackage, $temporaryVersion]);
             $errorId = (string) Str::uuid();
 
             Log::error('Transcriber App Package upload failed.', [
@@ -296,7 +249,7 @@ class APIController extends Controller
             report($exception);
 
             return response()->json([
-                'message' => $this->transcriberPackageUploadError($exception, $errorId),
+                'message' => $packages->uploadError($exception, $errorId),
                 'error_id' => $errorId,
             ], 500);
         }
@@ -304,8 +257,8 @@ class APIController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Transcriber App Package uploaded successfully!',
-            'version' => $version,
-            'zipfile' => $filename,
+            'version' => $published['version'],
+            'zipfile' => $published['zipfile'],
         ]);
     }
 
@@ -317,266 +270,48 @@ class APIController extends Controller
         ]);
     }
 
-    public function store(Request $request, LicenseKeyService $licenses): JsonResponse
+    public function store(StoreApiTokenRequest $request, ApiTokenService $tokens): JsonResponse
     {
-        $validated = $request->validate([
-            'app_name' => 'required|string|max:255|unique:a_p_i_s,app_name',
-            'app_token' => 'nullable|string|max:255|unique:a_p_i_s,app_token',
-            'can_post' => 'sometimes|boolean',
-            'can_get' => 'sometimes|boolean',
-            'can_put' => 'sometimes|boolean',
-            'can_patch' => 'sometimes|boolean',
-            'can_delete' => 'sometimes|boolean',
-            'blacklisted_ips' => 'nullable|json',
-            'blacklisted_routes' => 'nullable|json',
-        ]);
-
-        if (blank($validated['app_token'] ?? null)) {
-            $validated['app_token'] = $licenses->makeUniqueLicenseKey();
-        }
-
-        $validated['can_post'] = $request->boolean('can_post');
-        $validated['can_get'] = $request->boolean('can_get');
-        $validated['can_put'] = $request->boolean('can_put');
-        $validated['can_patch'] = $request->boolean('can_patch');
-        $validated['can_delete'] = $request->boolean('can_delete');
-
-        $api = API::create($validated);
+        $created = $tokens->create($request->validated());
 
         return response()->json([
             'success' => true,
             'message' => 'API settings saved successfully!',
-            'data' => $api,
+            'data' => $created['api'],
+            'plain_token' => $created['plain_token'],
         ]);
     }
 
-    public function updateStatus(Request $request, int|string $id): JsonResponse
+    public function updateStatus(UpdateApiStatusRequest $request, API $api, ApiTokenService $tokens): JsonResponse
     {
-        $validated = $request->validate([
-            'is_active' => ['required', 'boolean'],
-        ]);
-        $api = API::query()->findOrFail($id);
-        $api->is_active = (bool) $validated['is_active'];
-        $api->save();
+        $api = $tokens->updateStatus($api, (bool) $request->validated('is_active'));
 
         return response()->json([
             'success' => true,
             'message' => 'API status updated successfully!',
-            'data' => $api,
+            'data' => $tokens->present($api),
         ]);
     }
 
-    public function updateMethod(Request $request, int|string $id): JsonResponse
+    public function updateMethod(UpdateApiMethodRequest $request, API $api, ApiTokenService $tokens): JsonResponse
     {
-        $validated = $request->validate([
-            'method' => ['required', 'in:post,get,put,patch,delete'],
-            'enabled' => ['required', 'boolean'],
-        ]);
-        $api = API::query()->findOrFail($id);
-        $method = 'can_'.$validated['method'];
-        $api->{$method} = (bool) $validated['enabled'];
-        $api->save();
+        $validated = $request->validated();
+        $api = $tokens->updateMethod($api, (string) $validated['method'], (bool) $validated['enabled']);
 
         return response()->json([
             'success' => true,
             'message' => 'API method updated successfully!',
-            'data' => $api,
+            'data' => $tokens->present($api),
         ]);
     }
 
-    public function destroy(API $aPI): JsonResponse
+    public function destroy(API $api, ApiTokenService $tokens): JsonResponse
     {
-        $aPI->delete();
+        $tokens->delete($api);
 
         return response()->json([
             'success' => true,
             'message' => 'API deleted successfully!',
-            'data' => $aPI,
         ]);
-    }
-
-    /**
-     * @return array{version: string|null, zipfile: string|null}
-     */
-    private function transcriberPackage(): array
-    {
-        $directory = Storage::disk('local')->path('transcriber');
-        $versionPath = $directory.DIRECTORY_SEPARATOR.'version.json';
-        $version = null;
-
-        if (File::isReadable($versionPath)) {
-            try {
-                $contents = json_decode(File::get($versionPath), true, 512, JSON_THROW_ON_ERROR);
-                $version = is_array($contents) ? ($contents['version'] ?? null) : null;
-            } catch (Throwable) {
-                // Keep the settings page available if a legacy version file is malformed.
-            }
-        }
-
-        $zipFiles = File::isDirectory($directory)
-            ? array_values(array_filter(
-                File::files($directory),
-                fn ($file): bool => strtolower($file->getExtension()) === 'zip',
-            ))
-            : [];
-
-        usort($zipFiles, fn ($left, $right): int => strnatcasecmp($left->getFilename(), $right->getFilename()));
-
-        return [
-            'version' => $version,
-            'zipfile' => $zipFiles === [] ? null : $zipFiles[0]->getFilename(),
-        ];
-    }
-
-    private function transcriberPackageUploadError(Throwable $exception, string $errorId): string
-    {
-        $detail = trim($exception->getMessage());
-
-        if ($detail === '') {
-            return "Transcriber package upload failed. Error reference: {$errorId}.";
-        }
-
-        $detail = str_replace(
-            array_filter([base_path(), storage_path(), sys_get_temp_dir()]),
-            ['[application]', '[storage]', '[temporary directory]'],
-            $detail,
-        );
-        $detail = Str::limit(preg_replace('/\s+/', ' ', $detail) ?? $detail, 350, '...');
-
-        return "Transcriber package upload failed: {$detail} Error reference: {$errorId}.";
-    }
-
-    private function transcriberPackageVersionFromZip(string $path): ?string
-    {
-        $versionJson = $this->readFileFromZip($path, 'version.json');
-
-        if ($versionJson === null) {
-            return null;
-        }
-
-        $payload = json_decode($versionJson, true);
-
-        return is_array($payload) && is_string($payload['version'] ?? null)
-            ? trim($payload['version'])
-            : null;
-    }
-
-    private function readFileFromZip(string $path, string $wantedName): ?string
-    {
-        $handle = fopen($path, 'rb');
-
-        if ($handle === false) {
-            throw new \RuntimeException('Unable to read the uploaded Transcriber App Package.');
-        }
-
-        try {
-            $size = filesize($path);
-
-            if ($size === false || $size < 22) {
-                throw new \RuntimeException('The Transcriber App Package is not a readable ZIP file.');
-            }
-
-            $tailSize = min($size, 65557);
-            fseek($handle, -$tailSize, SEEK_END);
-            $tail = fread($handle, $tailSize);
-            $endOffset = is_string($tail) ? strrpos($tail, "PK\x05\x06") : false;
-
-            if ($endOffset === false) {
-                throw new \RuntimeException('The Transcriber App Package is not a readable ZIP file.');
-            }
-
-            $endRecord = substr($tail, $endOffset, 22);
-            $directory = unpack('ventries/vtotal/Vsize/Voffset', substr($endRecord, 8, 12));
-
-            if (! is_array($directory)) {
-                throw new \RuntimeException('The Transcriber App Package directory could not be read.');
-            }
-
-            fseek($handle, (int) $directory['offset']);
-            $read = 0;
-
-            while ($read < (int) $directory['size']) {
-                $header = fread($handle, 46);
-
-                if (! is_string($header) || strlen($header) !== 46 || substr($header, 0, 4) !== "PK\x01\x02") {
-                    throw new \RuntimeException('The Transcriber App Package directory is malformed.');
-                }
-
-                $entry = unpack(
-                    'x10/vmethod/x8/VcompressedSize/VuncompressedSize/vnameLength/vextraLength/vcommentLength/x8/VlocalOffset',
-                    $header,
-                );
-
-                if (! is_array($entry)) {
-                    throw new \RuntimeException('The Transcriber App Package directory entry could not be read.');
-                }
-
-                $nameLength = (int) $entry['nameLength'];
-                $extra = (int) $entry['extraLength'];
-                $comment = (int) $entry['commentLength'];
-                if ($nameLength < 1) {
-                    $name = '';
-                } else {
-                    $name = fread($handle, $nameLength);
-                }
-
-                if ($extra > 0) {
-                    fseek($handle, $extra, SEEK_CUR);
-                }
-
-                if ($comment > 0) {
-                    fseek($handle, $comment, SEEK_CUR);
-                }
-
-                $read += 46 + (int) $entry['nameLength'] + $extra + $comment;
-
-                if (! is_string($name) || ltrim(str_replace('\\', '/', $name), './') !== $wantedName) {
-                    continue;
-                }
-
-                return $this->readZipEntryContents($handle, (int) $entry['localOffset'], (int) $entry['method'], (int) $entry['compressedSize']);
-            }
-        } finally {
-            fclose($handle);
-        }
-
-        return null;
-    }
-
-    private function readZipEntryContents(mixed $handle, int $localOffset, int $method, int $compressedSize): string
-    {
-        if ($compressedSize < 0 || $compressedSize > 1024 * 1024) {
-            throw new \RuntimeException('The Transcriber App Package version.json file is too large.');
-        }
-
-        fseek($handle, $localOffset);
-        $localHeader = fread($handle, 30);
-
-        if (! is_string($localHeader) || strlen($localHeader) !== 30 || substr($localHeader, 0, 4) !== "PK\x03\x04") {
-            throw new \RuntimeException('The Transcriber App Package file entry is malformed.');
-        }
-
-        $local = unpack('vnameLength/vextraLength', substr($localHeader, 26, 4));
-
-        if (! is_array($local)) {
-            throw new \RuntimeException('The Transcriber App Package file entry could not be read.');
-        }
-
-        fseek($handle, (int) $local['nameLength'] + (int) $local['extraLength'], SEEK_CUR);
-        if ($compressedSize === 0) {
-            return '';
-        }
-
-        $contents = fread($handle, $compressedSize);
-
-        if (! is_string($contents) || strlen($contents) !== $compressedSize) {
-            throw new \RuntimeException('The Transcriber App Package version.json file could not be read.');
-        }
-
-        return match ($method) {
-            0 => $contents,
-            8 => gzinflate($contents) ?: throw new \RuntimeException('The Transcriber App Package version.json file could not be decompressed.'),
-            default => throw new \RuntimeException('The Transcriber App Package version.json file uses an unsupported ZIP compression method.'),
-        };
     }
 }

@@ -3,14 +3,11 @@ import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import {
     Clock3,
     Download,
-    FileAudio,
     FileText,
     ListChecks,
     Mic,
-    PanelRight,
     Pencil,
     Play,
-    Plus,
     Settings,
     Sparkles,
     Square,
@@ -19,6 +16,7 @@ import {
 } from '@lucide/vue';
 import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue';
 import InputError from '@/components/InputError.vue';
+import SettingsModal from '@/components/SettingsModal.vue';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -35,6 +33,7 @@ import ProcessingButton from '@/components/workspace/ProcessingButton.vue';
 import WorkspaceToast from '@/components/workspace/WorkspaceToast.vue';
 import { useAudioUpload } from '@/composables/useAudioUpload';
 import { useLiveRecorder } from '@/composables/useLiveRecorder';
+import { useSettingsModal } from '@/composables/useSettingsModal';
 import { useTranscriptPolling } from '@/composables/useTranscriptPolling';
 import { useWorkspaceToast } from '@/composables/useWorkspaceToast';
 
@@ -102,6 +101,7 @@ const props = defineProps<{
 
 const page = usePage();
 const toast = useWorkspaceToast();
+const { settingsHref } = useSettingsModal();
 const createOpen = ref(false);
 const renameOpen = ref(false);
 const onboardingOpen = ref(false);
@@ -110,6 +110,7 @@ const polishOpen = ref(false);
 const summaryOpen = ref(false);
 const logOpen = ref(false);
 const deleteOpen = ref(false);
+const workspaceMode = ref<'choose' | 'live' | 'upload'>('choose');
 const polishPreset = ref<
     'english' | 'filipino' | 'grammar' | 'translate_fix' | 'custom'
 >('grammar');
@@ -153,6 +154,64 @@ const hasTranscriptContent = computed(
                 transcript.sections.length > 0,
         ) ?? false,
 );
+
+const liveTranscriptCount = computed(
+    () =>
+        displayProject.value?.transcripts.filter(
+            (transcript) => transcript.source === 'live',
+        ).length ?? 0,
+);
+
+const uploadTranscriptCount = computed(
+    () =>
+        displayProject.value?.transcripts.filter(
+            (transcript) => transcript.source === 'upload',
+        ).length ?? 0,
+);
+
+const activeTranscriptActionMode = computed(() => {
+    if (workspaceMode.value === 'live' && liveTranscriptCount.value > 0) {
+        return 'live';
+    }
+
+    if (workspaceMode.value === 'upload' && uploadTranscriptCount.value > 0) {
+        return 'upload';
+    }
+
+    return '';
+});
+
+const emptyPanel = computed(() => {
+    if (!displayProject.value) {
+        return {
+            eyebrow: 'Transcription workspace',
+            title: 'Hi, what are we transcribing today?',
+            copy: "Start a transcript from the left, then choose Live or Upload Audio. I'll keep the transcript here so you can polish, summarize, export, or review the processing log when it's ready.",
+        };
+    }
+
+    if (workspaceMode.value === 'live') {
+        return {
+            eyebrow: 'Live transcript',
+            title: 'Ready when you are.',
+            copy: 'Press Live below to start capturing audio. Your transcript will appear here as each section finishes.',
+        };
+    }
+
+    if (workspaceMode.value === 'upload') {
+        return {
+            eyebrow: 'Upload transcript',
+            title: "Drop in an audio file and I'll organize the transcript.",
+            copy: 'Choose Upload Audio below, browse for a file, and the finished transcript will appear here.',
+        };
+    }
+
+    return {
+        eyebrow: 'Transcription workspace',
+        title: 'Great. How do you want to add audio?',
+        copy: "Choose Live if you're recording now, or Upload Audio if the file is already on your computer.",
+    };
+});
 
 const primaryTranscript = computed(
     () =>
@@ -273,6 +332,24 @@ watch(
 );
 
 watch(
+    () => displayProject.value?.id,
+    () => {
+        const transcripts = displayProject.value?.transcripts ?? [];
+        const existingMode =
+            transcripts.find((transcript) => transcript.source === 'live')
+                ?.source ??
+            transcripts.find((transcript) => transcript.source === 'upload')
+                ?.source;
+
+        workspaceMode.value =
+            existingMode === 'live' || existingMode === 'upload'
+                ? existingMode
+                : 'choose';
+    },
+    { immediate: true },
+);
+
+watch(
     () => primaryTranscript.value?.polish_status,
     (status, previous) => {
         if (previous !== 'processing') {
@@ -333,6 +410,7 @@ const createProject = () => {
         onSuccess: () => {
             createForm.reset();
             createOpen.value = false;
+            workspaceMode.value = 'choose';
         },
     });
 };
@@ -472,7 +550,29 @@ const live = useLiveRecorder({
 const liveClips = computed(() => live.clips.value);
 
 const chooseUpload = () => {
+    workspaceMode.value = 'upload';
     uploadInput.value?.click();
+};
+
+const chooseLiveMode = () => {
+    workspaceMode.value = 'live';
+};
+
+const chooseUploadMode = () => {
+    workspaceMode.value = 'upload';
+};
+
+const toggleLive = async () => {
+    upgradeBanner.value = '';
+
+    if (!canUseLive.value && !live.isRecording.value) {
+        upgradeBanner.value =
+            'Live transcription is not included in your current plan.';
+
+        return;
+    }
+
+    await live.toggle();
 };
 
 const handleUploadPick = async (event: Event) => {
@@ -505,11 +605,13 @@ const polishTranscript = async () => {
 
     if (!hasRawTranscript.value) {
         toast.error('No raw transcript is ready to polish yet.');
+
         return;
     }
 
     if (polishCustomInstruction.value.trim().length < 3) {
         polishError.value = 'Enter instructions before polishing.';
+
         return;
     }
 
@@ -541,6 +643,7 @@ const polishTranscript = async () => {
         if (payload.upgrade) {
             upgradeBanner.value =
                 payload.message ?? 'Transcript could not be polished.';
+
             return;
         }
 
@@ -564,6 +667,7 @@ const summarizeTranscript = async (source: 'raw' | 'cleaned') => {
 
     if (!hasRawTranscript.value) {
         toast.error('The transcript could not be summarized.');
+
         return;
     }
 
@@ -592,6 +696,7 @@ const summarizeTranscript = async (source: 'raw' | 'cleaned') => {
         if (payload.upgrade) {
             upgradeBanner.value =
                 payload.message ?? 'The transcript could not be summarized.';
+
             return;
         }
 
@@ -621,16 +726,19 @@ const exportTranscript = async (
         toast.error(
             'Polish the transcript before exporting the cleaned version.',
         );
+
         return;
     }
 
     if (source === 'summary' && !primaryTranscript.value.summary_text) {
         toast.error('Create a summary before exporting.');
+
         return;
     }
 
     if (!hasRawTranscript.value) {
         toast.error('No transcription is ready to export yet.');
+
         return;
     }
 
@@ -654,12 +762,14 @@ const exportTranscript = async (
         if (payload.upgrade) {
             upgradeBanner.value =
                 payload.message ?? 'No transcription is ready to export yet.';
+
             return;
         }
 
         toast.error(
             payload.message ?? 'No transcription is ready to export yet.',
         );
+
         return;
     }
 
@@ -827,13 +937,16 @@ watch(() => page.props.flash, showFlashToast);
 
                     <Dialog v-model:open="createOpen">
                         <DialogTrigger as-child>
-                            <Button class="mt-5 w-full">
-                                <Plus class="size-4" />
+                            <button
+                                type="button"
+                                class="mt-5 flex h-11 w-full cursor-pointer items-center justify-center rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+                            >
                                 Add Transcript
-                            </Button>
+                            </button>
                         </DialogTrigger>
                         <DialogContent
-                            class="border-slate-200 bg-white shadow-2xl"
+                            class="max-w-md border-slate-200 bg-white p-4 shadow-2xl"
+                            :show-close-button="false"
                         >
                             <DialogHeader>
                                 <DialogTitle
@@ -841,35 +954,39 @@ watch(() => page.props.flash, showFlashToast);
                                 >
                                     Add Transcript
                                 </DialogTitle>
-                                <DialogDescription
-                                    class="text-sm text-slate-600"
-                                >
-                                    Create a project for upload or live
-                                    transcription.
-                                </DialogDescription>
                             </DialogHeader>
                             <form
-                                class="grid gap-4"
+                                class="mt-4 grid gap-4"
                                 @submit.prevent="createProject"
                             >
                                 <div class="grid gap-2">
-                                    <Label for="project-title">Title</Label>
+                                    <Label for="project-title">
+                                        Transcript name
+                                    </Label>
                                     <Input
                                         id="project-title"
                                         v-model="createForm.title"
                                         autofocus
-                                        placeholder="Client intake call"
+                                        placeholder="Project or conversation name"
                                     />
                                     <InputError
                                         :message="createForm.errors.title"
                                     />
                                 </div>
-                                <DialogFooter>
+                                <DialogFooter class="gap-2">
+                                    <button
+                                        type="button"
+                                        class="h-10 cursor-pointer rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                                        @click="createOpen = false"
+                                    >
+                                        Cancel
+                                    </button>
                                     <ProcessingButton
                                         type="submit"
                                         :loading="createForm.processing"
+                                        class="h-10 cursor-pointer rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700"
                                     >
-                                        Create project
+                                        Add
                                     </ProcessingButton>
                                 </DialogFooter>
                             </form>
@@ -888,18 +1005,15 @@ watch(() => page.props.flash, showFlashToast);
                             v-for="project in projects"
                             :key="project.id"
                             :href="`/workspace/${project.id}`"
-                            class="rounded-lg px-3 py-3 text-sm transition-colors hover:bg-blue-50 hover:text-blue-700"
+                            class="flex min-h-11 w-full cursor-pointer items-center rounded-lg px-3 py-2 text-left text-sm leading-5 transition"
                             :class="
                                 displayProject?.id === project.id
-                                    ? 'bg-blue-100 text-blue-900 shadow-[inset_3px_0_0_#2563eb]'
-                                    : 'text-slate-700'
+                                    ? 'bg-blue-100 font-semibold text-blue-800 shadow-[inset_3px_0_0_#2563eb]'
+                                    : 'text-slate-950 hover:bg-blue-50 hover:text-blue-700'
                             "
                         >
                             <span class="block truncate font-medium">
                                 {{ project.title }}
-                            </span>
-                            <span class="mt-1 block text-xs text-slate-600">
-                                {{ project.transcripts_count }} transcripts
                             </span>
                         </Link>
 
@@ -914,7 +1028,10 @@ watch(() => page.props.flash, showFlashToast);
 
                 <div class="border-t border-slate-200 p-4">
                     <Link
-                        href="/settings/billing"
+                        :href="settingsHref('billing')"
+                        preserve-scroll
+                        preserve-state
+                        replace
                         class="block rounded-lg border border-blue-100 bg-blue-50 p-4 transition-colors hover:border-blue-200 hover:bg-blue-100"
                     >
                         <p class="text-sm font-semibold text-blue-950">
@@ -936,7 +1053,10 @@ watch(() => page.props.flash, showFlashToast);
                         </div>
                         <Button as-child size="icon" variant="ghost">
                             <Link
-                                href="/settings/profile"
+                                :href="settingsHref('profile')"
+                                preserve-scroll
+                                preserve-state
+                                replace
                                 aria-label="Settings"
                             >
                                 <Settings class="size-5" />
@@ -1061,7 +1181,10 @@ watch(() => page.props.flash, showFlashToast);
                         </Dialog>
                         <Button as-child variant="ghost" size="icon">
                             <Link
-                                href="/settings/profile"
+                                :href="settingsHref('profile')"
+                                preserve-scroll
+                                preserve-state
+                                replace
                                 aria-label="Settings"
                             >
                                 <Settings class="size-5" />
@@ -1078,7 +1201,10 @@ watch(() => page.props.flash, showFlashToast);
                         >
                             <span>{{ upgradeBanner }}</span>
                             <Link
-                                href="/settings/billing"
+                                :href="settingsHref('billing')"
+                                preserve-scroll
+                                preserve-state
+                                replace
                                 class="font-semibold text-blue-700"
                             >
                                 View plans
@@ -1173,7 +1299,7 @@ watch(() => page.props.flash, showFlashToast);
                                         }}
                                     </p>
                                     <Button
-                                        v-if="upload.canRetry"
+                                        v-if="upload.canRetry.value"
                                         class="mt-3 border border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
                                         variant="outline"
                                         @click="upload.retry"
@@ -1260,171 +1386,28 @@ watch(() => page.props.flash, showFlashToast);
                             <p
                                 class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
                             >
-                                {{
-                                    displayProject
-                                        ? 'Upload transcript'
-                                        : 'Transcription workspace'
-                                }}
+                                {{ emptyPanel.eyebrow }}
                             </p>
                             <h3
                                 class="mt-4 text-3xl font-semibold text-slate-950"
                             >
-                                {{
-                                    displayProject
-                                        ? 'Great. How do you want to add audio?'
-                                        : 'Hi, what are we transcribing today?'
-                                }}
+                                {{ emptyPanel.title }}
                             </h3>
                             <p
                                 class="mt-4 max-w-xl text-sm leading-6 text-blue-950"
                             >
-                                {{
-                                    displayProject
-                                        ? "Choose Live if you're recording now, or Upload Audio if the file is already on your computer."
-                                        : "Start a transcript from the left, then choose Live or Upload Audio. I'll keep the transcript here so you can polish, summarize, export, or review the processing log when it's ready."
-                                }}
+                                {{ emptyPanel.copy }}
                             </p>
                         </div>
                     </div>
                 </div>
 
                 <div
-                    v-if="live.isPanelVisible"
-                    class="pointer-events-none absolute inset-x-0 px-6"
-                    :style="{
-                        bottom:
-                            upload.isActive || upload.hasFile
-                                ? '18.5rem'
-                                : '6rem',
-                    }"
-                >
-                    <div
-                        class="pointer-events-auto mx-auto max-w-3xl rounded-lg border border-blue-100 bg-blue-50 p-4 shadow-[0_12px_32px_rgba(15,23,42,0.1)]"
-                    >
-                        <div class="flex items-center justify-between gap-4">
-                            <div>
-                                <p class="text-sm font-semibold text-slate-950">
-                                    {{ live.activeName }}
-                                </p>
-                                <p class="mt-1 text-xs text-blue-900">
-                                    {{ live.currentRangeLabel }}
-                                </p>
-                            </div>
-                            <div class="text-right">
-                                <p
-                                    class="font-mono text-lg font-semibold text-slate-950"
-                                >
-                                    {{ live.elapsedLabel }}
-                                </p>
-                                <p class="text-xs text-blue-900">
-                                    {{ live.supportLine }}
-                                </p>
-                            </div>
-                        </div>
-                        <div
-                            class="mt-3 h-2 overflow-hidden rounded-full bg-blue-100"
-                        >
-                            <div
-                                class="h-full rounded-full bg-blue-600 transition-[width] duration-150"
-                                :style="{
-                                    width: `${live.segmentProgress}%`,
-                                }"
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                <div
-                    v-if="upload.isActive || upload.hasFile"
-                    class="pointer-events-none absolute inset-x-0 bottom-24 px-6"
-                >
-                    <div
-                        class="pointer-events-auto mx-auto max-w-3xl rounded-lg border border-slate-200 bg-white p-4 shadow-[0_12px_32px_rgba(15,23,42,0.1)]"
-                    >
-                        <div class="flex items-start justify-between gap-4">
-                            <div class="min-w-0">
-                                <p
-                                    class="truncate text-sm font-semibold text-slate-950"
-                                >
-                                    {{ upload.fileName }}
-                                </p>
-                                <p class="mt-1 text-xs text-slate-600">
-                                    Duration: {{ upload.durationLabel }}
-                                </p>
-                                <p class="mt-2 text-sm text-blue-900">
-                                    {{ upload.statusLine }}
-                                </p>
-                            </div>
-                            <p class="shrink-0 text-xs text-slate-600">
-                                {{ upload.metaLine }}
-                            </p>
-                        </div>
-                        <div
-                            class="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"
-                        >
-                            <div
-                                class="h-full rounded-full bg-blue-600 transition-[width] duration-150"
-                                :style="{
-                                    width: `${upload.progressPercent}%`,
-                                }"
-                            />
-                        </div>
-                        <div class="mt-4 flex flex-wrap gap-2">
-                            <Button
-                                class="h-12 min-w-32 border border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-300 hover:bg-blue-100"
-                                variant="outline"
-                                @click="chooseUpload"
-                            >
-                                Browse
-                            </Button>
-                            <Button
-                                v-if="upload.canStart"
-                                class="h-12 bg-blue-600 text-white hover:bg-blue-700"
-                                @click="upload.start"
-                            >
-                                Start
-                            </Button>
-                            <Button
-                                v-if="upload.canPause"
-                                class="h-12 border border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
-                                variant="outline"
-                                @click="upload.pause"
-                            >
-                                Pause
-                            </Button>
-                            <Button
-                                v-if="upload.canContinue"
-                                class="h-12 border border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
-                                variant="outline"
-                                @click="upload.resume"
-                            >
-                                Continue
-                            </Button>
-                            <Button
-                                v-if="upload.canRetry"
-                                class="h-12 border border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
-                                variant="outline"
-                                @click="upload.retry"
-                            >
-                                Retry
-                            </Button>
-                            <Button
-                                v-if="upload.canCancel"
-                                class="h-12 border border-red-200 bg-red-50 text-red-700 hover:border-red-300 hover:bg-red-100"
-                                variant="outline"
-                                @click="upload.cancel"
-                            >
-                                Cancel
-                            </Button>
-                        </div>
-                    </div>
-                </div>
-
-                <div
+                    v-if="displayProject"
                     class="pointer-events-none absolute inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 px-6 py-4"
                 >
                     <div
-                        class="pointer-events-auto mx-auto flex max-w-3xl flex-wrap items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-[0_12px_32px_rgba(15,23,42,0.1)]"
+                        class="pointer-events-auto mx-auto flex max-w-[calc(100%-2rem)] flex-wrap items-center justify-center gap-3"
                     >
                         <input
                             ref="uploadInput"
@@ -1433,347 +1416,569 @@ watch(() => page.props.flash, showFlashToast);
                             accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm"
                             @change="handleUploadPick"
                         />
-                        <Button
-                            class="h-12 min-w-40 bg-blue-600 text-white transition hover:scale-[1.01] hover:bg-blue-700"
-                            :disabled="!canUseLive && !live.isUnavailable"
-                            :aria-pressed="live.isRecording"
-                            @click="live.toggle"
-                        >
-                            <Square
-                                v-if="live.isRecording"
-                                class="size-4 fill-current"
-                            />
-                            <Play v-else class="size-4 fill-current" />
-                            <span class="grid text-left leading-none">
-                                <span
-                                    class="text-xs font-semibold uppercase"
-                                    :class="
-                                        live.isRecording || live.isUnavailable
-                                            ? 'text-rose-300'
-                                            : 'text-blue-200'
-                                    "
-                                >
-                                    {{ live.buttonTop }}
-                                </span>
-                                <span
-                                    class="mt-1 text-sm font-semibold"
-                                    :class="
-                                        live.isRecording ||
-                                        live.isUnavailable ||
-                                        live.isRequesting
-                                            ? 'text-rose-50'
-                                            : 'text-white'
-                                    "
-                                >
-                                    {{ live.buttonBottom }}
-                                </span>
-                            </span>
-                        </Button>
-                        <Button
-                            :disabled="
-                                !canUseUpload ||
-                                upload.inFlight ||
-                                upload.isPreparing
-                            "
-                            variant="outline"
-                            @click="chooseUpload"
-                        >
-                            <FileAudio class="size-4" />
-                            Upload Audio
-                        </Button>
-                        <Dialog v-model:open="polishOpen">
-                            <DialogTrigger as-child>
-                                <Button
-                                    :disabled="
-                                        !primaryTranscript ||
-                                        isActing ||
-                                        isPolishing
-                                    "
-                                    variant="ghost"
-                                >
-                                    <Sparkles class="size-4" />
-                                    {{ isPolishing ? 'Polishing' : 'Polish' }}
-                                </Button>
-                            </DialogTrigger>
-                            <DialogContent
-                                class="border-slate-200 bg-white shadow-2xl"
+                        <template v-if="workspaceMode === 'choose'">
+                            <div
+                                class="order-1 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center justify-center gap-3 rounded-lg border border-blue-100 bg-white px-3 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.1)]"
                             >
-                                <DialogHeader>
-                                    <p
-                                        class="text-xs font-semibold text-blue-600 uppercase"
-                                    >
-                                        Polish transcript
-                                    </p>
-                                    <DialogTitle>Instructions</DialogTitle>
-                                </DialogHeader>
-                                <div class="grid gap-4">
-                                    <div class="grid gap-2">
-                                        <Label>Preset</Label>
-                                        <div class="grid gap-2 sm:grid-cols-2">
-                                            <Button
-                                                v-for="preset in polishPresets"
-                                                :key="preset.key"
-                                                type="button"
-                                                variant="outline"
-                                                :class="
-                                                    polishPreset === preset.key
-                                                        ? 'border-blue-300 bg-blue-50 text-blue-700'
-                                                        : ''
-                                                "
-                                                @click="
-                                                    selectPolishPreset(preset)
-                                                "
-                                            >
-                                                {{ preset.label }}
-                                            </Button>
-                                        </div>
-                                    </div>
-                                    <div class="grid gap-2">
-                                        <Label for="custom-polish">
-                                            Custom instructions
-                                        </Label>
-                                        <textarea
-                                            id="custom-polish"
-                                            v-model="polishCustomInstruction"
-                                            maxlength="2000"
-                                            class="min-h-32 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                                            @input="editCustomPolishInstruction"
-                                        />
-                                        <p
-                                            v-if="polishError"
-                                            class="text-sm text-red-700"
-                                        >
-                                            {{ polishError }}
-                                        </p>
-                                        <p
-                                            v-if="
-                                                primaryTranscript?.cleaned_text
-                                            "
-                                            class="text-sm text-slate-600"
-                                        >
-                                            Polishing again replaces the current
-                                            polished transcript.
-                                        </p>
-                                    </div>
-                                </div>
-                                <DialogFooter>
-                                    <Button
-                                        variant="outline"
-                                        @click="polishOpen = false"
-                                    >
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        :disabled="isActing || isPolishing"
-                                        @click="polishTranscript"
-                                    >
-                                        {{
-                                            isPolishing ? 'Polishing' : 'Polish'
-                                        }}
-                                    </Button>
-                                </DialogFooter>
-                            </DialogContent>
-                        </Dialog>
-                        <Dialog v-model:open="summaryOpen">
-                            <DialogTrigger as-child>
-                                <Button
-                                    :disabled="
-                                        !primaryTranscript ||
-                                        isActing ||
-                                        isSummarizing
-                                    "
-                                    variant="ghost"
+                                <button
+                                    type="button"
+                                    class="h-12 min-w-40 cursor-pointer rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    :disabled="!displayProject"
+                                    @click="chooseLiveMode"
                                 >
-                                    <FileText class="size-4" />
-                                    Summarize
-                                </Button>
-                            </DialogTrigger>
-                            <DialogContent
-                                class="border-slate-200 bg-white shadow-2xl"
+                                    Live
+                                </button>
+                                <button
+                                    type="button"
+                                    class="h-12 min-w-40 cursor-pointer rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    :disabled="!displayProject"
+                                    @click="chooseUploadMode"
+                                >
+                                    Upload Audio
+                                </button>
+                            </div>
+                        </template>
+
+                        <template v-if="workspaceMode === 'live'">
+                            <div
+                                class="order-1 flex w-fit max-w-[calc(100%-2rem)] items-center gap-3 rounded-lg border border-blue-100 bg-white px-3 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.1)] transition"
                             >
-                                <DialogHeader>
-                                    <DialogTitle>
-                                        {{ summaryStatusLabel }}
-                                    </DialogTitle>
-                                    <DialogDescription class="text-slate-600">
-                                        The summary is being prepared. You may
-                                        close this window and return later.
-                                    </DialogDescription>
-                                </DialogHeader>
-                                <div class="grid gap-4">
+                                <button
+                                    type="button"
+                                    class="group flex h-12 min-w-40 cursor-pointer items-center justify-center gap-3 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition outline-none hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-60"
+                                    :disabled="
+                                        !displayProject &&
+                                        !live.isUnavailable.value
+                                    "
+                                    :aria-pressed="live.isRecording.value"
+                                    @click="toggleLive"
+                                >
+                                    <Square
+                                        v-if="live.isRecording.value"
+                                        class="size-4 fill-current"
+                                    />
+                                    <Play v-else class="size-4 fill-current" />
+                                    <span class="grid text-left leading-none">
+                                        <span
+                                            class="text-xs font-semibold text-blue-200 uppercase"
+                                        >
+                                            {{ live.buttonTop.value }}
+                                        </span>
+                                        <span
+                                            class="mt-1 text-sm font-semibold text-white"
+                                        >
+                                            {{ live.buttonBottom.value }}
+                                        </span>
+                                    </span>
+                                </button>
+                                <button
+                                    ref="pendingTrigger"
+                                    type="button"
+                                    class="h-12 min-w-32 cursor-pointer rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50"
+                                    @click="openPending"
+                                >
+                                    Pending clips
+                                </button>
+                                <div
+                                    v-if="live.isPanelVisible.value"
+                                    class="w-80 min-w-0 flex-none"
+                                >
                                     <div
-                                        v-if="isSummarizing"
-                                        class="h-1 overflow-hidden rounded-full bg-blue-100"
+                                        class="flex min-w-0 items-center gap-2 text-sm"
+                                    >
+                                        <span
+                                            class="shrink-0 font-semibold text-slate-950"
+                                        >
+                                            {{ live.activeName.value }}
+                                        </span>
+                                        <span
+                                            class="min-w-0 truncate text-slate-500"
+                                        >
+                                            {{ live.currentRangeLabel.value }}
+                                        </span>
+                                        <span
+                                            class="ml-auto shrink-0 font-semibold text-blue-700"
+                                        >
+                                            {{ live.elapsedLabel.value }}
+                                        </span>
+                                    </div>
+                                    <div
+                                        class="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"
                                     >
                                         <div
-                                            class="h-full w-full animate-pulse bg-blue-600"
+                                            class="h-full rounded-full bg-blue-600 transition-[width] duration-150"
+                                            :style="{
+                                                width: `${live.segmentProgress.value}%`,
+                                            }"
                                         />
                                     </div>
+                                    <p
+                                        class="mt-1 text-xs font-medium text-slate-500"
+                                    >
+                                        {{ live.supportLine.value }}
+                                    </p>
+                                </div>
+                            </div>
+                        </template>
+
+                        <template v-if="workspaceMode === 'upload'">
+                            <div
+                                class="order-1 flex w-fit max-w-[calc(100%-2rem)] flex-wrap items-center justify-center gap-3 rounded-lg border border-blue-100 bg-white px-3 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.1)] transition"
+                            >
+                                <button
+                                    type="button"
+                                    class="inline-flex h-12 min-w-32 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    :disabled="
+                                        !canUseUpload ||
+                                        upload.inFlight.value ||
+                                        upload.isPreparing.value
+                                    "
+                                    @click="chooseUpload"
+                                >
+                                    Browse
+                                </button>
+                                <div
+                                    v-if="
+                                        upload.hasFile.value ||
+                                        upload.isActive.value
+                                    "
+                                    class="w-80 min-w-0 flex-none"
+                                >
+                                    <p
+                                        class="truncate text-sm font-semibold text-slate-950"
+                                    >
+                                        {{ upload.fileName.value }}
+                                    </p>
+                                    <p class="truncate text-xs text-slate-500">
+                                        {{
+                                            upload.metaLine.value ||
+                                            'WAV, MP3, M4A, AAC, OGG, FLAC.'
+                                        }}
+                                    </p>
+                                    <p class="text-xs text-slate-500">
+                                        Duration:
+                                        <span
+                                            class="font-semibold text-slate-700"
+                                        >
+                                            {{ upload.durationLabel.value }}
+                                        </span>
+                                    </p>
                                     <div
-                                        v-if="primaryTranscript?.summary_text"
-                                        class="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-blue-950"
+                                        class="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"
                                     >
-                                        {{ primaryTranscript.summary_text }}
+                                        <div
+                                            class="h-full rounded-full bg-blue-600 transition-[width] duration-150"
+                                            :style="{
+                                                width: `${upload.progressPercent.value}%`,
+                                            }"
+                                        />
                                     </div>
-                                    <p
-                                        v-else-if="!isSummarizing"
-                                        class="text-sm text-slate-600"
+                                </div>
+                                <span
+                                    class="max-w-28 truncate text-xs font-semibold text-slate-600"
+                                >
+                                    {{ upload.statusLine.value }}
+                                </span>
+                                <button
+                                    type="button"
+                                    class="h-12 min-w-20 cursor-pointer rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                                    :disabled="!upload.canStart.value"
+                                    @click="upload.start"
+                                >
+                                    Start
+                                </button>
+                                <button
+                                    type="button"
+                                    class="h-12 min-w-20 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    :disabled="!upload.canPause.value"
+                                    @click="upload.pause"
+                                >
+                                    Pause
+                                </button>
+                                <button
+                                    type="button"
+                                    class="h-12 min-w-24 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    :disabled="!upload.canContinue.value"
+                                    @click="upload.resume"
+                                >
+                                    Continue
+                                </button>
+                                <button
+                                    type="button"
+                                    class="h-12 min-w-20 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    :disabled="!upload.canRetry.value"
+                                    @click="upload.retry"
+                                >
+                                    Retry
+                                </button>
+                                <button
+                                    type="button"
+                                    class="h-12 min-w-20 cursor-pointer rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 transition hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    :disabled="!upload.canCancel.value"
+                                    @click="upload.cancel"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    ref="pendingTrigger"
+                                    type="button"
+                                    class="h-12 min-w-32 cursor-pointer rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50"
+                                    @click="openPending"
+                                >
+                                    Pending clips
+                                </button>
+                            </div>
+                        </template>
+                        <template v-if="activeTranscriptActionMode">
+                            <div
+                                class="order-2 flex items-center gap-2 rounded-lg border border-blue-100 bg-white p-1.5 shadow-[0_12px_32px_rgba(15,23,42,0.08)]"
+                            >
+                                <Dialog v-model:open="polishOpen">
+                                    <DialogTrigger as-child>
+                                        <button
+                                            type="button"
+                                            :disabled="
+                                                !primaryTranscript ||
+                                                isActing ||
+                                                isPolishing
+                                            "
+                                            class="inline-flex h-11 cursor-pointer items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            <Sparkles class="size-4" />
+                                            {{
+                                                isPolishing
+                                                    ? 'Polishing'
+                                                    : 'Polish'
+                                            }}
+                                        </button>
+                                    </DialogTrigger>
+                                    <DialogContent
+                                        class="border-slate-200 bg-white shadow-2xl"
                                     >
-                                        No summary has been created for this
-                                        project.
-                                    </p>
-                                    <p
-                                        v-if="primaryTranscript?.summary_text"
-                                        class="text-sm text-slate-600"
-                                    >
-                                        Starting again replaces this project's
-                                        existing summary.
-                                    </p>
-                                    <div class="grid gap-2">
-                                        <Label>Source</Label>
-                                        <div class="grid grid-cols-2 gap-2">
+                                        <DialogHeader>
+                                            <p
+                                                class="text-xs font-semibold text-blue-600 uppercase"
+                                            >
+                                                Polish transcript
+                                            </p>
+                                            <DialogTitle
+                                                >Instructions</DialogTitle
+                                            >
+                                        </DialogHeader>
+                                        <div class="grid gap-4">
+                                            <div class="grid gap-2">
+                                                <Label>Preset</Label>
+                                                <div
+                                                    class="grid gap-2 sm:grid-cols-2"
+                                                >
+                                                    <Button
+                                                        v-for="preset in polishPresets"
+                                                        :key="preset.key"
+                                                        type="button"
+                                                        variant="outline"
+                                                        :class="
+                                                            polishPreset ===
+                                                            preset.key
+                                                                ? 'border-blue-300 bg-blue-50 text-blue-700'
+                                                                : ''
+                                                        "
+                                                        @click="
+                                                            selectPolishPreset(
+                                                                preset,
+                                                            )
+                                                        "
+                                                    >
+                                                        {{ preset.label }}
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                            <div class="grid gap-2">
+                                                <Label for="custom-polish">
+                                                    Custom instructions
+                                                </Label>
+                                                <textarea
+                                                    id="custom-polish"
+                                                    v-model="
+                                                        polishCustomInstruction
+                                                    "
+                                                    maxlength="2000"
+                                                    class="min-h-32 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                                                    @input="
+                                                        editCustomPolishInstruction
+                                                    "
+                                                />
+                                                <p
+                                                    v-if="polishError"
+                                                    class="text-sm text-red-700"
+                                                >
+                                                    {{ polishError }}
+                                                </p>
+                                                <p
+                                                    v-if="
+                                                        primaryTranscript?.cleaned_text
+                                                    "
+                                                    class="text-sm text-slate-600"
+                                                >
+                                                    Polishing again replaces the
+                                                    current polished transcript.
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <DialogFooter>
                                             <Button
-                                                type="button"
                                                 variant="outline"
+                                                @click="polishOpen = false"
+                                            >
+                                                Cancel
+                                            </Button>
+                                            <Button
+                                                :disabled="
+                                                    isActing || isPolishing
+                                                "
+                                                @click="polishTranscript"
+                                            >
+                                                {{
+                                                    isPolishing
+                                                        ? 'Polishing'
+                                                        : 'Polish'
+                                                }}
+                                            </Button>
+                                        </DialogFooter>
+                                    </DialogContent>
+                                </Dialog>
+                                <Dialog v-model:open="summaryOpen">
+                                    <DialogTrigger as-child>
+                                        <button
+                                            type="button"
+                                            :disabled="
+                                                !primaryTranscript ||
+                                                isActing ||
+                                                isSummarizing
+                                            "
+                                            class="inline-flex h-11 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            <FileText class="size-4" />
+                                            Summarize
+                                        </button>
+                                    </DialogTrigger>
+                                    <DialogContent
+                                        class="border-slate-200 bg-white shadow-2xl"
+                                    >
+                                        <DialogHeader>
+                                            <DialogTitle>
+                                                {{ summaryStatusLabel }}
+                                            </DialogTitle>
+                                            <DialogDescription
+                                                class="text-slate-600"
+                                            >
+                                                The summary is being prepared.
+                                                You may close this window and
+                                                return later.
+                                            </DialogDescription>
+                                        </DialogHeader>
+                                        <div class="grid gap-4">
+                                            <div
+                                                v-if="isSummarizing"
+                                                class="h-1 overflow-hidden rounded-full bg-blue-100"
+                                            >
+                                                <div
+                                                    class="h-full w-full animate-pulse bg-blue-600"
+                                                />
+                                            </div>
+                                            <div
+                                                v-if="
+                                                    primaryTranscript?.summary_text
+                                                "
+                                                class="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-blue-950"
+                                            >
+                                                {{
+                                                    primaryTranscript.summary_text
+                                                }}
+                                            </div>
+                                            <p
+                                                v-else-if="!isSummarizing"
+                                                class="text-sm text-slate-600"
+                                            >
+                                                No summary has been created for
+                                                this project.
+                                            </p>
+                                            <p
+                                                v-if="
+                                                    primaryTranscript?.summary_text
+                                                "
+                                                class="text-sm text-slate-600"
+                                            >
+                                                Starting again replaces this
+                                                project's existing summary.
+                                            </p>
+                                            <div class="grid gap-2">
+                                                <Label>Source</Label>
+                                                <div
+                                                    class="grid grid-cols-2 gap-2"
+                                                >
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        :class="
+                                                            summarySource ===
+                                                            'raw'
+                                                                ? 'border-blue-300 bg-blue-50 text-blue-700'
+                                                                : ''
+                                                        "
+                                                        @click="
+                                                            summarySource =
+                                                                'raw'
+                                                        "
+                                                    >
+                                                        Raw transcript
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        :class="
+                                                            summarySource ===
+                                                            'cleaned'
+                                                                ? 'border-blue-300 bg-blue-50 text-blue-700'
+                                                                : ''
+                                                        "
+                                                        @click="
+                                                            summarySource =
+                                                                'cleaned'
+                                                        "
+                                                    >
+                                                        Cleaned transcript
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <DialogFooter>
+                                            <Button
+                                                variant="outline"
+                                                @click="summaryOpen = false"
+                                            >
+                                                Cancel
+                                            </Button>
+                                            <Button
+                                                @click="
+                                                    summarizeTranscript(
+                                                        summarySource,
+                                                    )
+                                                "
+                                                :disabled="
+                                                    isActing || isSummarizing
+                                                "
+                                            >
+                                                {{
+                                                    primaryTranscript?.summary_text
+                                                        ? 'Replace summary'
+                                                        : 'Summarize'
+                                                }}
+                                            </Button>
+                                        </DialogFooter>
+                                    </DialogContent>
+                                </Dialog>
+                                <div class="relative">
+                                    <button
+                                        type="button"
+                                        :disabled="
+                                            !primaryTranscript || isExporting
+                                        "
+                                        class="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                        @click="exportOpen = !exportOpen"
+                                    >
+                                        <Download class="size-4" />
+                                        {{
+                                            isExporting ? 'Exporting' : 'Export'
+                                        }}
+                                    </button>
+                                    <div
+                                        v-if="exportOpen"
+                                        class="absolute right-0 bottom-14 z-40 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-2xl"
+                                    >
+                                        <div
+                                            class="mb-2 grid grid-cols-3 gap-1"
+                                        >
+                                            <button
+                                                type="button"
+                                                class="rounded border border-slate-200 px-2 py-1 text-xs text-slate-700"
                                                 :class="
-                                                    summarySource === 'raw'
+                                                    exportSource === 'raw'
                                                         ? 'border-blue-300 bg-blue-50 text-blue-700'
                                                         : ''
                                                 "
-                                                @click="summarySource = 'raw'"
+                                                @click="exportSource = 'raw'"
                                             >
-                                                Raw transcript
-                                            </Button>
-                                            <Button
+                                                Raw
+                                            </button>
+                                            <button
                                                 type="button"
-                                                variant="outline"
+                                                class="rounded border border-slate-200 px-2 py-1 text-xs text-slate-700"
                                                 :class="
-                                                    summarySource === 'cleaned'
+                                                    exportSource === 'cleaned'
                                                         ? 'border-blue-300 bg-blue-50 text-blue-700'
                                                         : ''
                                                 "
                                                 @click="
-                                                    summarySource = 'cleaned'
+                                                    exportSource = 'cleaned'
                                                 "
                                             >
-                                                Cleaned transcript
+                                                Cleaned
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="rounded border border-slate-200 px-2 py-1 text-xs text-slate-700"
+                                                :class="
+                                                    exportSource === 'summary'
+                                                        ? 'border-blue-300 bg-blue-50 text-blue-700'
+                                                        : ''
+                                                "
+                                                @click="
+                                                    exportSource = 'summary'
+                                                "
+                                            >
+                                                Summary
+                                            </button>
+                                        </div>
+                                        <div class="grid gap-1">
+                                            <Button
+                                                variant="outline"
+                                                @click="exportTranscript('txt')"
+                                            >
+                                                TXT
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                @click="
+                                                    exportTranscript('docx')
+                                                "
+                                            >
+                                                Microsoft Word
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                @click="
+                                                    exportTranscript('xlsx')
+                                                "
+                                            >
+                                                Excel
                                             </Button>
                                         </div>
                                     </div>
                                 </div>
-                                <DialogFooter>
-                                    <Button
-                                        variant="outline"
-                                        @click="summaryOpen = false"
-                                    >
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        @click="
-                                            summarizeTranscript(summarySource)
-                                        "
-                                        :disabled="isActing || isSummarizing"
-                                    >
-                                        {{
-                                            primaryTranscript?.summary_text
-                                                ? 'Replace summary'
-                                                : 'Summarize'
-                                        }}
-                                    </Button>
-                                </DialogFooter>
-                            </DialogContent>
-                        </Dialog>
-                        <div class="relative">
-                            <ProcessingButton
-                                :disabled="!primaryTranscript || isExporting"
-                                :loading="isExporting"
-                                variant="ghost"
-                                @click="exportOpen = !exportOpen"
-                            >
-                                <Download class="size-4" />
-                                Export
-                            </ProcessingButton>
-                            <div
-                                v-if="exportOpen"
-                                class="absolute right-0 bottom-14 z-40 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-2xl"
-                            >
-                                <div class="mb-2 grid grid-cols-3 gap-1">
-                                    <button
-                                        type="button"
-                                        class="rounded border border-slate-200 px-2 py-1 text-xs text-slate-700"
-                                        :class="
-                                            exportSource === 'raw'
-                                                ? 'border-blue-300 bg-blue-50 text-blue-700'
-                                                : ''
-                                        "
-                                        @click="exportSource = 'raw'"
-                                    >
-                                        Raw
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="rounded border border-slate-200 px-2 py-1 text-xs text-slate-700"
-                                        :class="
-                                            exportSource === 'cleaned'
-                                                ? 'border-blue-300 bg-blue-50 text-blue-700'
-                                                : ''
-                                        "
-                                        @click="exportSource = 'cleaned'"
-                                    >
-                                        Cleaned
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="rounded border border-slate-200 px-2 py-1 text-xs text-slate-700"
-                                        :class="
-                                            exportSource === 'summary'
-                                                ? 'border-blue-300 bg-blue-50 text-blue-700'
-                                                : ''
-                                        "
-                                        @click="exportSource = 'summary'"
-                                    >
-                                        Summary
-                                    </button>
-                                </div>
-                                <div class="grid gap-1">
-                                    <Button
-                                        variant="outline"
-                                        @click="exportTranscript('txt')"
-                                    >
-                                        TXT
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        @click="exportTranscript('docx')"
-                                    >
-                                        Microsoft Word
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        @click="exportTranscript('xlsx')"
-                                    >
-                                        Excel
-                                    </Button>
-                                </div>
+                                <button
+                                    ref="logTrigger"
+                                    type="button"
+                                    :disabled="!primaryTranscript"
+                                    aria-label="Processing log"
+                                    title="Processing log"
+                                    class="inline-flex h-11 min-w-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    @click="openLog"
+                                >
+                                    <ListChecks class="size-4" />
+                                    Log
+                                </button>
                             </div>
-                        </div>
-                        <Button
-                            ref="logTrigger"
-                            :disabled="!primaryTranscript"
-                            variant="ghost"
-                            @click="openLog"
-                        >
-                            <ListChecks class="size-4" />
-                            Log
-                        </Button>
-                        <Button
-                            ref="pendingTrigger"
-                            variant="ghost"
-                            @click="openPending"
-                        >
-                            <PanelRight class="size-4" />
-                            Pending clips
-                        </Button>
+                        </template>
                     </div>
                 </div>
             </section>
@@ -2008,5 +2213,6 @@ watch(() => page.props.flash, showFlashToast);
                 </div>
             </aside>
         </div>
+        <SettingsModal />
     </main>
 </template>

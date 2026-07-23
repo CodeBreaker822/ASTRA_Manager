@@ -30,7 +30,6 @@ type Transcript = {
 
 type UploadClip = {
     index: number;
-    file: File;
     startMs: number;
     endMs: number;
     durationMs: number;
@@ -83,6 +82,7 @@ export const useAudioUpload = (options: {
     const uploadPercent = ref(0);
     const clips = ref<UploadClip[]>([]);
     const selectedFile = ref<File | null>(null);
+    const selectedDurationMs = ref(0);
     const currentXhr = ref<XMLHttpRequest | null>(null);
     const isPreparing = ref(false);
     const inFlight = ref(false);
@@ -112,7 +112,10 @@ export const useAudioUpload = (options: {
     );
     const canStart = computed(
         () =>
-            Boolean(selectedFile.value) && !inFlight.value && !hasSession.value,
+            Boolean(selectedFile.value) &&
+            clips.value.length > 0 &&
+            !inFlight.value &&
+            !hasSession.value,
     );
     const canPause = computed(() => inFlight.value && !pauseRequested.value);
     const canContinue = computed(
@@ -226,6 +229,7 @@ export const useAudioUpload = (options: {
             if (pauseRequested.value) {
                 status.value = 'Paused';
                 inFlight.value = false;
+
                 return;
             }
 
@@ -239,11 +243,11 @@ export const useAudioUpload = (options: {
 
             batch.forEach((clip) => {
                 clip.status = 'Sending';
-                clip.meta = `${formatBytes(clip.file.size)} sent`;
+                clip.meta = `${formatBytes(selectedFile.value?.size ?? 0)} source`;
             });
 
             try {
-                const payload = await postBatch(projectId, batch);
+                const payload = await postBatch(projectId);
 
                 if (payload.upgrade) {
                     options.onUpgrade(
@@ -251,12 +255,13 @@ export const useAudioUpload = (options: {
                             'Audio upload could not be processed.',
                     );
                     markFailed(batch);
+
                     return;
                 }
 
                 batch.forEach((clip) => {
                     clip.status = 'Processing';
-                    clip.meta = `${formatBytes(clip.file.size)} sent`;
+                    clip.meta = 'Queued from FFmpeg chunk';
                 });
                 status.value = 'Processing';
                 metaLine.value = `Processing ${batch[0].index + 1} of ${clips.value.length}`;
@@ -278,6 +283,7 @@ export const useAudioUpload = (options: {
                     status.value = 'Paused';
                     inFlight.value = false;
                     retryable.value = false;
+
                     return;
                 }
 
@@ -287,6 +293,7 @@ export const useAudioUpload = (options: {
                         ? error.message
                         : 'Audio upload could not be processed.',
                 );
+
                 return;
             }
         }
@@ -315,19 +322,22 @@ export const useAudioUpload = (options: {
         options.onSuccess('Audio transcription completed.');
     };
 
-    const postBatch = (projectId: number, batch: UploadClip[]) =>
+    const postBatch = (projectId: number) =>
         new Promise<UploadResponse>((resolve, reject) => {
             const form = new FormData();
+            const file = selectedFile.value;
 
-            batch.forEach((clip) => {
-                form.append('audio[]', clip.file);
-                form.append('clip_index[]', String(clip.index));
-                form.append('clip_start_ms[]', String(clip.startMs));
-                form.append('clip_end_ms[]', String(clip.endMs));
-            });
+            if (!file) {
+                reject(new Error('Select an audio file first.'));
+
+                return;
+            }
+
+            form.append('audio', file);
+            form.append('server_chunk', '1');
             form.append(
                 'duration_seconds',
-                String(Math.ceil(totalDurationMs(batch) / 1000)),
+                String(Math.ceil(selectedDurationMs.value / 1000)),
             );
 
             const xhr = new XMLHttpRequest();
@@ -353,19 +363,18 @@ export const useAudioUpload = (options: {
 
                 if (xhr.status >= 200 && xhr.status < 300) {
                     resolve(payload);
+
                     return;
                 }
 
                 if (payload.upgrade) {
                     resolve(payload);
+
                     return;
                 }
 
                 reject(
-                    new Error(
-                        payload.message ??
-                            'Audio upload could not be processed.',
-                    ),
+                    new Error('Audio upload could not be processed.'),
                 );
             };
             xhr.onerror = () =>
@@ -403,44 +412,40 @@ export const useAudioUpload = (options: {
         isPreparing.value = true;
         status.value = 'Preparing source';
 
-        const buffer = await file.arrayBuffer();
-        const audioContext = new AudioContext();
-        const audio = await audioContext.decodeAudioData(buffer.slice(0));
-        const prepared: UploadClip[] = [];
-        const totalMs = Math.round(audio.duration * 1000);
+        try {
+            const totalMs = await audioDurationMs(file);
+            const prepared: UploadClip[] = [];
+            selectedDurationMs.value = totalMs;
 
-        for (let startMs = 0; startMs < totalMs; startMs += SECTION_MS) {
-            const endMs = Math.min(totalMs, startMs + SECTION_MS);
-            prepared.push({
-                index: prepared.length,
-                file: audioBufferToWavFile(
-                    sliceAudioBuffer(audioContext, audio, startMs, endMs),
-                    `${file.name}-clip-${prepared.length + 1}.wav`,
-                ),
-                startMs,
-                endMs,
-                durationMs: endMs - startMs,
-                rangeLabel: `${formatTime(startMs)}-${formatTime(endMs)}`,
-                status: 'Waiting',
-                meta: 'Waiting for source upload',
-            });
+            for (let startMs = 0; startMs < totalMs; startMs += SECTION_MS) {
+                const endMs = Math.min(totalMs, startMs + SECTION_MS);
+                prepared.push({
+                    index: prepared.length,
+                    startMs,
+                    endMs,
+                    durationMs: endMs - startMs,
+                    rangeLabel: `${formatTime(startMs)}-${formatTime(endMs)}`,
+                    status: 'Waiting',
+                    meta: 'Waiting for source upload',
+                });
+            }
+
+            if (
+                prepared.length > MAX_BATCH_CLIPS ||
+                totalDurationMs(prepared) > MAX_BATCH_DURATION_MS
+            ) {
+                resetSession();
+                options.onError('Audio is too big.');
+
+                return;
+            }
+
+            clips.value = prepared;
+            durationLabel.value = formatTime(totalMs);
+            status.value = 'Ready';
+        } finally {
+            isPreparing.value = false;
         }
-
-        if (
-            prepared.length > MAX_BATCH_CLIPS ||
-            totalDurationMs(prepared) > MAX_BATCH_DURATION_MS
-        ) {
-            await audioContext.close();
-            resetSession();
-            options.onError('Audio is too big.');
-            return;
-        }
-
-        clips.value = prepared;
-        durationLabel.value = formatTime(totalMs);
-        status.value = 'Ready';
-        isPreparing.value = false;
-        await audioContext.close();
     };
 
     const markFailed = (batch: UploadClip[]) => {
@@ -464,6 +469,7 @@ export const useAudioUpload = (options: {
         uploadPercent.value = 0;
         clips.value = [];
         selectedFile.value = null;
+        selectedDurationMs.value = 0;
         currentXhr.value = null;
         isPreparing.value = false;
         inFlight.value = false;
@@ -532,93 +538,15 @@ const formatTime = (ms: number) => {
     return `${minutes}:${rest}`;
 };
 
-const sliceAudioBuffer = (
-    context: AudioContext,
-    source: AudioBuffer,
-    startMs: number,
-    endMs: number,
-) => {
-    const sampleRate = source.sampleRate;
-    const start = Math.floor((startMs / 1000) * sampleRate);
-    const end = Math.min(source.length, Math.ceil((endMs / 1000) * sampleRate));
-    const length = Math.max(1, end - start);
-    const target = context.createBuffer(
-        source.numberOfChannels,
-        length,
-        sampleRate,
-    );
+const audioDurationMs = async (file: File) => {
+    const context = new AudioContext();
 
-    for (let channel = 0; channel < source.numberOfChannels; channel++) {
-        target.copyToChannel(
-            source.getChannelData(channel).slice(start, end),
-            channel,
-        );
-    }
+    try {
+        const buffer = await file.arrayBuffer();
+        const audio = await context.decodeAudioData(buffer.slice(0));
 
-    return target;
-};
-
-const audioBufferToWavFile = (buffer: AudioBuffer, name: string) =>
-    new File([encodeWav(buffer)], name, { type: 'audio/wav' });
-
-const encodeWav = (buffer: AudioBuffer) => {
-    const channelCount = buffer.numberOfChannels;
-    const sampleRate = buffer.sampleRate;
-    const bytesPerSample = 2;
-    const blockAlign = channelCount * bytesPerSample;
-    const samples = buffer.length;
-    const dataSize = samples * blockAlign;
-    const output = new ArrayBuffer(44 + dataSize);
-    const view = new DataView(output);
-    let offset = 0;
-
-    writeString(view, offset, 'RIFF');
-    offset += 4;
-    view.setUint32(offset, 36 + dataSize, true);
-    offset += 4;
-    writeString(view, offset, 'WAVE');
-    offset += 4;
-    writeString(view, offset, 'fmt ');
-    offset += 4;
-    view.setUint32(offset, 16, true);
-    offset += 4;
-    view.setUint16(offset, 1, true);
-    offset += 2;
-    view.setUint16(offset, channelCount, true);
-    offset += 2;
-    view.setUint32(offset, sampleRate, true);
-    offset += 4;
-    view.setUint32(offset, sampleRate * blockAlign, true);
-    offset += 4;
-    view.setUint16(offset, blockAlign, true);
-    offset += 2;
-    view.setUint16(offset, bytesPerSample * 8, true);
-    offset += 2;
-    writeString(view, offset, 'data');
-    offset += 4;
-    view.setUint32(offset, dataSize, true);
-    offset += 4;
-
-    for (let sample = 0; sample < samples; sample++) {
-        for (let channel = 0; channel < channelCount; channel++) {
-            const value = Math.max(
-                -1,
-                Math.min(1, buffer.getChannelData(channel)[sample] ?? 0),
-            );
-            view.setInt16(
-                offset,
-                value < 0 ? value * 0x8000 : value * 0x7fff,
-                true,
-            );
-            offset += 2;
-        }
-    }
-
-    return output;
-};
-
-const writeString = (view: DataView, offset: number, value: string) => {
-    for (let index = 0; index < value.length; index++) {
-        view.setUint8(offset + index, value.charCodeAt(index));
+        return Math.max(1, Math.round(audio.duration * 1000));
+    } finally {
+        await context.close();
     }
 };

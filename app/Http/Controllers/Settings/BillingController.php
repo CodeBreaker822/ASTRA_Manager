@@ -10,6 +10,7 @@ use App\Services\PayMongoCheckoutService;
 use App\Services\PlanService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -77,13 +78,19 @@ class BillingController extends Controller
         try {
             $checkout = $payMongo->createCheckoutSession($user, $planKey, $plan, $transaction);
         } catch (RuntimeException $exception) {
+            Log::warning('PayMongo checkout could not be created.', [
+                'user_id' => $user->id,
+                'plan' => $planKey,
+                'error' => $exception->getMessage(),
+            ]);
+
             $transaction->update([
                 'status' => 'failed',
-                'payload' => ['error' => $exception->getMessage()],
+                'payload' => ['error' => 'Checkout could not be started.'],
             ]);
 
             return back()->withErrors([
-                'billing' => $exception->getMessage(),
+                'billing' => 'Checkout could not be started. Please try again later.',
             ]);
         }
 

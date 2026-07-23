@@ -25,6 +25,24 @@ defineOptions({
 
 const page = usePage();
 const user = computed(() => page.props.auth.user);
+const profileModal = computed(
+    () =>
+        (
+            page.props.settingsModal as
+                | {
+                      profile?: {
+                          mustVerifyEmail?: boolean;
+                          status?: string | null;
+                      };
+                  }
+                | null
+                | undefined
+        )?.profile,
+);
+const mustVerifyEmail = computed(
+    () => profileModal.value?.mustVerifyEmail ?? page.props.mustVerifyEmail,
+);
+const status = computed(() => profileModal.value?.status ?? page.props.status);
 </script>
 
 <template>
@@ -73,7 +91,7 @@ const user = computed(() => page.props.auth.user);
                 <InputError class="mt-2" :message="errors.email" />
             </div>
 
-            <div v-if="page.props.mustVerifyEmail && !user.email_verified_at">
+            <div v-if="mustVerifyEmail && !user.email_verified_at">
                 <p class="-mt-4 text-sm text-muted-foreground">
                     Your email address is unverified.
                     <Link
@@ -86,7 +104,7 @@ const user = computed(() => page.props.auth.user);
                 </p>
 
                 <div
-                    v-if="page.props.status === 'verification-link-sent'"
+                    v-if="status === 'verification-link-sent'"
                     class="mt-2 text-sm font-medium text-green-600"
                 >
                     A new verification link has been sent to your email address.

@@ -9,7 +9,6 @@ use App\Services\LicenseKeyService;
 use App\Traits\Gates;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
@@ -26,10 +25,15 @@ class UserManagerController extends Controller
 
         return Inertia::render('dashboard/Users', [
             'users' => User::query()
-                ->with('position:id,position_name')
+                ->with([
+                    'position:id,position_name',
+                    'license:id,user_id,app_name,app_token_suffix,is_active',
+                ])
                 ->select(['id', 'name', 'email', 'email_verified_at', 'position_id', 'user_status', 'created_at', 'updated_at'])
                 ->latest()
-                ->get(),
+                ->get()
+                ->map(fn (User $user): array => $this->presentUser($user))
+                ->all(),
             'positions' => UserPositions::query()
                 ->with('permissions:id,position_id,permission_name')
                 ->orderBy('position_name')
@@ -106,7 +110,7 @@ class UserManagerController extends Controller
             'permissions.*' => ['required', 'string'],
         ]);
 
-        DB::transaction(function () use ($validated): void {
+        UserPositions::query()->getConnection()->transaction(function () use ($validated): void {
             $position = UserPositions::create([
                 'position_name' => $validated['position_name'],
                 'position_code' => strtoupper(str_replace(' ', '_', $validated['position_name'])),
@@ -130,7 +134,7 @@ class UserManagerController extends Controller
             'permissions.*' => ['required', 'string'],
         ]);
 
-        DB::transaction(function () use ($position, $validated): void {
+        UserPositions::query()->getConnection()->transaction(function () use ($position, $validated): void {
             $position->update([
                 'position_name' => $validated['position_name'],
                 'position_code' => strtoupper(str_replace(' ', '_', $validated['position_name'])),
@@ -170,5 +174,38 @@ class UserManagerController extends Controller
                 'permission_name' => $permission,
             ]);
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function presentUser(User $user): array
+    {
+        $license = $user->license;
+        $licenseTokenSuffix = $license?->app_token_suffix
+            ? substr((string) $license->app_token_suffix, -5)
+            : null;
+
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'email_verified_at' => $user->email_verified_at,
+            'position_id' => $user->position_id,
+            'user_status' => $user->user_status,
+            'created_at' => $user->created_at,
+            'updated_at' => $user->updated_at,
+            'position' => $user->position ? [
+                'id' => $user->position->id,
+                'position_name' => $user->position->position_name,
+            ] : null,
+            'license' => $license ? [
+                'id' => $license->id,
+                'app_name' => $license->app_name,
+                'token_suffix' => $licenseTokenSuffix,
+                'masked_token' => $licenseTokenSuffix ? str_repeat('*', 20).$licenseTokenSuffix : null,
+                'is_active' => (bool) $license->is_active,
+            ] : null,
+        ];
     }
 }

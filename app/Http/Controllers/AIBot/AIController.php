@@ -4,8 +4,10 @@ namespace App\Http\Controllers\AIBot;
 
 use App\Http\Controllers\Controller;
 use App\Services\ChatbotService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class AIController extends Controller
 {
@@ -15,12 +17,20 @@ class AIController extends Controller
      * Store chat messages in session temporarily
      * In production, this should be stored in database
      */
-    private function getChatHistory()
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function getChatHistory(): array
     {
-        return session('chat_history', []);
+        $history = session('chat_history', []);
+
+        return is_array($history) ? $history : [];
     }
 
-    private function saveChatHistory($history)
+    /**
+     * @param  array<int, array<string, mixed>>  $history
+     */
+    private function saveChatHistory(array $history): void
     {
         // Keep only last 20 messages to manage memory
         session(['chat_history' => array_slice($history, -20)]);
@@ -29,15 +39,15 @@ class AIController extends Controller
     /**
      * Process user message and return AI response
      */
-    public function sendMessage(Request $request)
+    public function sendMessage(Request $request): JsonResponse
     {
         try {
             $request->validate([
                 'message' => 'required|string|max:2000',
             ]);
 
-            $userMessage = $request->input('message');
-            $userId = Auth::id();
+            $userMessage = (string) $request->input('message');
+            $userId = (int) $request->user()->id;
 
             // Get current chat history
             $history = $this->getChatHistory();
@@ -136,14 +146,14 @@ class AIController extends Controller
 
             return response()->json($responseData);
 
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'error' => 'Invalid message format',
                 'details' => $e->errors(),
             ], 422);
 
-        } catch (\Exception $e) {
+        } catch (Throwable) {
             return response()->json([
                 'success' => false,
                 'error' => 'Failed to process your message. Please try again.',
@@ -154,20 +164,20 @@ class AIController extends Controller
     /**
      * Clear chat history
      */
-    public function clearChat(Request $request)
+    public function clearChat(Request $request): JsonResponse
     {
         try {
             session(['chat_history' => []]);
 
             // Clear AI session context as well
-            $this->chatbot->clearSessionContext(Auth::id());
+            $this->chatbot->clearSessionContext((int) $request->user()->id);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Chat history cleared',
             ]);
 
-        } catch (\Exception $e) {
+        } catch (Throwable) {
             return response()->json([
                 'success' => false,
                 'error' => 'Failed to clear chat history',
@@ -178,7 +188,7 @@ class AIController extends Controller
     /**
      * Get chat history
      */
-    public function getHistory(Request $request)
+    public function getHistory(Request $request): JsonResponse
     {
         try {
             $history = $this->getChatHistory();
@@ -188,7 +198,7 @@ class AIController extends Controller
                 'history' => $history,
             ]);
 
-        } catch (\Exception $e) {
+        } catch (Throwable) {
             return response()->json([
                 'success' => false,
                 'error' => 'Failed to retrieve chat history',
@@ -199,17 +209,17 @@ class AIController extends Controller
     /**
      * Get AI session info for debugging
      */
-    public function getSessionInfo(Request $request)
+    public function getSessionInfo(Request $request): JsonResponse
     {
         try {
-            $sessionInfo = $this->chatbot->getSessionInfo(Auth::id());
+            $sessionInfo = $this->chatbot->getSessionInfo((int) $request->user()->id);
 
             return response()->json([
                 'success' => true,
                 'session' => $sessionInfo,
             ]);
 
-        } catch (\Exception $e) {
+        } catch (Throwable) {
             return response()->json([
                 'success' => false,
                 'error' => 'Failed to retrieve session info',
@@ -220,7 +230,7 @@ class AIController extends Controller
     /**
      * Clean AI response by removing tool call syntax
      */
-    private function cleanAIResponse($response)
+    private function cleanAIResponse(string $response): string
     {
         // Remove tool call syntax like *CallToolList()* or *ToolName(data)*
         $cleanedResponse = preg_replace('/\*[^*]+\*/', '', $response);
@@ -231,7 +241,7 @@ class AIController extends Controller
 
         // If response is empty after cleaning, provide honest fallback
         if (empty($cleanedResponse)) {
-            return "I don't have access to system tools yet, so I cannot perform actions. I can only provide general information about the transcription server. Please contact the developers to enable tool access.";
+            return "I can only provide general information right now. Some actions are not available for this account.";
         }
 
         return $cleanedResponse;
@@ -240,7 +250,10 @@ class AIController extends Controller
     /**
      * Extract tool calls from AI response
      */
-    private function extractToolCalls($response)
+    /**
+     * @return array<int, string>
+     */
+    private function extractToolCalls(string $response): array
     {
         $toolCalls = [];
 
@@ -265,7 +278,11 @@ class AIController extends Controller
     /**
      * Process tool calls and return results
      */
-    private function processToolCalls($toolCalls, $userId)
+    /**
+     * @param  array<int, string>  $toolCalls
+     * @return array<string, mixed>
+     */
+    private function processToolCalls(array $toolCalls, int $userId): array
     {
         $results = [];
 
@@ -274,15 +291,18 @@ class AIController extends Controller
                 // Parse tool call: either function name or function with JSON data
                 if (str_contains($toolCall, '(')) {
                     // Extract function name and parameters
-                    preg_match('/^([^(]+)\((.*)\)$/', $toolCall, $parts);
+                    if (! preg_match('/^([^(]+)\((.*)\)$/', $toolCall, $parts)) {
+                        continue;
+                    }
+
                     $functionName = trim($parts[1]);
-                    $params = isset($parts[2]) ? trim($parts[2], '"') : '';
+                    $params = trim($parts[2], '"');
 
                     // Execute tool based on function name
                     $result = $this->executeTool($functionName, $params, $userId);
                     $results[$functionName] = $result;
                 }
-            } catch (\Exception $e) {
+            } catch (Throwable) {
                 $results[$toolCall] = [
                     'success' => false,
                     'error' => 'Tool execution failed',
@@ -296,7 +316,7 @@ class AIController extends Controller
     /**
      * Execute individual tool
      */
-    private function executeTool($functionName, $params, $userId)
+    private function executeTool(string $functionName, string $params, int $userId): mixed
     {
         // TODO: Implement actual tool execution
         // For now, return mock responses
@@ -317,14 +337,17 @@ class AIController extends Controller
     /**
      * Process user request through AI
      */
-    private function getAIResponse($userMessage, $history)
+    /**
+     * @param  array<int, array<string, mixed>>  $history
+     */
+    private function getAIResponse(string $userMessage, array $history): string
     {
         try {
-            $userId = Auth::id();
+            $userId = (int) request()->user()->id;
 
             return $this->chatbot->chat($userMessage, $userId, $history);
 
-        } catch (\Exception $e) {
+        } catch (Throwable $e) {
             // Check if it's a rate limit error
             if (str_contains($e->getMessage(), 'busy')) {
                 return 'Chat is busy please try again in a minute';

@@ -8,7 +8,6 @@ use App\Services\PageContentService;
 use App\Services\PlanService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -68,7 +67,7 @@ class DashboardPricingController extends Controller
             'pricingContent.faq.*.answer' => ['required', 'string', 'max:500'],
         ]);
 
-        DB::transaction(function () use ($validated): void {
+        PlanTier::query()->getConnection()->transaction(function () use ($validated): void {
             foreach (array_values($validated['tiers']) as $index => $tier) {
                 PlanTier::query()->updateOrCreate(
                     ['key' => $tier['key']],

@@ -41,8 +41,11 @@ use Throwable;
 class TranscriptionController extends Controller
 {
     private const RUNPOD_API_BASE_URL = 'https://api.runpod.ai/v2';
+
     private const RATE_LIMIT_PER_MINUTE = 120;
+
     private const MAX_TRANSCRIBE_BATCH_DURATION_MS = 20 * 60 * 1000;
+
     private const MAX_TRANSCRIBE_BATCH_CLIPS = 20;
 
     public function transcribe(Request $request, AppSettingsService $settings): JsonResponse
@@ -369,7 +372,7 @@ class TranscriptionController extends Controller
         $startedAt = microtime(true);
         $token = $request->bearerToken();
         $license = is_string($token) && $token !== ''
-            ? API::query()->where('app_token', $token)->first()
+            ? API::findByPlainToken($token)
             : null;
 
         if (! $license) {
@@ -518,7 +521,7 @@ class TranscriptionController extends Controller
             return response()->json(['message' => 'Missing Bearer license key.'], 401);
         }
 
-        $license = API::query()->where('app_token', $token)->first();
+        $license = API::findByPlainToken($token);
 
         if (! $license) {
             return response()->json(['message' => 'Invalid license key.'], 401);
@@ -541,6 +544,9 @@ class TranscriptionController extends Controller
         return $license;
     }
 
+    /**
+     * @return array{version: string|null, zipfile: string|null}
+     */
     private function transcriberUpdate(): array
     {
         $version = null;
@@ -551,7 +557,7 @@ class TranscriptionController extends Controller
                 $data = json_decode((string) file_get_contents($versionPath), true, 512, JSON_THROW_ON_ERROR);
 
                 if (is_array($data) && array_key_exists('version', $data)) {
-                    $version = $data['version'];
+                    $version = is_string($data['version']) ? $data['version'] : null;
                 }
             } catch (Throwable) {
                 // A bad manually uploaded file should not break the status endpoint.
@@ -620,6 +626,9 @@ class TranscriptionController extends Controller
             || in_array($request->path(), $blockedRoutes, true);
     }
 
+    /**
+     * @return array<int, string>
+     */
     private function normalizeList(mixed $value): array
     {
         if (is_string($value)) {

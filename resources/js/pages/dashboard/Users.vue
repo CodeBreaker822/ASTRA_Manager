@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { Pencil, Plus, Save, ShieldCheck, Trash2, X } from '@lucide/vue';
+import { KeyRound, Pencil, Plus, Save, ShieldCheck, Trash2, X } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import InputError from '@/components/InputError.vue';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +35,13 @@ type ManagedUser = User & {
     position?: {
         id: number;
         position_name: string;
+    } | null;
+    license?: {
+        id: number;
+        app_name: string;
+        token_suffix: string | null;
+        masked_token: string;
+        is_active: boolean;
     } | null;
 };
 
@@ -148,6 +155,7 @@ const submitPosition = (position?: Position) => {
 
     if (position) {
         positionForm.put(`/dashboard/users/positions/${position.id}`, options);
+
         return;
     }
 
@@ -345,6 +353,27 @@ const removePosition = (position: Position) => {
                                 >
                                     <X class="size-4" />
                                 </Button>
+                            </div>
+
+                            <div
+                                class="grid gap-2 rounded-md border bg-muted/30 p-3 lg:col-span-5"
+                            >
+                                <div
+                                    class="flex items-center gap-2 text-sm font-medium"
+                                >
+                                    <KeyRound class="size-4" />
+                                    User API Token
+                                </div>
+                                <Input
+                                    v-if="user.license?.masked_token"
+                                    :model-value="user.license.masked_token"
+                                    readonly
+                                    aria-label="User API token"
+                                    class="font-mono text-xs"
+                                />
+                                <p v-else class="text-sm text-muted-foreground">
+                                    No user API token generated.
+                                </p>
                             </div>
                         </template>
 

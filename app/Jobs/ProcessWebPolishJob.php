@@ -6,7 +6,6 @@ use App\Models\Transcript;
 use App\Services\WebTranscriptProcessor;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Throwable;
 
 class ProcessWebPolishJob implements ShouldQueue
 {
@@ -37,7 +36,7 @@ class ProcessWebPolishJob implements ShouldQueue
         $processor->polish($transcript, $this->instruction);
     }
 
-    public function failed(?Throwable $exception): void
+    public function failed(): void
     {
         $transcript = Transcript::query()->find($this->transcriptId);
 
@@ -45,7 +44,7 @@ class ProcessWebPolishJob implements ShouldQueue
             return;
         }
 
-        $message = $exception?->getMessage() ?: 'Transcript could not be polished.';
+        $message = 'Transcript could not be polished.';
 
         $transcript->forceFill([
             'polish_status' => 'failed',

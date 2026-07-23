@@ -6,8 +6,8 @@ use App\Http\Controllers\Api\TranscriptionController as ApiTranscriptionControll
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Symfony\Component\HttpFoundation\File\UploadedFile;
 
 class WebApiTranscriptionClient
 {
@@ -35,7 +35,7 @@ class WebApiTranscriptionClient
         $payload = $this->payload($response);
 
         if ($response->getStatusCode() !== 202) {
-            throw new \RuntimeException((string) ($payload['message'] ?? 'Audio upload could not be processed.'));
+            throw new \RuntimeException('Audio upload could not be processed.');
         }
 
         $jobId = (string) ($payload['job_id'] ?? '');
@@ -66,7 +66,7 @@ class WebApiTranscriptionClient
         $payload = $this->payload($response);
 
         if ($response->getStatusCode() >= 400) {
-            throw new \RuntimeException((string) ($payload['message'] ?? 'Transcript could not be polished.'));
+            throw new \RuntimeException('Transcript could not be polished.');
         }
 
         return $payload;
@@ -166,7 +166,7 @@ class WebApiTranscriptionClient
             }
 
             if ($status === 'failed' || $response->getStatusCode() >= 400) {
-                throw new \RuntimeException((string) ($payload['message'] ?? 'Audio upload could not be processed.'));
+                throw new \RuntimeException('Audio upload could not be processed.');
             }
 
             sleep(2);

@@ -135,6 +135,7 @@ export const useLiveRecorder = (options: {
     const toggle = async () => {
         if (isRecording.value) {
             stop();
+
             return;
         }
 
@@ -144,6 +145,7 @@ export const useLiveRecorder = (options: {
                     ? 'Microphone access is blocked. Please allow it to record audio.'
                     : 'Live recording could not start. Please try again.',
             );
+
             return;
         }
 
@@ -164,6 +166,7 @@ export const useLiveRecorder = (options: {
             options.onToastError(
                 'Live recording could not start. Please try again.',
             );
+
             return;
         }
 
@@ -180,6 +183,7 @@ export const useLiveRecorder = (options: {
             options.onToastError(
                 'Microphone access is blocked. Please allow it to record audio.',
             );
+
             return;
         }
 
@@ -297,9 +301,7 @@ export const useLiveRecorder = (options: {
                     );
                 }
 
-                throw new Error(
-                    payload.message ?? 'Audio upload could not be processed.',
-                );
+                throw new Error('Audio upload could not be processed.');
             }
 
             clip.status = 'Saved';

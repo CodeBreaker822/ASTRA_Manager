@@ -8,8 +8,8 @@ import {
     DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import UserInfo from '@/components/UserInfo.vue';
+import { useSettingsModal } from '@/composables/useSettingsModal';
 import { logout } from '@/routes';
-import { edit } from '@/routes/profile';
 import type { User } from '@/types';
 
 type Props = {
@@ -19,6 +19,7 @@ type Props = {
 const handleLogout = () => {
     router.flushAll();
 };
+const { settingsHref } = useSettingsModal();
 
 defineProps<Props>();
 </script>
@@ -32,7 +33,13 @@ defineProps<Props>();
     <DropdownMenuSeparator />
     <DropdownMenuGroup>
         <DropdownMenuItem :as-child="true">
-            <Link class="block w-full cursor-pointer" :href="edit()" prefetch>
+            <Link
+                class="block w-full cursor-pointer"
+                :href="settingsHref('profile')"
+                preserve-scroll
+                preserve-state
+                replace
+            >
                 <Settings class="mr-2 h-4 w-4" />
                 Settings
             </Link>

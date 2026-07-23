@@ -12,7 +12,10 @@ class LicenseKeyService
     {
         do {
             $key = 'is_license_'.bin2hex(random_bytes(48));
-        } while (API::query()->where('app_token', $key)->exists());
+        } while (API::query()
+            ->where('app_token_hash', API::hashToken($key))
+            ->orWhere('app_token', $key)
+            ->exists());
 
         return $key;
     }

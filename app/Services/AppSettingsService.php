@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\TranscriptionProviderSetting;
-use Illuminate\Support\Facades\DB;
 
 class AppSettingsService
 {
@@ -306,7 +305,7 @@ class AppSettingsService
     {
         $allowedProviders = $this->providerIdsForCategory($category);
 
-        DB::transaction(function () use ($allowedProviders, $settingIds): void {
+        TranscriptionProviderSetting::query()->getConnection()->transaction(function () use ($allowedProviders, $settingIds): void {
             foreach (array_values($settingIds) as $sortOrder => $settingId) {
                 TranscriptionProviderSetting::query()
                     ->whereKey($settingId)

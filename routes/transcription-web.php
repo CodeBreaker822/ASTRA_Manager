@@ -22,8 +22,8 @@ Route::middleware(['auth', 'can:API-manage_api'])->group(function () {
     Route::post('/dashboard/api/transcription-providers/order', [APIController::class, 'reorderTranscriptionProviders'])->name('api.transcription-providers.order');
     Route::post('/dashboard/api/transcriber-package', [APIController::class, 'uploadTranscriberPackage'])->name('api.transcriber-package.upload');
     Route::post('/dashboard/api/license-key', [APIController::class, 'generateLicenseKey'])->name('api.generate-license-key');
-    Route::put('/api/settings/update-status/{id}', [APIController::class, 'updateStatus'])->name('api.update-status');
-    Route::put('/api/settings/update-method/{id}', [APIController::class, 'updateMethod'])->name('api.update-method');
+    Route::put('/api/settings/update-status/{api}', [APIController::class, 'updateStatus'])->name('api.update-status');
+    Route::put('/api/settings/update-method/{api}', [APIController::class, 'updateMethod'])->name('api.update-method');
     Route::post('/api/settings/store', [APIController::class, 'store'])->name('api.store');
-    Route::delete('/api/settings/{aPI}', [APIController::class, 'destroy'])->name('api.destroy');
+    Route::delete('/api/settings/{api}', [APIController::class, 'destroy'])->name('api.destroy');
 });

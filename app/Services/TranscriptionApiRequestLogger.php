@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\API;
 use App\Models\TranscriptionApiRequestLog;
+use App\Services\Security\LicenseTokenFingerprint;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -13,6 +14,11 @@ use Throwable;
 
 class TranscriptionApiRequestLogger
 {
+    public function __construct(private readonly LicenseTokenFingerprint $tokens) {}
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
     public function record(
         Request $request,
         string $operation,
@@ -24,22 +30,30 @@ class TranscriptionApiRequestLogger
         try {
             $token = $request->bearerToken();
             $payload = $response->getData(true);
-            $status = $context['status'] ?? $this->statusFor($response->getStatusCode(), $payload);
+            $payload = is_array($payload) ? $payload : [];
+            $status = is_string($context['status'] ?? null)
+                ? $context['status']
+                : $this->statusFor($response->getStatusCode(), $payload);
+            $severity = is_string($context['severity'] ?? null)
+                ? $context['severity']
+                : $this->severityFor($status, $response->getStatusCode());
+            $provider = $this->contextString($context, 'provider') ?? $this->requestString($request, 'provider');
+            $model = $this->contextString($context, 'model') ?? $this->responseString($payload, 'model');
 
             TranscriptionApiRequestLog::query()->create([
                 'request_id' => (string) Str::uuid(),
                 'api_id' => $license?->id,
                 'app_name' => $license?->app_name,
-                'license_token_prefix' => $this->tokenPrefix($token),
-                'license_token_hash' => $this->tokenHash($token),
+                'license_token_prefix' => $this->tokens->prefix($token),
+                'license_token_hash' => $this->tokens->hash($token),
                 'operation' => $operation,
                 'endpoint' => '/'.$request->path(),
                 'http_method' => $request->method(),
                 'status' => $status,
-                'severity' => $context['severity'] ?? $this->severityFor($status, $response->getStatusCode()),
+                'severity' => $severity,
                 'http_status' => $response->getStatusCode(),
-                'provider' => $context['provider'] ?? $this->requestString($request, 'provider'),
-                'model' => $context['model'] ?? $this->responseString($payload, 'model'),
+                'provider' => $provider,
+                'model' => $model,
                 'language_code' => $this->requestString($request, 'language_code'),
                 'clip_index' => $this->requestInteger($request, 'clip_index'),
                 'clip_start_ms' => $this->requestInteger($request, 'clip_start_ms'),
@@ -64,6 +78,9 @@ class TranscriptionApiRequestLogger
         }
     }
 
+    /**
+     * @param  array<string, mixed>  $payload
+     */
     public function statusFor(int $httpStatus, array $payload = []): string
     {
         if ($httpStatus >= 200 && $httpStatus < 300) {
@@ -92,6 +109,9 @@ class TranscriptionApiRequestLogger
         };
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     private function requestSummary(Request $request, string $operation): array
     {
         return array_filter([
@@ -105,6 +125,10 @@ class TranscriptionApiRequestLogger
         ], fn (mixed $value): bool => $value !== null && $value !== '');
     }
 
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
     private function responseSummary(array $payload): array
     {
         return array_filter([
@@ -119,6 +143,9 @@ class TranscriptionApiRequestLogger
         ], fn (mixed $value): bool => $value !== null && $value !== '');
     }
 
+    /**
+     * @param  array<string, mixed>  $payload
+     */
     private function errorMessage(array $payload): ?string
     {
         if (! isset($payload['message'])) {
@@ -144,6 +171,21 @@ class TranscriptionApiRequestLogger
         return is_numeric($value) ? (int) $value : null;
     }
 
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function contextString(array $context, string $key): ?string
+    {
+        $value = $context[$key] ?? null;
+
+        return is_scalar($value) && trim((string) $value) !== ''
+            ? Str::limit(trim((string) $value), 255, '')
+            : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
     private function responseString(array $payload, string $key): ?string
     {
         return isset($payload[$key]) && is_scalar($payload[$key])
@@ -167,21 +209,13 @@ class TranscriptionApiRequestLogger
 
     private function audioSize(mixed $file): ?int
     {
-        return $file instanceof UploadedFile ? $file->getSize() : null;
-    }
-
-    private function tokenPrefix(?string $token): ?string
-    {
-        if (! is_string($token) || $token === '') {
+        if (! $file instanceof UploadedFile) {
             return null;
         }
 
-        return Str::limit($token, 24, '');
-    }
+        $size = $file->getSize();
 
-    private function tokenHash(?string $token): ?string
-    {
-        return is_string($token) && $token !== '' ? hash('sha256', $token) : null;
+        return is_int($size) ? $size : null;
     }
 
     private function durationMs(float $startedAt): int

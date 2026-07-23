@@ -1,4 +1,5 @@
-import { onUnmounted, ref, type Ref } from 'vue';
+import { onUnmounted, ref  } from 'vue';
+import type {Ref} from 'vue';
 
 export const useTranscriptPolling = (
     hasWork: Ref<boolean>,

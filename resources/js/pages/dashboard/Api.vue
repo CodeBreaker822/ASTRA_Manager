@@ -2,7 +2,6 @@
 import { Head } from '@inertiajs/vue3';
 import {
     Copy,
-    Eye,
     FileText,
     GripVertical,
     Plus,
@@ -15,7 +14,9 @@ import DashboardLayout from '@/layouts/dashboard/Layout.vue';
 type ApiKey = {
     id: number;
     app_name: string;
-    app_token: string;
+    app_token?: string | null;
+    token_suffix: string | null;
+    masked_token: string;
     can_post: boolean;
     can_get: boolean;
     can_put: boolean;
@@ -140,15 +141,6 @@ const packageProgress = ref(0);
 const packageProgressText = ref('Uploading package...');
 const dropzoneActive = ref(false);
 
-const providerGroups = computed(() => ({
-    transcriber: providers.value.filter(
-        (provider) => provider.category === 'transcriber',
-    ),
-    text_fixer: providers.value.filter(
-        (provider) => provider.category === 'text_fixer',
-    ),
-}));
-
 const providerSections: Array<{
     category: ProviderCategory;
     title: string;
@@ -251,7 +243,11 @@ async function saveApi() {
     apiSaving.value = true;
 
     try {
-        const payload = await requestJson<{ data: ApiKey; message: string }>(
+        const payload = await requestJson<{
+            data: ApiKey;
+            message: string;
+            plain_token: string;
+        }>(
             '/api/settings/store',
             {
                 method: 'POST',
@@ -271,6 +267,7 @@ async function saveApi() {
 
         apis.value.push(payload.data);
         apiModalOpen.value = false;
+        showTokenModal(payload.plain_token);
         showNotice(payload.message || 'API settings saved successfully!');
     } catch (error) {
         showNotice(exceptionMessage(error), 'error');
@@ -761,12 +758,12 @@ function uploadErrorMessage(
             413: 'The package upload returned HTTP 413 because the submitted request was considered too large.',
             419: 'Your session expired during the upload. Refresh this page and try again.',
             422: 'The server rejected the package or version. Verify that the selected file is a valid ZIP.',
-            500: 'The server failed while storing or publishing the package. Check the server log for the matching upload error.',
+            500: 'The package could not be published. Please try again later.',
             502: 'The gateway lost contact with the application while uploading the package.',
             503: 'The upload service is temporarily unavailable.',
             504: 'The gateway timed out while waiting for the package upload to finish.',
         }[xhr.status] ??
-        `Package upload failed with HTTP ${xhr.status || 'network'}${xhr.statusText ? `: ${xhr.statusText}` : ''}.`
+        'Package upload failed. Please try again later.'
     );
 }
 
@@ -875,20 +872,25 @@ function exceptionMessage(error: unknown): string {
                                 <td class="px-6 py-4">
                                     <div class="flex items-center space-x-2">
                                         <div
-                                            class="max-w-xs truncate text-sm text-gray-500 dark:text-gray-400"
+                                            class="hidden"
                                         >
                                             ••••••••••••••••••••••••••••••••
                                         </div>
-                                        <button
-                                            type="button"
-                                            class="text-gray-400 transition duration-150 hover:text-gray-600 dark:hover:text-gray-300"
-                                            title="Show license key"
-                                            @click="
-                                                showTokenModal(api.app_token)
+                                        <div
+                                            class="max-w-xs truncate font-mono text-sm text-gray-500 dark:text-gray-400"
+                                        >
+                                            {{ api.masked_token }}
+                                        </div>
+                                        <span
+                                            class="font-mono text-xs text-gray-400 dark:text-gray-500"
+                                            :title="
+                                                api.token_suffix
+                                                    ? `Ends with ${api.token_suffix}`
+                                                    : 'Token is hidden'
                                             "
                                         >
-                                            <Eye class="size-4" />
-                                        </button>
+                                            {{ api.token_suffix || 'hidden' }}
+                                        </span>
                                     </div>
                                 </td>
                                 <td

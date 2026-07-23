@@ -4,6 +4,4 @@ namespace App\Exceptions;
 
 use RuntimeException;
 
-class DeepgramSpeechToTextException extends RuntimeException
-{
-}
+class DeepgramSpeechToTextException extends RuntimeException {}

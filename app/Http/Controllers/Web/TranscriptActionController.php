@@ -9,6 +9,7 @@ use App\Models\Transcript;
 use App\Models\TranscriptProject;
 use App\Services\EntitlementService;
 use App\Services\TranscriptExportService;
+use App\Services\Web\TranscriptPayloadPresenter;
 use App\Services\WebTranscriptProcessor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,6 +23,7 @@ class TranscriptActionController extends Controller
         Transcript $transcript,
         EntitlementService $entitlements,
         WebTranscriptProcessor $processor,
+        TranscriptPayloadPresenter $payloads,
     ): JsonResponse {
         $this->authorizeTranscript($request, $project, $transcript);
 
@@ -56,7 +58,7 @@ class TranscriptActionController extends Controller
 
         return response()->json([
             'message' => 'Polishing',
-            'transcript' => $this->transcriptPayload($transcript->fresh()),
+            'transcript' => $payloads->present($transcript->fresh()),
         ], 202);
     }
 
@@ -66,6 +68,7 @@ class TranscriptActionController extends Controller
         Transcript $transcript,
         EntitlementService $entitlements,
         WebTranscriptProcessor $processor,
+        TranscriptPayloadPresenter $payloads,
     ): JsonResponse {
         $this->authorizeTranscript($request, $project, $transcript);
 
@@ -90,7 +93,7 @@ class TranscriptActionController extends Controller
 
         return response()->json([
             'message' => 'Summarizing...',
-            'transcript' => $this->transcriptPayload($transcript->fresh()),
+            'transcript' => $payloads->present($transcript->fresh()),
         ], 202);
     }
 
@@ -124,10 +127,9 @@ class TranscriptActionController extends Controller
 
     private function authorizeTranscript(Request $request, TranscriptProject $project, Transcript $transcript): void
     {
-        abort_unless(
-            $project->user_id === $request->user()?->id && $transcript->project_id === $project->id,
-            404,
-        );
+        $this->authorize('view', $project);
+        abort_unless($transcript->project_id === $project->id, 404);
+        $this->authorize('view', $transcript);
     }
 
     private function upgradeRequired(string $message): JsonResponse
@@ -153,38 +155,5 @@ class TranscriptActionController extends Controller
             'custom' => trim($custom),
             default => 'Fix grammar, spelling, punctuation, capitalization, and obvious speech-to-text mistakes without translating the transcript. Preserve the original language choices, meaning, names, titles, numbers, and time order.',
         };
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function transcriptPayload(Transcript $transcript): array
-    {
-        $transcript->loadMissing(['sections' => fn ($query) => $query->orderBy('position')]);
-
-        return [
-            'id' => $transcript->id,
-            'source' => $transcript->source,
-            'status' => $transcript->status,
-            'duration_seconds' => $transcript->duration_seconds,
-            'raw_text' => $transcript->raw_text,
-            'cleaned_text' => $transcript->cleaned_text,
-            'summary_text' => $transcript->summary_text,
-            'polish_status' => $transcript->polish_status,
-            'polish_error_message' => $transcript->polish_error_message,
-            'summary_status' => $transcript->summary_status,
-            'summary_error_message' => $transcript->summary_error_message,
-            'processing_log' => $transcript->processing_log ?? [],
-            'sections' => $transcript->sections
-                ->map(fn ($section): array => [
-                    'id' => $section->id,
-                    'position' => $section->position,
-                    'text' => $section->text,
-                    'cleaned_text' => $section->cleaned_text,
-                    'started_at_ms' => $section->started_at_ms,
-                    'ended_at_ms' => $section->ended_at_ms,
-                ])
-                ->all(),
-        ];
     }
 }

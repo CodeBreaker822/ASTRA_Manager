@@ -6,6 +6,8 @@ import laravel from 'laravel-vite-plugin';
 import { bunny } from 'laravel-vite-plugin/fonts';
 import { defineConfig } from 'vite';
 
+const inertiaSsrEnabled = process.env.INERTIA_SSR_ENABLED === 'true';
+
 export default defineConfig({
     plugins: [
         laravel({
@@ -17,7 +19,7 @@ export default defineConfig({
                 }),
             ],
         }),
-        inertia(),
+        inertiaSsrEnabled ? inertia() : inertia({ ssr: false }),
         tailwindcss(),
         vue({
             template: {

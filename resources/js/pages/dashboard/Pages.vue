@@ -18,13 +18,67 @@ defineOptions({
     layout: DashboardLayout,
 });
 
+type HeroContent = {
+    eyebrow: string;
+    title: string;
+    intro: string;
+};
+
+type FeatureRow = {
+    eyebrow: string;
+    icon: string;
+    title: string;
+    body: string;
+    bullets: string[];
+};
+
+type FeaturesContent = {
+    hero: HeroContent;
+    feature_rows: FeatureRow[];
+    cta: {
+        title: string;
+        body: string;
+        button_label: string;
+    };
+};
+
+type DownloadContent = {
+    hero: HeroContent;
+    download_card: {
+        title: string;
+        body: string;
+        button_label: string;
+        empty_label: string;
+    };
+    requirements: Array<{
+        icon: string;
+        title: string;
+        body: string;
+    }>;
+    account: {
+        title: string;
+        body: string;
+        bullets: string[];
+        button_label: string;
+    };
+    faq: Array<{
+        question: string;
+        answer: string;
+    }>;
+};
+
+type PageFormContent = FeaturesContent | DownloadContent;
+
 const isFeatures = computed(() => props.pageKey === 'features');
 const updateUrl = computed(() => `/dashboard/pages/${props.pageKey}`);
+const initialContent: PageFormContent = isFeatures.value
+    ? featuresContent(props.content)
+    : downloadContent(props.content);
 const form = useForm({
-    content: isFeatures.value
-        ? featuresContent(props.content)
-        : downloadContent(props.content),
+    content: initialContent,
 });
+const featuresFormContent = computed(() => form.content as FeaturesContent);
+const downloadFormContent = computed(() => form.content as DownloadContent);
 
 const submit = () => {
     form.put(updateUrl.value, { preserveScroll: true });
@@ -52,7 +106,7 @@ function stringArray(value: unknown, count = 0): string[] {
     return items;
 }
 
-function heroContent(content: Record<string, unknown>) {
+function heroContent(content: Record<string, unknown>): HeroContent {
     const hero = objectValue(content.hero);
 
     return {
@@ -62,7 +116,7 @@ function heroContent(content: Record<string, unknown>) {
     };
 }
 
-function featuresContent(content: Record<string, unknown>) {
+function featuresContent(content: Record<string, unknown>): FeaturesContent {
     const rows = Array.isArray(content.feature_rows)
         ? content.feature_rows.map((item) => {
               const row = objectValue(item);
@@ -89,7 +143,7 @@ function featuresContent(content: Record<string, unknown>) {
     };
 }
 
-function downloadContent(content: Record<string, unknown>) {
+function downloadContent(content: Record<string, unknown>): DownloadContent {
     const downloadCard = objectValue(content.download_card);
     const account = objectValue(content.account);
     const requirements = Array.isArray(content.requirements)
@@ -196,7 +250,7 @@ function downloadContent(content: Record<string, unknown>) {
         <template v-if="isFeatures">
             <section class="grid gap-4">
                 <article
-                    v-for="(row, index) in form.content.feature_rows"
+                    v-for="(row, index) in featuresFormContent.feature_rows"
                     :key="index"
                     class="rounded-lg border border-slate-200 bg-white p-5"
                 >
@@ -240,13 +294,16 @@ function downloadContent(content: Record<string, unknown>) {
             <section class="rounded-lg border border-slate-200 bg-white p-5">
                 <h2 class="text-base font-semibold text-slate-950">CTA</h2>
                 <div class="mt-4 grid gap-4 md:grid-cols-2">
-                    <Input v-model="form.content.cta.title" class="h-11" />
                     <Input
-                        v-model="form.content.cta.button_label"
+                        v-model="featuresFormContent.cta.title"
+                        class="h-11"
+                    />
+                    <Input
+                        v-model="featuresFormContent.cta.button_label"
                         class="h-11"
                     />
                     <textarea
-                        v-model="form.content.cta.body"
+                        v-model="featuresFormContent.cta.body"
                         rows="3"
                         class="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 md:col-span-2"
                     />
@@ -261,19 +318,19 @@ function downloadContent(content: Record<string, unknown>) {
                 </h2>
                 <div class="mt-4 grid gap-4 md:grid-cols-2">
                     <Input
-                        v-model="form.content.download_card.title"
+                        v-model="downloadFormContent.download_card.title"
                         class="h-11"
                     />
                     <Input
-                        v-model="form.content.download_card.button_label"
+                        v-model="downloadFormContent.download_card.button_label"
                         class="h-11"
                     />
                     <Input
-                        v-model="form.content.download_card.empty_label"
+                        v-model="downloadFormContent.download_card.empty_label"
                         class="h-11"
                     />
                     <textarea
-                        v-model="form.content.download_card.body"
+                        v-model="downloadFormContent.download_card.body"
                         rows="3"
                         class="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 md:col-span-2"
                     />
@@ -282,7 +339,9 @@ function downloadContent(content: Record<string, unknown>) {
 
             <section class="grid gap-4">
                 <article
-                    v-for="(requirement, index) in form.content.requirements"
+                    v-for="(
+                        requirement, index
+                    ) in downloadFormContent.requirements"
                     :key="index"
                     class="rounded-lg border border-slate-200 bg-white p-5"
                 >
@@ -319,20 +378,24 @@ function downloadContent(content: Record<string, unknown>) {
                     Account Band
                 </h2>
                 <div class="mt-4 grid gap-4 md:grid-cols-2">
-                    <Input v-model="form.content.account.title" class="h-11" />
                     <Input
-                        v-model="form.content.account.button_label"
+                        v-model="downloadFormContent.account.title"
+                        class="h-11"
+                    />
+                    <Input
+                        v-model="downloadFormContent.account.button_label"
                         class="h-11"
                     />
                     <textarea
-                        v-model="form.content.account.body"
+                        v-model="downloadFormContent.account.body"
                         rows="3"
                         class="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 md:col-span-2"
                     />
                     <Input
-                        v-for="(_, index) in form.content.account.bullets"
+                        v-for="(_, index) in downloadFormContent.account
+                            .bullets"
                         :key="index"
-                        v-model="form.content.account.bullets[index]"
+                        v-model="downloadFormContent.account.bullets[index]"
                         class="h-10"
                     />
                 </div>
@@ -340,7 +403,7 @@ function downloadContent(content: Record<string, unknown>) {
 
             <section class="grid gap-4">
                 <article
-                    v-for="(item, index) in form.content.faq"
+                    v-for="(item, index) in downloadFormContent.faq"
                     :key="index"
                     class="rounded-lg border border-slate-200 bg-white p-5"
                 >

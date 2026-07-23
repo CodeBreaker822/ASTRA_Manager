@@ -103,6 +103,64 @@ Verification:
 - Vite production build passed.
 - Vite build still prints upstream Rolldown annotation warnings from `reka-ui/@vueuse`.
 
+## Branding Correction - JERVA
+
+Status: Complete
+
+- Replaced remaining web/server-facing ASTRA/AIMS branding with JERVA.
+- Updated the Laravel/Vite app name from `ASTRA AI Server` to `JERVA` in `.env` and `.env.example`.
+- Updated the sidebar logo and welcome page title to show `JERVA`.
+- Updated public API provider identity from `aims_server` / `AIMS Server` to `jerva_server` / `JERVA Server`.
+- Updated fallback chatbot and AWS Transcribe object/job prefixes to use JERVA naming.
+- Tightened the Pricing and Page manager Vue types found during branding verification so CMS editors pass `vue-tsc`.
+
+Verification:
+
+- Cleared Laravel config cache.
+- Source search found no remaining `ASTRA AI Server`, `AIMS Server`, `AIMS Chatbot`, or `aims-transcriber` labels in the web/server source.
+- Vue type-check passed.
+- Vite production build passed, and the active manifest-selected app bundle no longer contains the old branding.
+- Relevant PHP syntax checks passed.
+- Focused API/dashboard/CMS regression tests passed: 16 tests, 146 assertions.
+
+## Settings Modal Behavior Fix
+
+Status: Complete
+
+- Moved normal settings opening into a real app-level modal controlled by `?settings=profile|security|appearance|billing`, so Workspace/Dashboard remain behind the overlay instead of being replaced by a settings page.
+- Added settings modal data to shared Inertia props only when a settings tab is requested.
+- Updated sidebar/user-menu/workspace settings links to open the modal over the current page.
+- Kept the existing settings routes as fallback/direct endpoints, but profile saves now redirect back with a safe `/settings/profile` fallback so modal saves stay in place.
+
+Verification:
+
+- Vue type-check passed.
+- Vite production build passed.
+- Focused profile/security/billing/dashboard tests passed: 22 tests, 113 assertions.
+
+## Workspace Processing UI & FFmpeg Chunking Fix
+
+Status: Complete
+
+- Reworked the Vue workspace command dock to follow the JERVA Edition Blade workspace pattern: choose Live/Upload first, then show that mode's compact controls in the bottom dock.
+- Removed the floating upload/live progress cards that caused the oversized loading-bar layout.
+- Restyled workspace dock actions to match the Blade button language instead of the generic dashboard button look.
+- Removed offline processing from the web workspace flow.
+- Changed upload flow so the browser sends the original source file with duration metadata; Laravel now performs upload chunking with bundled `ffmpeg/bin/ffmpeg.exe` when `server_chunk=1`.
+- Kept live chunks on the existing `/workspace/{project}/chunk` endpoint and upload chunks on the existing `/workspace/{project}/upload` pipeline.
+
+Verification:
+
+- Vue type-check passed.
+- Vite production build passed.
+- Focused web transcription/audio limit tests passed: 17 tests, 88 assertions.
+- Targeted PHPStan passed for the changed web transcription controller and FFmpeg chunker service.
+
+Follow-up correction:
+
+- Matched the JERVA app creation flow: Add Transcript only creates/selects a transcript, the command dock is hidden until a transcript is selected, and the Live/Upload selection appears after project selection instead of being part of project creation.
+- Existing transcripts now reopen the matching Live or Upload mode; empty/new transcripts reset to the Live/Upload chooser.
+
 ## Phase 6 - SaaS Polish
 
 Status: Complete for the beta scaffold

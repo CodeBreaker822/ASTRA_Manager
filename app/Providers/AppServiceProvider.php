@@ -5,7 +5,11 @@ namespace App\Providers;
 use App\Gates\APIManagerGates;
 use App\Gates\CmsGates;
 use App\Gates\UserGates;
+use App\Models\Transcript;
+use App\Models\TranscriptProject;
 use App\Models\User;
+use App\Policies\TranscriptPolicy;
+use App\Policies\TranscriptProjectPolicy;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -39,6 +43,9 @@ class AppServiceProvider extends ServiceProvider
         Date::use(CarbonImmutable::class);
 
         Gate::before(fn (User $user, string $ability): ?bool => $this->isConfiguredAdmin($user) ? true : null);
+
+        Gate::policy(TranscriptProject::class, TranscriptProjectPolicy::class);
+        Gate::policy(Transcript::class, TranscriptPolicy::class);
 
         UserGates::register();
         APIManagerGates::register();
