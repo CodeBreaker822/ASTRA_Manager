@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\TranscriptionProviderSetting;
+use Illuminate\Contracts\Encryption\DecryptException;
 
 class AppSettingsService
 {
@@ -73,12 +74,13 @@ class AppSettingsService
                 ->all();
             $unusedModels = array_values(array_diff($definition['models'], $usedModels));
             $reusableApiKey = $providerSettings
-                ->first(fn (TranscriptionProviderSetting $setting): bool => filled($setting->api_key))
-                ?->api_key;
+                ->map(fn (TranscriptionProviderSetting $setting): ?string => $this->safeApiKey($setting))
+                ->first(fn (?string $apiKey): bool => filled($apiKey));
 
             foreach ($providerSettings as $setting) {
                 $model = $this->validModelForDefinition($definition, $setting->model);
                 $metadata = $this->metadataWithDefaults($providerId, $setting->metadata ?? []);
+                $apiKey = $this->safeApiKey($setting);
 
                 $selectableModels = array_values(array_unique([
                     $model,
@@ -92,9 +94,9 @@ class AppSettingsService
                     'model' => $model,
                     'model_label' => $definition['model_labels'][$model] ?? $model,
                     'is_enabled' => $setting->is_enabled,
-                    'configured' => filled($setting->api_key) && $this->providerHasRequiredMetadata($providerId, $metadata),
-                    'masked_api_key' => $this->maskKey($setting->api_key),
-                    'has_reusable_api_key' => filled($setting->api_key),
+                    'configured' => filled($apiKey) && $this->providerHasRequiredMetadata($providerId, $metadata),
+                    'masked_api_key' => $this->maskKey($apiKey),
+                    'has_reusable_api_key' => filled($apiKey),
                     'metadata' => $metadata,
                     'sort_order' => $setting->sort_order,
                 ]);
@@ -295,7 +297,10 @@ class AppSettingsService
             ->keyBy('id');
 
         return array_map(function (array $provider) use ($settings): array {
-            $provider['api_key'] = $settings->get($provider['setting_id'])?->api_key;
+            $setting = $settings->get($provider['setting_id']);
+            $provider['api_key'] = $setting instanceof TranscriptionProviderSetting
+                ? $this->safeApiKey($setting)
+                : null;
 
             return $provider;
         }, $providers);
@@ -550,7 +555,7 @@ class AppSettingsService
             ->orderBy('id')
             ->first();
 
-        return $setting?->api_key;
+        return $setting instanceof TranscriptionProviderSetting ? $this->safeApiKey($setting) : null;
     }
 
     private function existingApiKey(string $provider): ?string
@@ -562,7 +567,18 @@ class AppSettingsService
             ->orderBy('id')
             ->first();
 
-        return filled($setting?->api_key) ? $setting->api_key : null;
+        $apiKey = $setting instanceof TranscriptionProviderSetting ? $this->safeApiKey($setting) : null;
+
+        return filled($apiKey) ? $apiKey : null;
+    }
+
+    private function safeApiKey(TranscriptionProviderSetting $setting): ?string
+    {
+        try {
+            return $setting->api_key;
+        } catch (DecryptException) {
+            return null;
+        }
     }
 
     private function model(string $provider, string $fallback): string
