@@ -45,8 +45,9 @@ return [
         'public_key' => env('PAYMONGO_PUBLIC_KEY'),
         'secret_key' => env('PAYMONGO_SECRET_KEY'),
         'webhook_secret' => env('PAYMONGO_WEBHOOK_SECRET'),
-        'payment_method_types' => array_values(array_filter(explode(',', env('PAYMONGO_PAYMENT_METHOD_TYPES', 'card,gcash,grab_pay,paymaya,qrph')))),
+        'payment_method_types' => array_values(array_filter(explode(',', env('PAYMONGO_PAYMENT_METHOD_TYPES', 'card')))),
         'send_email_receipt' => env('PAYMONGO_SEND_EMAIL_RECEIPT', true),
+        'credits_per_dollar' => env('PAYMONGO_CREDITS_PER_DOLLAR', 1),
     ],
 
     'lambda_pdf' => [
