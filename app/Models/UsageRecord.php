@@ -14,9 +14,6 @@ use Illuminate\Support\Carbon;
  * @property int $seconds_transcribed
  * @property int $polish_count
  * @property int $summary_count
- * @property unsignedInteger $free_seconds_reserved
- * @property unsignedInteger $free_polish_reserved
- * @property unsignedInteger $free_summary_reserved
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -26,9 +23,6 @@ use Illuminate\Support\Carbon;
     'seconds_transcribed',
     'polish_count',
     'summary_count',
-    'free_seconds_reserved',
-    'free_polish_reserved',
-    'free_summary_reserved',
 ])]
 class UsageRecord extends Model
 {
@@ -38,9 +32,6 @@ class UsageRecord extends Model
             'seconds_transcribed' => 'integer',
             'polish_count' => 'integer',
             'summary_count' => 'integer',
-            'free_seconds_reserved' => 'integer',
-            'free_polish_reserved' => 'integer',
-            'free_summary_reserved' => 'integer',
         ];
     }
 

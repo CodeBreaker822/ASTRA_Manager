@@ -7,7 +7,6 @@ use App\Jobs\ProcessAsyncTranscriptionJob;
 use App\Models\API;
 use App\Models\ApiTranscriptionJob;
 use App\Services\AppSettingsService;
-use App\Services\Billing\BillingService;
 use App\Services\AssemblyAiSpeechToTextService;
 use App\Services\AwsTranscribeSpeechToTextService;
 use App\Services\AzureSpeechToTextService;
@@ -49,7 +48,7 @@ class TranscriptionController extends Controller
 
     private const MAX_TRANSCRIBE_BATCH_CLIPS = 20;
 
-    public function transcribe(Request $request, AppSettingsService $settings, BillingService $billing): JsonResponse
+    public function transcribe(Request $request, AppSettingsService $settings): JsonResponse
     {
         $startedAt = microtime(true);
         $license = null;

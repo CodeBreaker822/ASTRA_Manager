@@ -2,14 +2,11 @@
 
 namespace App\Exceptions;
 
-class InsufficientWalletBalanceException extends RuntimeException
+class InsufficientWalletBalanceException extends \RuntimeException
 {
-    public function __construct(?string $message = null, ?Throwable $previous = null)
+    public function __construct(?string $message = null, ?\Throwable $previous = null)
     {
-        parent::__construct(
-            $message ?? 'Insufficient wallet balance. Please add funds to continue.',
-            402,
-            $previous,
-        );
+        $message = $message ?? 'Insufficient wallet balance. Please add funds to continue.';
+        parent::__construct($message, 422, $previous);
     }
 }
