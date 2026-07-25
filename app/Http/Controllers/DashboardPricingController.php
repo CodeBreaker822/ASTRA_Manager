@@ -77,7 +77,6 @@ class DashboardPricingController extends Controller
                         'monthly_price' => $tier['monthly_price'] ?? null,
                         'yearly_price' => $tier['yearly_price'] ?? null,
                         'price_label' => $tier['price_label'],
-                        'price_per_second' => null, // Not used in unified wallet
                         'upload_price_per_hour' => $tier['upload_price_per_hour'],
                         'live_price_per_hour' => $tier['live_price_per_hour'],
                         'llm_price' => $tier['llm_price'],

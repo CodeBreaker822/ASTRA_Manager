@@ -25,19 +25,20 @@ use Laravel\Sanctum\HasApiTokens;
  * @property Carbon|null $email_verified_at
  * @property string $password
  * @property string $plan
- * @property int $credit_seconds
- * @property int $polish_credit_characters
- * @property int $summary_credit_characters
  * @property string|null $two_factor_secret
  * @property string|null $two_factor_recovery_codes
  * @property Carbon|null $two_factor_confirmed_at
  * @property string|null $remember_token
  * @property int|null $position_id
  * @property string|null $user_status
+ * @property unsignedBigInteger $wallet_balance_nanos
+ * @property unsignedBigInteger $wallet_reserved_nanos
+ * @property unsignedBigInteger $total_earned_nanos
+ * @property unsignedBigInteger $total_spent_nanos
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['name', 'email', 'password', 'plan', 'credit_seconds', 'polish_credit_characters', 'summary_credit_characters', 'position_id', 'user_status'])]
+#[Fillable(['name', 'email', 'password', 'plan', 'position_id', 'user_status'])]
 #[Hidden(['password', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
 class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
 {
@@ -54,10 +55,11 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
-            'credit_seconds' => 'integer',
-            'polish_credit_characters' => 'integer',
-            'summary_credit_characters' => 'integer',
             'two_factor_confirmed_at' => 'datetime',
+            'wallet_balance_nanos' => 'integer',
+            'wallet_reserved_nanos' => 'integer',
+            'total_earned_nanos' => 'integer',
+            'total_spent_nanos' => 'integer',
         ];
     }
 
