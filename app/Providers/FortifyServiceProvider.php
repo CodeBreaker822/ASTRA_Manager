@@ -96,26 +96,49 @@ class FortifyServiceProvider extends ServiceProvider
     private function configureRateLimiting(): void
     {
         RateLimiter::for('two-factor', function (Request $request) {
-            return Limit::perMinute(10)->by($request->session()->get('login.id'));
+            return Limit::perMinute(5)->by(
+                (string) ($request->session()->get('login.id') ?? $request->ip())
+            );
         });
 
         RateLimiter::for('login', function (Request $request) {
-            $throttleKey = Str::transliterate(Str::lower($request->input(Fortify::username())).'|'.$request->ip());
+            $email = Str::transliterate(
+                Str::lower((string) $request->input(Fortify::username()))
+            );
 
-            return Limit::perMinute(60)->by($throttleKey);
+            return [
+                Limit::perMinute(5)->by($email.'|'.$request->ip()),
+                Limit::perHour(50)->by($request->ip()),
+            ];
+        });
+
+        RateLimiter::for('desktop-login', function (Request $request) {
+            $email = Str::transliterate(
+                Str::lower((string) $request->input('email'))
+            );
+
+            return [
+                Limit::perMinute(5)->by($email.'|'.$request->ip()),
+                Limit::perHour(50)->by($request->ip()),
+            ];
         });
 
         RateLimiter::for('password.reset', function (Request $request) {
-            return Limit::perMinute(10)->by($request->input('email') ?? $request->ip());
+            return Limit::perMinute(5)->by(
+                Str::lower((string) ($request->input('email') ?? $request->ip()))
+            );
         });
 
         RateLimiter::for('email.verify', function (Request $request) {
-            return Limit::perMinute(10)->by($request->user()->id);
+            $identifier = $request->user()?->getAuthIdentifier() ?? $request->ip();
+
+            return Limit::perMinute(6)->by((string) $identifier);
         });
 
         RateLimiter::for('passkeys', function (Request $request) {
             return Limit::perMinute(10)->by(
-                ($request->input('credential.id') ?: $request->session()->getId()).'|'.$request->ip(),
+                ($request->input('credential.id') ?: $request->session()->getId())
+                .'|'.$request->ip()
             );
         });
     }

@@ -101,7 +101,7 @@ return [
     |
     */
 
-    'middleware' => ['web', 'throttle:3,1'],
+    'middleware' => ['web'],
 
     /*
     |--------------------------------------------------------------------------
@@ -117,6 +117,7 @@ return [
     'limiters' => [
         'login' => 'login',
         'two-factor' => 'two-factor',
+        'verification' => 'email.verify',
         'passkeys' => 'passkeys',
     ],
 
