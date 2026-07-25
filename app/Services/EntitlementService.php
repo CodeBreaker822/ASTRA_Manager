@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\InsufficientWalletBalanceException;
 use App\Models\UsageRecord;
 use App\Models\User;
 use Illuminate\Support\Carbon;
@@ -254,5 +255,186 @@ class EntitlementService
             'summary' => 'summary_credit_characters',
             default => throw new \InvalidArgumentException('Unknown text action.'),
         };
+    }
+
+    /**
+     * Check if the user can afford to charge for a feature.
+     * This check is not thread-safe - use charge() for atomic operations.
+     *
+     * @param User $user The user
+     * @param string $feature Feature name (upload, live, polish, summarize)
+     * @param float $units Number of units (e.g., hours, characters)
+     * @return bool True if the user can afford it
+     */
+    public function canAfford(User $user, string $feature, float $units): bool
+    {
+        $rate = $this->ratePerUnit($feature);
+
+        if ($rate === null) {
+            return false;
+        }
+
+        $cost = round($units * $rate, 2);
+        $freeAllowanceRemaining = $this->getFreeAllowanceRemaining($user, $feature, $units);
+
+        if ($freeAllowanceRemaining) {
+            return true;
+        }
+
+        return $user->wallet_balance >= $cost;
+    }
+
+    /**
+     * Charge the user for a feature.
+     * Deducts from free allowance first, then from wallet balance.
+     * Uses atomic lock for thread-safe credit deduction.
+     *
+     * @param User $user The user
+     * @param string $feature Feature name (upload, live, polish, summarize)
+     * @param float $units Number of units (e.g., hours, characters)
+     * @return void
+     * @throws InsufficientWalletBalanceException If not enough balance after free allowance
+     */
+    public function charge(User $user, string $feature, float $units): void
+    {
+        $rate = $this->ratePerUnit($feature);
+
+        if ($rate === null) {
+            throw new InsufficientWalletBalanceException("Invalid feature rate for: {$feature}");
+        }
+
+        $cost = round($units * $rate, 2);
+
+        // 1. Check free allowance first
+        $freeAllowanceRemaining = $this->getFreeAllowanceRemaining($user, $feature, $units);
+
+        if ($freeAllowanceRemaining > 0) {
+            $this->consumeFreeAllowance($user, $feature, $units);
+            return;
+        }
+
+        // 2. Atomic wallet balance deduction with row locking
+        DB::transaction(function () use ($user, $cost, $feature) {
+            // Use explicit lockForUpdate to prevent race conditions
+            $lockedUser = User::query()
+                ->whereKey($user->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            // Double-check balance after acquiring lock (in case another transaction committed)
+            if ($lockedUser->wallet_balance < $cost) {
+                throw new InsufficientWalletBalanceException();
+            }
+
+            // Atomic decrement (fails if balance goes negative)
+            $lockedUser->decrement('wallet_balance', $cost);
+
+            // Increment total spent for tracking
+            $lockedUser->increment('total_spent_credits', $cost);
+        });
+    }
+
+    /**
+     * Get the remaining free allowance for a feature.
+     *
+     * @param User $user The user
+     * @param string $feature Feature name
+     * @param float $units Total units being used
+     * @return int Remaining free units
+     */
+    private function getFreeAllowanceRemaining(User $user, string $feature, float $units): int
+    {
+        $usage = $this->usageForCurrentPeriod($user);
+
+        return match ($feature) {
+            'upload', 'live' => $this->getFreeMinutesRemaining($user, $usage, (int) $units),
+            'polish', 'summarize' => $this->getFreeTextActionRemaining($user, $usage, $feature, (int) $units),
+            default => 0,
+        };
+    }
+
+    /**
+     * Get remaining free minutes for upload/live features.
+     *
+     * @param User $user The user
+     * @param UsageRecord $usage The usage record
+     * @param int $additionalSeconds Additional seconds being used
+     * @return int Remaining free seconds
+     */
+    private function getFreeMinutesRemaining(User $user, UsageRecord $usage, int $additionalSeconds): int
+    {
+        $freeMinutes = $this->dailyFreeMinutes() * 60;
+        $usedSeconds = (int) $usage->seconds_transcribed + $additionalSeconds;
+
+        return max(0, $freeMinutes - $usedSeconds);
+    }
+
+    /**
+     * Get remaining free text action uses.
+     *
+     * @param User $user The user
+     * @param UsageRecord $usage The usage record
+     * @param string $feature Feature name (polish or summarize)
+     * @param int $additionalCharacters Additional characters being used
+     * @return int Remaining free characters
+     */
+    private function getFreeTextActionRemaining(User $user, UsageRecord $usage, string $feature, int $additionalCharacters): int
+    {
+        $freeUses = $this->dailyFreeTextActionLimit($feature);
+        $countColumn = $this->textActionCountColumn($feature);
+        $usedCount = (int) $usage->{$countColumn};
+
+        // Free uses are per-count, not per-character, so we check the count
+        if ($usedCount < $freeUses) {
+            $freeLimitChars = match ($feature) {
+                'polish' => $this->dailyFreePolishUses() * 1000, // Assume 1000 chars per free use
+                'summarize' => $this->dailyFreeSummaryUses() * 1000,
+                default => 0,
+            };
+
+            return max(0, $freeLimitChars - $additionalCharacters);
+        }
+
+        return 0;
+    }
+
+    /**
+     * Consume the free allowance for a feature.
+     *
+     * @param User $user The user
+     * @param string $feature Feature name
+     * @param float $units Units being used
+     * @return void
+     */
+    private function consumeFreeAllowance(User $user, string $feature, float $units): void
+    {
+        $usage = $this->usageForCurrentPeriod($user);
+
+        DB::transaction(function () use ($user, $usage, $feature, $units) {
+            $lockedUser = User::query()
+                ->whereKey($user->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $lockedUsage = UsageRecord::query()
+                ->where('user_id', $lockedUser->id)
+                ->where('period', Carbon::now()->toDateString())
+                ->lockForUpdate()
+                ->first();
+
+            if (! $lockedUsage) {
+                $lockedUsage = UsageRecord::query()->create([
+                    'user_id' => $lockedUser->id,
+                    'period' => Carbon::now()->toDateString(),
+                ]);
+            }
+
+            match ($feature) {
+                'upload', 'live' => $lockedUsage->increment('seconds_transcribed', (int) $units),
+                'polish' => $lockedUsage->increment('polish_count'),
+                'summarize' => $lockedUsage->increment('summary_count'),
+                default => null,
+            };
+        });
     }
 }

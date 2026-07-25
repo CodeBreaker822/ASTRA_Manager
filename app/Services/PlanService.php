@@ -140,4 +140,27 @@ class PlanService
 
         return array_values(array_filter($value, is_string(...)));
     }
+
+    /**
+     * Get the price per unit for a specific feature.
+     *
+     * @param string $feature Feature name (upload, live, polish, summarize)
+     * @return float|null The rate per unit (e.g., $ per hour, $ per 1000 chars), or null if not found
+     */
+    public function ratePerUnit(string $feature): ?float
+    {
+        $paygPlan = $this->plan('payg');
+
+        if (! is_array($paygPlan)) {
+            return null;
+        }
+
+        return match ($feature) {
+            'upload' => $paygPlan['upload_price_per_hour'] ?? null,
+            'live' => $paygPlan['live_price_per_hour'] ?? null,
+            'polish' => $paygPlan['polish_price_per_character'] ?? null,
+            'summarize' => $paygPlan['summary_price_per_character'] ?? null,
+            default => null,
+        };
+    }
 }

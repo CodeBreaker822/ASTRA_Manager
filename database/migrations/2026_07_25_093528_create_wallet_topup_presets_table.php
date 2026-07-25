@@ -1,0 +1,1 @@
+// No migration created - presets will be handled client-side

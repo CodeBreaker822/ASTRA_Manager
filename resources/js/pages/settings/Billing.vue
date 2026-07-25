@@ -1,58 +1,25 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
-import { Check, CreditCard, Gauge, LockKeyhole } from '@lucide/vue';
+import { Head, Link, useForm } from '@inertiajs/vue3';
+import { DollarSign, Plus } from '@lucide/vue';
 import Heading from '@/components/Heading.vue';
 import { Button } from '@/components/ui/button';
+import type { Plan } from '@/types';
 
-type Plan = {
+type PlanTier = {
     key: string;
     name: string;
     tagline: string;
-    price_label: string;
-    minutes: number;
-    cta: string;
-    featured: boolean;
-    price_per_second: number;
-    polish_characters: number;
-    summary_characters: number;
+    upload_price_per_hour: number;
+    live_price_per_hour: number;
     polish_price_per_character: number;
     summary_price_per_character: number;
+    minutes: number;
     free_polish_uses_per_day: number;
     free_summary_uses_per_day: number;
-    features: string[];
 };
 
 const props = defineProps<{
-    billing: {
-        provider: string | null;
-        checkout_available: boolean;
-        portal_available: boolean;
-        paymongo_ready: Record<string, boolean>;
-    };
-    entitlements: {
-        plan: {
-            key: string;
-            name: string;
-            minutes: number;
-            free_polish_uses_per_day: number;
-            free_summary_uses_per_day: number;
-            features: Record<string, unknown>;
-        };
-        usage: {
-            period: string;
-            minutes_used: number;
-            minutes_remaining: number;
-            minutes_credit_balance: number;
-            seconds_transcribed: number;
-            seconds_credit_balance: number;
-            polish_count: number;
-            summary_count: number;
-            free_polish_remaining: number;
-            free_summary_remaining: number;
-            polish_credit_characters: number;
-            summary_credit_characters: number;
-        };
-    };
+    walletBalance: number;
     plans: Plan[];
 }>();
 
@@ -60,214 +27,229 @@ defineOptions({
     layout: {
         breadcrumbs: [
             {
-                title: 'Billing settings',
+                title: 'Billing',
                 href: '/settings/billing',
             },
         ],
     },
 });
 
-const usagePercent = Math.min(
-    100,
-    Math.round(
-        (props.entitlements.usage.minutes_used /
-            Math.max(
-                1,
-                props.entitlements.plan.minutes +
-                    props.entitlements.usage.minutes_credit_balance,
-            )) *
-            100,
-    ),
-);
+const form = useForm({
+    amount: null as number | null,
+});
+
+const paygPlan = props.plans.find(p => p.key === 'payg') as PlanTier | undefined;
+
+const formattedBalance = (balance: number) => {
+    return '$' + (balance / 100).toFixed(2);
+};
+
+const handleTopup = () => {
+    if (!form.amount || form.amount < 100) {
+        alert('Minimum top-up is $1.00');
+        return;
+    }
+    form.post('/settings/billing/checkout', {
+        onError: (errors) => {
+            console.error('Top-up failed:', errors);
+        },
+    });
+};
 </script>
 
 <template>
-    <Head title="Billing settings" />
+    <Head title="Billing" />
 
-    <h1 class="sr-only">Billing settings</h1>
+    <h1 class="sr-only">Billing</h1>
 
     <div class="space-y-8">
         <Heading
             variant="small"
             title="Billing"
-            description="Review today's free minutes and buy pay-as-you-go credits"
+            description="Free tier benefits and pay-as-you-go pricing"
         />
 
+        <!-- Wallet Balance Banner -->
         <section
-            class="grid gap-4 rounded-lg border border-blue-100 bg-blue-50 p-5 text-blue-950 md:grid-cols-[1fr_auto]"
+            v-if="walletBalance > 0"
+            class="grid gap-4 rounded-lg border border-green-200 bg-green-50 p-5 text-green-950"
         >
-            <div>
-                <p
-                    class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
-                >
-                    Today's allowance
-                </p>
-                <h2 class="mt-2 text-xl font-semibold">
-                    {{ entitlements.plan.name }}
-                </h2>
-                <p class="mt-2 text-sm leading-6 text-blue-900">
-                    {{ entitlements.usage.minutes_remaining }} of
-                    {{
-                        entitlements.plan.minutes +
-                        entitlements.usage.minutes_credit_balance
-                    }}
-                    transcription minutes remain for
-                    {{ entitlements.usage.period }}. Polish free uses:
-                    {{ entitlements.usage.free_polish_remaining }} of
-                    {{ entitlements.plan.free_polish_uses_per_day }}. Summarize
-                    free uses:
-                    {{ entitlements.usage.free_summary_remaining }} of
-                    {{ entitlements.plan.free_summary_uses_per_day }}.
-                </p>
-            </div>
-            <Button as-child>
-                <Link href="/price">View credits</Link>
-            </Button>
-        </section>
-
-        <section class="grid gap-4 md:grid-cols-3">
-            <article class="rounded-lg border border-slate-200 bg-white p-5">
-                <Gauge class="size-5 text-blue-600" />
-                <p class="mt-4 text-sm font-semibold text-slate-950">
-                    Daily usage
-                </p>
-                <div class="mt-3 h-2 overflow-hidden rounded-full bg-blue-100">
-                    <div
-                        class="h-full rounded-full bg-blue-600"
-                        :style="{ width: `${usagePercent}%` }"
-                    />
-                </div>
-                <p class="mt-3 text-sm text-slate-700">
-                    {{ entitlements.usage.minutes_used }} minutes used
-                </p>
-            </article>
-
-            <article class="rounded-lg border border-slate-200 bg-white p-5">
-                <CreditCard class="size-5 text-blue-600" />
-                <p class="mt-4 text-sm font-semibold text-slate-950">
-                    Credit balance
-                </p>
-                <p class="mt-2 text-sm leading-6 text-slate-700">
-                    {{ entitlements.usage.minutes_credit_balance }} paid
-                    minutes, {{ entitlements.usage.polish_credit_characters }}
-                    polish characters, and
-                    {{ entitlements.usage.summary_credit_characters }} summarize
-                    characters available
-                </p>
-            </article>
-
-            <article class="rounded-lg border border-slate-200 bg-white p-5">
-                <LockKeyhole class="size-5 text-blue-600" />
-                <p class="mt-4 text-sm font-semibold text-slate-950">
-                    Account management
-                </p>
-                <p class="mt-2 text-sm leading-6 text-slate-700">
-                    PayMongo checkout adds minute credits after payment
-                    confirmation. No recurring payment is created.
-                </p>
-            </article>
-        </section>
-
-        <section class="grid gap-4 lg:grid-cols-3">
-            <article
-                v-for="plan in plans"
-                :key="plan.key"
-                class="rounded-lg border border-slate-200 bg-white p-5"
-            >
-                <div class="flex items-start justify-between gap-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <DollarSign class="size-5 text-green-700" />
                     <div>
-                        <h3 class="text-base font-semibold text-slate-950">
-                            {{ plan.name }}
-                        </h3>
-                        <p class="mt-1 text-sm text-slate-700">
-                            {{ plan.tagline }}
+                        <p class="text-xs font-semibold tracking-wide text-green-600 uppercase">
+                            Wallet Balance
+                        </p>
+                        <p class="text-xl font-bold">
+                            {{ formattedBalance(walletBalance) }}
                         </p>
                     </div>
+                </div>
+                <Link href="/settings/billing/checkout" method="post">
+                    <Button>Top Up</Button>
+                </Link>
+            </div>
+        </section>
+
+        <!-- Two-Card Layout -->
+        <section class="grid gap-6 lg:grid-cols-2">
+            <!-- Free Tier Card -->
+            <article class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+                <div class="flex items-start justify-between gap-4">
+                    <div>
+                        <h2 class="text-2xl font-bold text-slate-950">Free Tier</h2>
+                        <p class="mt-1 text-sm text-slate-600">Perfect for trying out the service</p>
+                    </div>
                     <span
-                        v-if="plan.key === 'free'"
-                        class="rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-xs font-semibold text-green-700"
+                        class="rounded-lg border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold text-green-700"
                     >
-                        Daily free
+                        Daily Free
                     </span>
                 </div>
 
-                <p class="mt-5 text-2xl font-semibold text-slate-950">
-                    {{ plan.price_label }}
-                </p>
-                <p class="mt-1 text-sm text-slate-600">
-                    {{
-                        plan.key === 'free'
-                            ? `${plan.minutes} minutes reset every day`
-                            : `${plan.minutes} one-time minutes`
-                    }}
-                </p>
+                <div class="mt-6 space-y-4">
+                    <div class="flex items-start gap-3">
+                        <span class="mt-0.5 size-5 shrink-0 text-green-600">✓</span>
+                        <div>
+                            <p class="text-sm font-semibold text-slate-950">
+                                60 transcription minutes per day
+                            </p>
+                            <p class="text-xs text-slate-500 mt-0.5">Resets at midnight</p>
+                        </div>
+                    </div>
 
-                <div class="mt-5 grid gap-2">
-                    <p
-                        v-for="feature in plan.features"
-                        :key="feature"
-                        class="flex gap-2 text-sm leading-6 text-slate-700"
-                    >
-                        <Check class="mt-1 size-4 shrink-0 text-blue-600" />
-                        <span>{{ feature }}</span>
-                    </p>
+                    <div class="flex items-start gap-3">
+                        <span class="mt-0.5 size-5 shrink-0 text-green-600">✓</span>
+                        <div>
+                            <p class="text-sm font-semibold text-slate-950">
+                                3 Polishing uses per day
+                            </p>
+                            <p class="text-xs text-slate-500 mt-0.5">Up to 1,000 characters each</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-start gap-3">
+                        <span class="mt-0.5 size-5 shrink-0 text-green-600">✓</span>
+                        <div>
+                            <p class="text-sm font-semibold text-slate-950">
+                                3 Summarization uses per day
+                            </p>
+                            <p class="text-xs text-slate-500 mt-0.5">Up to 1,000 characters each</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-start gap-3">
+                        <span class="mt-0.5 size-5 shrink-0 text-green-600">✓</span>
+                        <div>
+                            <p class="text-sm font-semibold text-slate-950">TXT, Word, Excel exports</p>
+                        </div>
+                    </div>
                 </div>
 
-                <div v-if="plan.key === 'free'" class="mt-6">
+                <div class="mt-8">
                     <Button class="w-full" variant="outline" disabled>
-                        Included daily
+                        Included with your account
                     </Button>
                 </div>
-                <div v-else class="mt-6 grid gap-2">
-                    <Button v-if="billing.paymongo_ready.audio" as-child>
-                        <Link
-                            href="/settings/billing/checkout"
-                            method="post"
-                            as="button"
-                            :data="{ plan: plan.key, credit_type: 'audio' }"
-                        >
-                            Buy minutes
-                        </Link>
-                    </Button>
-                    <Button v-else variant="outline" disabled>
-                        Configure audio checkout
-                    </Button>
+            </article>
 
-                    <Button
-                        v-if="billing.paymongo_ready.polish"
-                        as-child
-                        variant="outline"
+            <!-- Pay-as-you-go Card -->
+            <article
+                v-if="paygPlan"
+                class="rounded-lg border border-blue-200 bg-blue-50 p-6 shadow-sm"
+            >
+                <div class="flex items-start justify-between gap-4">
+                    <div>
+                        <h2 class="text-2xl font-bold text-slate-950">Pay-as-you-go</h2>
+                        <p class="mt-1 text-sm text-slate-600">Add funds to your wallet as needed</p>
+                    </div>
+                    <span
+                        class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700"
                     >
-                        <Link
-                            href="/settings/billing/checkout"
-                            method="post"
-                            as="button"
-                            :data="{ plan: plan.key, credit_type: 'polish' }"
-                        >
-                            Buy polish characters
-                        </Link>
-                    </Button>
-                    <Button v-else variant="outline" disabled>
-                        Configure polish checkout
-                    </Button>
+                        Recommended
+                    </span>
+                </div>
 
-                    <Button
-                        v-if="billing.paymongo_ready.summary"
-                        as-child
-                        variant="outline"
-                    >
-                        <Link
-                            href="/settings/billing/checkout"
-                            method="post"
-                            as="button"
-                            :data="{ plan: plan.key, credit_type: 'summary' }"
-                        >
-                            Buy summarize characters
-                        </Link>
-                    </Button>
-                    <Button v-else variant="outline" disabled>
-                        Configure summarize checkout
-                    </Button>
+                <div class="mt-6 space-y-4">
+                    <!-- Audio Upload Pricing -->
+                    <div class="flex items-start justify-between rounded-lg bg-white p-4">
+                        <div>
+                            <p class="text-sm font-semibold text-slate-950">
+                                Audio Upload
+                            </p>
+                            <p class="text-xs text-slate-500">1 hour of recording</p>
+                        </div>
+                        <p class="text-sm font-bold text-slate-950">
+                            ${{ (paygPlan.upload_price_per_hour / 100).toFixed(2) }}/hour
+                        </p>
+                    </div>
+
+                    <!-- Live Recording Pricing -->
+                    <div class="flex items-start justify-between rounded-lg bg-white p-4">
+                        <div>
+                            <p class="text-sm font-semibold text-slate-950">
+                                Live Recording
+                            </p>
+                            <p class="text-xs text-slate-500">1 hour of live recording</p>
+                        </div>
+                        <p class="text-sm font-bold text-slate-950">
+                            ${{ (paygPlan.live_price_per_hour / 100).toFixed(2) }}/hour
+                        </p>
+                    </div>
+
+                    <!-- Polishing Pricing -->
+                    <div class="flex items-start justify-between rounded-lg bg-white p-4">
+                        <div>
+                            <p class="text-sm font-semibold text-slate-950">
+                                Polishing
+                            </p>
+                            <p class="text-xs text-slate-500">Per 1,000 characters</p>
+                        </div>
+                        <p class="text-sm font-bold text-slate-950">
+                            ${{ (paygPlan.polish_price_per_character / 100).toFixed(3) }}/1K chars
+                        </p>
+                    </div>
+
+                    <!-- Summarization Pricing -->
+                    <div class="flex items-start justify-between rounded-lg bg-white p-4">
+                        <div>
+                            <p class="text-sm font-semibold text-slate-950">
+                                Summarization
+                            </p>
+                            <p class="text-xs text-slate-500">Per 1,000 characters</p>
+                        </div>
+                        <p class="text-sm font-bold text-slate-950">
+                            ${{ (paygPlan.summary_price_per_character / 100).toFixed(3) }}/1K chars
+                        </p>
+                    </div>
+                </div>
+
+                <div class="mt-8">
+                    <label class="text-sm font-semibold text-slate-700">
+                        Add funds to your wallet
+                    </label>
+
+                    <!-- Custom Top-up Input (no presets) -->
+                    <div class="mt-3 flex gap-2">
+                        <input
+                            v-model.number="form.amount"
+                            type="number"
+                            min="100"
+                            step="1"
+                            placeholder="Custom amount (minimum $1.00)"
+                            class="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            @keyup.enter="handleTopup"
+                        />
+                        <Button @click="handleTopup">
+                            <Plus class="mr-2 size-4" />
+                            Top Up
+                        </Button>
+                    </div>
+
+                    <p class="mt-2 text-xs text-slate-500">
+                        Amounts are charged in USD. Funds are added to your wallet immediately after payment confirmation.
+                    </p>
                 </div>
             </article>
         </section>

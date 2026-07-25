@@ -51,8 +51,6 @@ class DashboardPricingController extends Controller
             'tiers.*.minutes' => ['required', 'integer', 'min:0'],
             'tiers.*.free_polish_uses_per_day' => ['required', 'integer', 'min:0', 'max:65535'],
             'tiers.*.free_summary_uses_per_day' => ['required', 'integer', 'min:0', 'max:65535'],
-            'tiers.*.polish_characters' => ['required', 'integer', 'min:0'],
-            'tiers.*.summary_characters' => ['required', 'integer', 'min:0'],
             'tiers.*.cta' => ['required', 'string', 'max:80'],
             'tiers.*.featured' => ['boolean'],
             'tiers.*.features' => ['array'],
@@ -88,8 +86,8 @@ class DashboardPricingController extends Controller
                         'minutes' => $tier['minutes'],
                         'free_polish_uses_per_day' => $tier['free_polish_uses_per_day'],
                         'free_summary_uses_per_day' => $tier['free_summary_uses_per_day'],
-                        'polish_characters' => $tier['polish_characters'],
-                        'summary_characters' => $tier['summary_characters'],
+                        'polish_characters' => null, // No longer used in unified wallet
+                        'summary_characters' => null, // No longer used in unified wallet
                         'cta' => $tier['cta'],
                         'featured' => (bool) ($tier['featured'] ?? false),
                         'features' => array_values(array_filter($tier['features'] ?? [], fn (?string $feature): bool => filled($feature))),
@@ -114,6 +112,20 @@ class DashboardPricingController extends Controller
                     'tier_keys' => array_values($row['tier_keys'] ?? []),
                     'sort_order' => $index,
                 ]);
+            }
+
+            // Handle wallet topup presets
+            if (isset($validated['walletTopupPresets'])) {
+                DB::table('wallet_topup_presets')->delete();
+                foreach (array_values($validated['walletTopupPresets']) as $preset) {
+                    DB::table('wallet_topup_presets')->insert([
+                        'amount' => $preset['amount'],
+                        'sort_order' => $preset['sort_order'] ?? 0,
+                        'is_active' => $preset['is_active'] ?? true,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
             }
         });
 

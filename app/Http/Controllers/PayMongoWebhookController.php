@@ -60,26 +60,11 @@ class PayMongoWebhookController extends Controller
         ]);
 
         if (! $alreadyPaid) {
-            $plan = $plans->plan($planKey) ?? [];
+            $amountInMinorUnits = $transaction->amount;
 
-            if ($creditType === 'polish') {
-                $characters = is_numeric($polishCharacters)
-                    ? (int) $polishCharacters
-                    : (int) ($plan['polish_characters'] ?? 0);
-
-                $transaction->user()->increment('polish_credit_characters', $characters);
-            } elseif ($creditType === 'summary') {
-                $characters = is_numeric($summaryCharacters)
-                    ? (int) $summaryCharacters
-                    : (int) ($plan['summary_characters'] ?? 0);
-
-                $transaction->user()->increment('summary_credit_characters', $characters);
-            } else {
-                $minutes = is_numeric($creditMinutes)
-                    ? (int) $creditMinutes
-                    : (int) ($plan['minutes'] ?? 0);
-
-                $transaction->user()->increment('credit_seconds', $minutes * 60);
+            if ($amountInMinorUnits > 0) {
+                // Credit the wallet balance
+                $transaction->user()->increment('wallet_balance', $amountInMinorUnits);
             }
         }
 

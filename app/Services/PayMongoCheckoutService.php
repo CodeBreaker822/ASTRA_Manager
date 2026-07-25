@@ -12,6 +12,84 @@ class PayMongoCheckoutService
     public function __construct(private readonly HttpFactory $http) {}
 
     /**
+     * Create a checkout session for wallet top-up.
+     *
+     * @param  array<string, mixed>  $plan
+     * @return array{session_id: string|null, checkout_url: string, payload: array<string, mixed>}
+     */
+    public function createWalletTopupCheckout(User $user, int $amountInMinorUnits, BillingTransaction $transaction): array
+    {
+        $secretKey = config('services.paymongo.secret_key');
+
+        if (! is_string($secretKey) || $secretKey === '') {
+            throw new RuntimeException('PayMongo secret key is not configured.');
+        }
+
+        if ($amountInMinorUnits <= 0) {
+            throw new RuntimeException('PayMongo amount must be greater than 0.');
+        }
+
+        $response = $this->http
+            ->withBasicAuth($secretKey, '')
+            ->acceptJson()
+            ->asJson()
+            ->withHeaders([
+                'Idempotency-Key' => $transaction->reference,
+            ])
+            ->post($this->apiUrl().'/v2/checkout_sessions', [
+                'data' => [
+                    'attributes' => [
+                        'billing' => [
+                            'name' => $user->name,
+                            'email' => $user->email,
+                        ],
+                        'description' => 'JERVA Wallet Top-up',
+                        'line_items' => [[
+                            'name' => 'JERVA Wallet Top-up',
+                            'amount' => $amountInMinorUnits,
+                            'currency' => 'USD',
+                            'quantity' => 1,
+                        ]],
+                        'metadata' => [
+                            'user_id' => (string) $user->id,
+                            'plan' => 'wallet_topup',
+                            'wallet_topup_amount' => (string) $amountInMinorUnits,
+                            'billing_transaction_id' => (string) $transaction->id,
+                        ],
+                        'payment_method_types' => $this->paymentMethodTypes(),
+                        'reference_number' => $transaction->reference,
+                        'send_email_receipt' => (bool) config('services.paymongo.send_email_receipt', true),
+                        'success_url' => route('billing.success', [], true),
+                        'cancel_url' => route('billing.cancel', [], true),
+                    ],
+                ],
+            ]);
+
+        if ($response->failed()) {
+            $message = data_get($response->json(), 'errors.0.detail')
+                ?? data_get($response->json(), 'errors.0.title')
+                ?? 'PayMongo checkout session could not be created.';
+
+            throw new RuntimeException((string) $message);
+        }
+
+        $payload = $response->json();
+        $checkoutUrl = data_get($payload, 'data.attributes.checkout_url');
+
+        if (! is_string($checkoutUrl) || $checkoutUrl === '') {
+            throw new RuntimeException('PayMongo did not return a checkout URL.');
+        }
+
+        $sessionId = data_get($payload, 'data.id');
+
+        return [
+            'session_id' => is_string($sessionId) ? $sessionId : null,
+            'checkout_url' => $checkoutUrl,
+            'payload' => is_array($payload) ? $payload : [],
+        ];
+    }
+
+    /**
      * @param  array<string, mixed>  $plan
      * @return array{session_id: string|null, checkout_url: string, payload: array<string, mixed>}
      */
@@ -135,6 +213,15 @@ class PayMongoCheckoutService
         return is_string(config('services.paymongo.secret_key'))
             && config('services.paymongo.secret_key') !== ''
             && $this->amountFor($planKey, app(PlanService::class)->plan($planKey), $creditType) > 0;
+    }
+
+    /**
+     * Check if PayMongo is configured for wallet top-ups.
+     */
+    public function isConfiguredForWalletTopup(): bool
+    {
+        return is_string(config('services.paymongo.secret_key'))
+            && config('services.paymongo.secret_key') !== '';
     }
 
     private function characterAmount(int $characters, float $pricePerCharacter): int

@@ -8,12 +8,6 @@ Route::post('/auth/login', [AuthController::class, 'login'])->middleware('thrott
 Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
-
-    // Credits and payment routes
-    Route::get('/credits/packages', [App\Http\Controllers\Api\PaymentController::class, 'packages']);
-    Route::post('/credits/purchase', [App\Http\Controllers\Api\PaymentController::class, 'purchase']);
-    Route::get('/credits/balance', [App\Http\Controllers\Api\PaymentController::class, 'balance']);
-    Route::get('/credits/transactions', [App\Http\Controllers\Api\PaymentController::class, 'transactions']);
 });
 
 Route::post('/transcribe', [TranscriptionController::class, 'transcribe']);
