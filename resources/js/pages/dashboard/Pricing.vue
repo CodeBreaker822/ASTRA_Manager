@@ -24,8 +24,6 @@ type Tier = {
     minutes: number;
     free_polish_uses_per_day: number;
     free_summary_uses_per_day: number;
-    polish_characters: number;
-    summary_characters: number;
     cta: string;
     featured: boolean;
     features: string[];
@@ -82,8 +80,6 @@ const form = useForm({
         summary_price_per_character: tier.summary_price_per_character ?? 0,
         free_polish_uses_per_day: tier.free_polish_uses_per_day ?? 0,
         free_summary_uses_per_day: tier.free_summary_uses_per_day ?? 0,
-        polish_characters: tier.polish_characters ?? 0,
-        summary_characters: tier.summary_characters ?? 0,
         features: [...tier.features, '', '', '', ''].slice(0, 6),
     })),
     comparisonRows: props.comparisonRows.map((row) => ({
@@ -303,38 +299,6 @@ const submit = () => {
                                     v-model.number="
                                         tier.free_summary_uses_per_day
                                     "
-                                    type="number"
-                                    min="0"
-                                    class="h-9"
-                                />
-                            </label>
-
-                            <label
-                                :for="`polish-chars-${tier.key}`"
-                                class="grid grid-cols-[9.5rem_1fr] items-center gap-3 text-sm"
-                            >
-                                <span class="font-medium text-slate-600"
-                                    >Polish characters included</span
-                                >
-                                <Input
-                                    :id="`polish-chars-${tier.key}`"
-                                    v-model.number="tier.polish_characters"
-                                    type="number"
-                                    min="0"
-                                    class="h-9"
-                                />
-                            </label>
-
-                            <label
-                                :for="`summary-chars-${tier.key}`"
-                                class="grid grid-cols-[9.5rem_1fr] items-center gap-3 text-sm"
-                            >
-                                <span class="font-medium text-slate-600"
-                                    >Summary characters included</span
-                                >
-                                <Input
-                                    :id="`summary-chars-${tier.key}`"
-                                    v-model.number="tier.summary_characters"
                                     type="number"
                                     min="0"
                                     class="h-9"

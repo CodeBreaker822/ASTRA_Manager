@@ -62,8 +62,8 @@ class TranscriptionController extends Controller
                 return $this->upgradeRequired('Upload transcription is not available for this account.');
             }
 
-            if (! $entitlements->canTranscribe($request->user(), $durationSeconds)) {
-                return $this->upgradeRequired('You have used today\'s free transcription minutes. Buy more minutes to continue today.');
+            if (! $entitlements->canAfford($request->user(), 'upload', $durationSeconds)) {
+                return $this->upgradeRequired('Insufficient balance for transcription. Please add funds to continue.');
             }
 
             $transcript = $workflow->queueTranscript($request, $project, 'upload', $clips, $durationSeconds);
@@ -106,8 +106,8 @@ class TranscriptionController extends Controller
             return $this->upgradeRequired('Live transcription is not available for this account.');
         }
 
-        if (! $entitlements->canTranscribe($request->user(), (int) ($validated['duration_seconds'] ?? 0))) {
-            return $this->upgradeRequired('You have used today\'s free transcription minutes. Buy more minutes to continue today.');
+        if (! $entitlements->canAfford($request->user(), 'live', (int) ($validated['duration_seconds'] ?? 0))) {
+            return $this->upgradeRequired('Insufficient balance for live transcription. Please add funds to continue.');
         }
 
         $clips = $workflow->normalizeClips($request, $validated);

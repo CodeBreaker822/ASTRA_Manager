@@ -77,7 +77,7 @@ class DashboardPricingController extends Controller
                         'monthly_price' => $tier['monthly_price'] ?? null,
                         'yearly_price' => $tier['yearly_price'] ?? null,
                         'price_label' => $tier['price_label'],
-                        'price_per_second' => round(((float) $tier['upload_price_per_hour']) / 3600, 8),
+                        'price_per_second' => null, // Not used in unified wallet
                         'upload_price_per_hour' => $tier['upload_price_per_hour'],
                         'live_price_per_hour' => $tier['live_price_per_hour'],
                         'llm_price' => $tier['llm_price'],
@@ -86,8 +86,6 @@ class DashboardPricingController extends Controller
                         'minutes' => $tier['minutes'],
                         'free_polish_uses_per_day' => $tier['free_polish_uses_per_day'],
                         'free_summary_uses_per_day' => $tier['free_summary_uses_per_day'],
-                        'polish_characters' => null, // No longer used in unified wallet
-                        'summary_characters' => null, // No longer used in unified wallet
                         'cta' => $tier['cta'],
                         'featured' => (bool) ($tier['featured'] ?? false),
                         'features' => array_values(array_filter($tier['features'] ?? [], fn (?string $feature): bool => filled($feature))),
@@ -112,20 +110,6 @@ class DashboardPricingController extends Controller
                     'tier_keys' => array_values($row['tier_keys'] ?? []),
                     'sort_order' => $index,
                 ]);
-            }
-
-            // Handle wallet topup presets
-            if (isset($validated['walletTopupPresets'])) {
-                DB::table('wallet_topup_presets')->delete();
-                foreach (array_values($validated['walletTopupPresets']) as $preset) {
-                    DB::table('wallet_topup_presets')->insert([
-                        'amount' => $preset['amount'],
-                        'sort_order' => $preset['sort_order'] ?? 0,
-                        'is_active' => $preset['is_active'] ?? true,
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
-                }
             }
         });
 

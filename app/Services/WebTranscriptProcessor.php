@@ -97,7 +97,7 @@ class WebTranscriptProcessor
         ])->save();
         $this->appendLog($transcript, 'polished', 'Transcript polished.');
 
-        app(EntitlementService::class)->recordPolishUsage($user, mb_strlen($text));
+        app(EntitlementService::class)->charge($user, 'polish', mb_strlen($text));
 
         return $cleaned;
     }
@@ -127,7 +127,7 @@ class WebTranscriptProcessor
         ])->save();
         $this->appendLog($transcript, 'summarized', 'Transcript summarized.');
 
-        app(EntitlementService::class)->recordSummaryUsage($user, mb_strlen($text));
+        app(EntitlementService::class)->charge($user, 'summarize', mb_strlen($text));
 
         return $summary;
     }
@@ -325,6 +325,6 @@ class WebTranscriptProcessor
             throw new \RuntimeException('Transcript owner could not be resolved.');
         }
 
-        app(EntitlementService::class)->recordTranscriptionUsage($user, $seconds);
+        app(EntitlementService::class)->charge($user, 'upload', $seconds);
     }
 }

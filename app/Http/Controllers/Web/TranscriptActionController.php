@@ -49,8 +49,8 @@ class TranscriptActionController extends Controller
             return response()->json(['message' => 'Enter instructions before polishing.'], 422);
         }
 
-        if (! $entitlements->canPolish($request->user(), mb_strlen($this->sourceText($transcript)))) {
-            return $this->upgradeRequired('Daily free polishing is used up. Add polish character credits to continue.');
+        if (! $entitlements->canAfford($request->user(), 'polish', mb_strlen($this->sourceText($transcript)))) {
+            return $this->upgradeRequired('Insufficient balance for polishing. Please add funds to continue.');
         }
 
         $transcript->forceFill([
@@ -89,8 +89,8 @@ class TranscriptActionController extends Controller
         ]);
         $source = (string) ($validated['source'] ?? 'raw');
 
-        if (! $entitlements->canSummarize($request->user(), mb_strlen($this->summarySourceText($transcript, $source)))) {
-            return $this->upgradeRequired('Daily free summarizing is used up. Add summarize character credits to continue.');
+        if (! $entitlements->canAfford($request->user(), 'summarize', mb_strlen($this->summarySourceText($transcript, $source)))) {
+            return $this->upgradeRequired('Insufficient balance for summarizing. Please add funds to continue.');
         }
 
         $transcript->forceFill([

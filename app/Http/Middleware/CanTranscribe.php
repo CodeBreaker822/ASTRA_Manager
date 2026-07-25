@@ -16,15 +16,15 @@ class CanTranscribe
 
         abort_unless($user instanceof User, 403);
 
-        if (! app(EntitlementService::class)->canTranscribe($user)) {
+        if (! app(EntitlementService::class)->canAfford($user, 'upload', 1)) {
             if ($request->expectsJson()) {
                 return response()->json([
-                    'message' => 'You have used today\'s free transcription minutes. Buy more minutes to continue today.',
+                    'message' => 'Insufficient balance. Please add funds to continue.',
                     'upgrade' => true,
                 ], 402);
             }
 
-            return back()->with('error', 'You have used today\'s free transcription minutes. Buy more minutes to continue today.');
+            return back()->with('error', 'Insufficient balance. Please add funds to continue.');
         }
 
         return $next($request);
