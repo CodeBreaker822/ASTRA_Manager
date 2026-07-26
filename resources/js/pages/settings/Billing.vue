@@ -28,8 +28,9 @@ const props = defineProps<{
     topup: {
         wallet_currency: 'USD';
         checkout_currency: 'PHP';
-        usd_to_php_rate: number;
+        usd_to_php_rate: number | null;
         payment_method_types: string[];
+        pass_on_fees: boolean;
     };
 }>();
 
@@ -78,7 +79,9 @@ const formatPesos = (amount: number) =>
 const estimatedCheckoutAmount = computed(() => {
     const amount = Number(form.amount ?? 0);
 
-    return amount > 0 ? amount * props.topup.usd_to_php_rate : 0;
+    return amount > 0 && props.topup.usd_to_php_rate
+        ? amount * props.topup.usd_to_php_rate
+        : null;
 });
 const paymentMethods = computed(() =>
     props.topup.payment_method_types
@@ -346,23 +349,26 @@ const handleTopup = () => {
                         PayMongo checkout is not configured.
                     </p>
                     <p
-                        v-else-if="estimatedCheckoutAmount > 0"
+                        v-else-if="estimatedCheckoutAmount"
                         class="mt-2 text-xs text-slate-500"
                     >
                         PayMongo charges
                         {{ formatPesos(estimatedCheckoutAmount) }} through
-                        {{ paymentMethods }}. Your wallet receives
-                        {{ formatDollars(form.amount ?? 0) }} after payment
-                        confirmation.
+                        {{ paymentMethods }} before PayMongo fees.
+                        {{
+                            topup.pass_on_fees
+                                ? 'PayMongo fees are added at checkout.'
+                                : 'PayMongo fees may be deducted from settlement.'
+                        }}
+                        Your wallet receives {{ formatDollars(form.amount ?? 0) }}
+                        after payment confirmation.
                     </p>
                     <p
-                        v-if="
-                            billing.checkout_available &&
-                            estimatedCheckoutAmount <= 0
-                        "
+                        v-else-if="billing.checkout_available"
                         class="mt-2 text-xs text-slate-500"
                     >
-                        Credits appear after PayMongo confirms payment.
+                        Live USD to PHP rate and PayMongo fees are checked when
+                        checkout starts.
                     </p>
                 </div>
             </article>

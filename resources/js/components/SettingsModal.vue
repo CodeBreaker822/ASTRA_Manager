@@ -83,8 +83,9 @@ type SettingsModalProps = {
         topup: {
             wallet_currency: 'USD';
             checkout_currency: 'PHP';
-            usd_to_php_rate: number;
+            usd_to_php_rate: number | null;
             payment_method_types: string[];
+            pass_on_fees: boolean;
         };
         walletBalance: number;
     } | null;

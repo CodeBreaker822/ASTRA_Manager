@@ -39,8 +39,9 @@ class BillingController extends Controller
             'topup' => [
                 'wallet_currency' => 'USD',
                 'checkout_currency' => 'PHP',
-                'usd_to_php_rate' => $payMongo->walletTopupRate(),
+                'usd_to_php_rate' => $payMongo->walletTopupRateForDisplay(),
                 'payment_method_types' => $payMongo->paymentMethodTypes(),
+                'pass_on_fees' => (bool) config('services.paymongo.pass_on_fees', true),
             ],
             'walletBalance' => (int) round(((float) $user->wallet_balance) * 100),
         ]);

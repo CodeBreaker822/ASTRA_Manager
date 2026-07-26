@@ -47,7 +47,7 @@ return [
         'webhook_secret' => env('PAYMONGO_WEBHOOK_SECRET'),
         'payment_method_types' => array_values(array_filter(explode(',', env('PAYMONGO_PAYMENT_METHOD_TYPES', 'card,gcash,qrph')))),
         'send_email_receipt' => env('PAYMONGO_SEND_EMAIL_RECEIPT', true),
-        'usd_to_php_rate' => env('PAYMONGO_USD_TO_PHP_RATE', 56.50),
+        'pass_on_fees' => env('PAYMONGO_PASS_ON_FEES', true),
     ],
 
     'lambda_pdf' => [

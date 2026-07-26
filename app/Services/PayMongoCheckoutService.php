@@ -9,7 +9,10 @@ use RuntimeException;
 
 class PayMongoCheckoutService
 {
-    public function __construct(private readonly HttpFactory $http) {}
+    public function __construct(
+        private readonly HttpFactory $http,
+        private readonly CurrencyExchangeRateService $exchangeRates,
+    ) {}
 
     /**
      * @return array{session_id: string|null, checkout_url: string, payload: array<string, mixed>}
@@ -26,7 +29,8 @@ class PayMongoCheckoutService
             throw new RuntimeException('PayMongo amount must be greater than 0.');
         }
 
-        $payMongoAmount = $this->walletTopupPayMongoAmount($amountInMinorUnits);
+        $exchangeRate = $this->walletTopupRate();
+        $payMongoAmount = $this->walletTopupPayMongoAmount($amountInMinorUnits, $exchangeRate);
 
         $response = $this->http
             ->withBasicAuth($secretKey, '')
@@ -56,11 +60,14 @@ class PayMongoCheckoutService
                             'wallet_topup_currency' => 'USD',
                             'paymongo_amount' => (string) $payMongoAmount,
                             'paymongo_currency' => 'PHP',
+                            'exchange_rate_usd_to_php' => (string) $exchangeRate,
+                            'exchange_rate_source' => (string) config('exchange.default', 'frankfurter'),
                             'billing_transaction_id' => (string) $transaction->id,
                         ],
                         'payment_method_types' => $this->paymentMethodTypes(),
                         'reference_number' => $transaction->reference,
                         'send_email_receipt' => (bool) config('services.paymongo.send_email_receipt', true),
+                        'pass_on_fees' => (bool) config('services.paymongo.pass_on_fees', true),
                         'success_url' => route('billing.success', ['reference' => $transaction->reference], true),
                         'cancel_url' => route('billing.cancel', ['reference' => $transaction->reference], true),
                     ],
@@ -95,8 +102,16 @@ class PayMongoCheckoutService
     {
         return is_string(config('services.paymongo.secret_key'))
             && config('services.paymongo.secret_key') !== ''
-            && $this->walletTopupRate() > 0
             && $this->paymentMethodTypes() !== [];
+    }
+
+    public function walletTopupRateForDisplay(): ?float
+    {
+        try {
+            return $this->walletTopupRate();
+        } catch (RuntimeException) {
+            return null;
+        }
     }
 
     /**
@@ -189,12 +204,10 @@ class PayMongoCheckoutService
         return rtrim(is_string($url) ? $url : 'https://api.paymongo.com', '/');
     }
 
-    private function walletTopupPayMongoAmount(int $usdCents): int
+    private function walletTopupPayMongoAmount(int $usdCents, float $rate): int
     {
-        $rate = $this->walletTopupRate();
-
         if ($rate <= 0) {
-            throw new RuntimeException('PAYMONGO_USD_TO_PHP_RATE must be greater than 0.');
+            throw new RuntimeException('Live USD to PHP exchange rate must be greater than 0.');
         }
 
         return (int) round(($usdCents / 100) * $rate * 100);
@@ -202,6 +215,6 @@ class PayMongoCheckoutService
 
     public function walletTopupRate(): float
     {
-        return (float) config('services.paymongo.usd_to_php_rate', 56.50);
+        return $this->exchangeRates->usdToPhpRate();
     }
 }

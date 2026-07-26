@@ -4,6 +4,7 @@ use App\Models\BillingTransaction;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
+use Worksome\Exchange\Facades\Exchange;
 
 test('paymongo wallet top-up checkout creates a billing transaction and redirects to hosted checkout', function () {
     Http::fake([
@@ -19,9 +20,9 @@ test('paymongo wallet top-up checkout creates a billing transaction and redirect
 
     config([
         'services.paymongo.secret_key' => 'sk_test_123',
-        'services.paymongo.usd_to_php_rate' => 56.50,
         'services.paymongo.payment_method_types' => ['card', 'gcash', 'qrph'],
     ]);
+    Exchange::fake(['PHP' => 62.0]);
 
     $user = User::factory()->create();
 
@@ -45,11 +46,15 @@ test('paymongo wallet top-up checkout creates a billing transaction and redirect
         && $request['data']['attributes']['metadata']['plan'] === 'wallet_topup'
         && $request['data']['attributes']['metadata']['wallet_topup_amount'] === '1000'
         && $request['data']['attributes']['metadata']['wallet_topup_currency'] === 'USD'
-        && $request['data']['attributes']['line_items'][0]['amount'] === 56500
+        && $request['data']['attributes']['line_items'][0]['amount'] === 62000
         && $request['data']['attributes']['line_items'][0]['currency'] === 'PHP'
+        && $request['data']['attributes']['metadata']['exchange_rate_usd_to_php'] === '62'
         && str_contains($request['data']['attributes']['success_url'], $transaction->reference)
         && str_contains($request['data']['attributes']['cancel_url'], $transaction->reference)
+        && $request['data']['attributes']['pass_on_fees'] === true
         && $request['data']['attributes']['payment_method_types'] === ['card', 'gcash', 'qrph']);
+
+    Exchange::assertRetrievedRates();
 });
 
 test('paymongo wallet top-up checkout records failed sessions without throwing an undefined variable error', function () {
@@ -62,6 +67,7 @@ test('paymongo wallet top-up checkout records failed sessions without throwing a
     ]);
 
     config(['services.paymongo.secret_key' => 'sk_test_123']);
+    Exchange::fake(['PHP' => 62.0]);
 
     $user = User::factory()->create();
 
@@ -79,13 +85,11 @@ test('paymongo wallet top-up checkout records failed sessions without throwing a
         ->and($transaction->amount)->toBe(500);
 });
 
-test('paymongo wallet top-up fails clearly when usd to php rate is invalid', function () {
+test('paymongo wallet top-up fails clearly when live usd to php rate is invalid', function () {
     Http::fake();
 
-    config([
-        'services.paymongo.secret_key' => 'sk_test_123',
-        'services.paymongo.usd_to_php_rate' => 0,
-    ]);
+    config(['services.paymongo.secret_key' => 'sk_test_123']);
+    Exchange::fake(['PHP' => 0.0]);
 
     $user = User::factory()->create();
 
@@ -94,7 +98,7 @@ test('paymongo wallet top-up fails clearly when usd to php rate is invalid', fun
         ->post(route('billing.checkout'), ['amount' => '5.00'])
         ->assertRedirect(route('billing.edit'))
         ->assertSessionHasErrors([
-            'billing' => 'PayMongo checkout could not be started: PAYMONGO_USD_TO_PHP_RATE must be greater than 0.',
+            'billing' => 'PayMongo checkout could not be started: Live USD to PHP exchange rate must be greater than 0.',
         ]);
 
     $transaction = BillingTransaction::query()->firstOrFail();
