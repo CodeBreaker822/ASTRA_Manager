@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Services\PageContentService;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use SplFileInfo;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class DownloadController extends Controller
@@ -63,18 +65,43 @@ class DownloadController extends Controller
 
         usort($zipFiles, fn ($left, $right): int => strnatcasecmp($left->getFilename(), $right->getFilename()));
 
-        $zip = $zipFiles[0] ?? null;
+        foreach ($zipFiles as $zip) {
+            if (! $this->ensureReadable($zip)) {
+                continue;
+            }
 
-        if ($zip === null) {
-            return null;
+            return [
+                'path' => $zip->getPathname(),
+                'filename' => $zip->getFilename(),
+                'size' => $zip->getSize(),
+                'modified_at' => $zip->getMTime(),
+            ];
         }
 
-        return [
-            'path' => $zip->getPathname(),
-            'filename' => $zip->getFilename(),
-            'size' => $zip->getSize(),
-            'modified_at' => $zip->getMTime(),
-        ];
+        return null;
+    }
+
+    private function ensureReadable(SplFileInfo $file): bool
+    {
+        $path = $file->getPathname();
+
+        if (File::isReadable($path)) {
+            return true;
+        }
+
+        File::chmod($path, 0644);
+        clearstatcache(true, $path);
+
+        if (File::isReadable($path)) {
+            return true;
+        }
+
+        Log::warning('Transcriber App Package exists but is not readable.', [
+            'path' => $path,
+            'permissions' => substr(sprintf('%o', File::chmod($path)), -4),
+        ]);
+
+        return false;
     }
 
     private function humanFileSize(int $bytes): string

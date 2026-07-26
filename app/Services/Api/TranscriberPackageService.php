@@ -84,9 +84,13 @@ class TranscriberPackageService
                 throw new RuntimeException('Unable to publish the Transcriber App Package.');
             }
 
+            File::chmod($directory.DIRECTORY_SEPARATOR.$filename, 0644);
+
             if (! File::move($temporaryVersion, $directory.DIRECTORY_SEPARATOR.'version.json')) {
                 throw new RuntimeException('Unable to publish the Transcriber App version.');
             }
+
+            File::chmod($directory.DIRECTORY_SEPARATOR.'version.json', 0644);
         } catch (Throwable $exception) {
             File::delete([$temporaryPackage, $temporaryVersion]);
 
