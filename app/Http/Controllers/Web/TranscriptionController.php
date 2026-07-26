@@ -12,7 +12,9 @@ use App\Services\WebApiTranscriptionClient;
 use App\Services\WebTranscriptProcessor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 
 class TranscriptionController extends Controller
@@ -33,18 +35,27 @@ class TranscriptionController extends Controller
             ]
             : ['audio' => ['required', 'file', 'max:512000']];
 
-        $validated = $request->validate(array_merge($audioRules, [
-            'duration_seconds' => ['nullable', 'integer', 'min:0'],
-            'language_code' => ['nullable'],
-            'language_code.*' => ['nullable', 'string', 'max:20'],
-            'clip_index' => ['nullable'],
-            'clip_index.*' => ['nullable', 'integer', 'min:0'],
-            'clip_start_ms' => ['nullable'],
-            'clip_start_ms.*' => ['nullable', 'integer', 'min:0'],
-            'clip_end_ms' => ['nullable'],
-            'clip_end_ms.*' => ['nullable', 'integer', 'min:0'],
-            'server_chunk' => ['nullable', 'boolean'],
-        ]));
+        try {
+            $validated = $request->validate(array_merge($audioRules, [
+                'duration_seconds' => ['nullable', 'integer', 'min:0'],
+                'language_code' => ['nullable'],
+                'language_code.*' => ['nullable', 'string', 'max:20'],
+                'clip_index' => ['nullable'],
+                'clip_index.*' => ['nullable', 'integer', 'min:0'],
+                'clip_start_ms' => ['nullable'],
+                'clip_start_ms.*' => ['nullable', 'integer', 'min:0'],
+                'clip_end_ms' => ['nullable'],
+                'clip_end_ms.*' => ['nullable', 'integer', 'min:0'],
+                'server_chunk' => ['nullable', 'boolean'],
+            ]));
+        } catch (ValidationException $exception) {
+            Log::error('Web audio upload source validation failed.', [
+                ...$this->uploadSourceLogContext($request, $project),
+                'errors' => $exception->errors(),
+            ]);
+
+            return response()->json(['message' => 'Audio upload could not be processed.'], 422);
+        }
 
         $cleanup = null;
 
@@ -82,8 +93,7 @@ class TranscriptionController extends Controller
             $previous = $exception->getPrevious();
 
             Log::error('Web audio upload processing failed.', [
-                'user_id' => $request->user()?->id,
-                'project_id' => $project->id,
+                ...$this->uploadSourceLogContext($request, $project),
                 'exception' => $exception::class,
                 'message' => $exception->getMessage(),
                 'previous_exception' => $previous ? $previous::class : null,
@@ -198,5 +208,58 @@ class TranscriptionController extends Controller
             'message' => $message,
             'upgrade' => true,
         ], 402);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function uploadSourceLogContext(Request $request, TranscriptProject $project): array
+    {
+        return [
+            'user_id' => $request->user()?->id,
+            'project_id' => $project->id,
+            'content_length' => $request->server('CONTENT_LENGTH'),
+            'content_type' => $request->headers->get('content-type'),
+            'post_max_size' => ini_get('post_max_size'),
+            'upload_max_filesize' => ini_get('upload_max_filesize'),
+            'max_file_uploads' => ini_get('max_file_uploads'),
+            'file_keys' => array_keys($request->allFiles()),
+            'audio_files' => $this->uploadedAudioLogContext($request->file('audio')),
+        ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function uploadedAudioLogContext(mixed $audio): array
+    {
+        if ($audio instanceof UploadedFile) {
+            return [$this->uploadedFileLogContext($audio)];
+        }
+
+        if (! is_array($audio)) {
+            return [];
+        }
+
+        return array_values(array_map(
+            fn (UploadedFile $file): array => $this->uploadedFileLogContext($file),
+            array_filter($audio, fn (mixed $file): bool => $file instanceof UploadedFile),
+        ));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function uploadedFileLogContext(UploadedFile $file): array
+    {
+        return [
+            'original_name' => $file->getClientOriginalName(),
+            'mime_type' => $file->getClientMimeType(),
+            'size' => $file->getSize(),
+            'is_valid' => $file->isValid(),
+            'upload_error' => $file->getError(),
+            'upload_error_message' => $file->getErrorMessage(),
+            'real_path' => $file->getRealPath(),
+        ];
     }
 }
