@@ -81,7 +81,7 @@ class TranscriptionController extends Controller
         } catch (RuntimeException $exception) {
             $previous = $exception->getPrevious();
 
-            Log::info('Web audio upload processing failed.', [
+            Log::error('Web audio upload processing failed.', [
                 'user_id' => $request->user()?->id,
                 'project_id' => $project->id,
                 'exception' => $exception::class,

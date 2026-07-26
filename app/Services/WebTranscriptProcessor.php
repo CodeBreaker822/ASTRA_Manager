@@ -45,7 +45,7 @@ class WebTranscriptProcessor
             $this->recordUsage($transcript);
             $this->appendLog($transcript, 'completed', 'Complete');
         } catch (Throwable $exception) {
-            Log::info('Web transcription through API pipeline failed.', [
+            Log::error('Web transcription through API pipeline failed.', [
                 'transcript_id' => $transcript->id,
                 'exception' => $exception::class,
                 'message' => $exception->getMessage(),

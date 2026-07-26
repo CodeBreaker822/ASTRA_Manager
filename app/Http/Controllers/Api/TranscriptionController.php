@@ -626,7 +626,7 @@ class TranscriptionController extends Controller
                 $path = $audio?->getRealPath();
 
                 if (! is_string($path) || ! is_file($path)) {
-                    Log::info('Async transcription upload source file is not readable.', [
+                    Log::error('Async transcription upload source file is not readable.', [
                         'license_id' => $license->id,
                         'job_id' => $jobId,
                         'clip_index' => $clip['queue_index'] ?? null,
@@ -643,7 +643,7 @@ class TranscriptionController extends Controller
                 $contents = file_get_contents($path);
 
                 if ($contents === false) {
-                    Log::info('Async transcription upload source file could not be read.', [
+                    Log::error('Async transcription upload source file could not be read.', [
                         'license_id' => $license->id,
                         'job_id' => $jobId,
                         'clip_index' => $clip['queue_index'] ?? null,
@@ -714,7 +714,7 @@ class TranscriptionController extends Controller
                 'clip_count' => count($storedClips),
             ]);
         } catch (Throwable $exception) {
-            Log::info('Async transcription job creation failed.', [
+            Log::error('Async transcription job creation failed.', [
                 'license_id' => $license->id,
                 'exception' => $exception::class,
                 'message' => $exception->getMessage(),
@@ -818,7 +818,7 @@ class TranscriptionController extends Controller
             $absolutePath = Storage::disk('local')->path($audioPath);
 
             if ($audioPath === '' || ! is_file($absolutePath)) {
-                Log::info('Async transcription stored audio file is not readable.', [
+                Log::error('Async transcription stored audio file is not readable.', [
                     'stored_path' => $audioPath,
                     'absolute_path' => $absolutePath,
                     'clip_index' => $clip['clip_index'] ?? null,

@@ -36,7 +36,7 @@ class WebApiTranscriptionClient
         $payload = $this->payload($response);
 
         if ($response->getStatusCode() >= 400) {
-            Log::info('Web audio sync transcription API request failed.', [
+            Log::error('Web audio sync transcription API request failed.', [
                 'user_id' => $user->id,
                 'status_code' => $response->getStatusCode(),
                 'payload' => $this->logPayload($payload),
@@ -63,7 +63,7 @@ class WebApiTranscriptionClient
         $payload = $this->payload($response);
 
         if ($response->getStatusCode() !== 202 || blank($payload['job_id'] ?? null)) {
-            Log::info('Web audio async transcription job creation failed.', [
+            Log::error('Web audio async transcription job creation failed.', [
                 'user_id' => $user->id,
                 'status_code' => $response->getStatusCode(),
                 'payload' => $this->logPayload($payload),
@@ -88,7 +88,7 @@ class WebApiTranscriptionClient
         $payload = $this->payload($response);
 
         if ($response->getStatusCode() >= 500 && ($payload['status'] ?? null) !== 'failed') {
-            Log::info('Web audio async transcription status request failed.', [
+            Log::error('Web audio async transcription status request failed.', [
                 'user_id' => $user->id,
                 'job_id' => $jobId,
                 'status_code' => $response->getStatusCode(),
@@ -173,7 +173,7 @@ class WebApiTranscriptionClient
             $absolutePath = Storage::disk('local')->path($path);
 
             if ($path === '' || ! is_file($absolutePath)) {
-                Log::info('Stored web audio clip is not readable before API transcription request.', [
+                Log::error('Stored web audio clip is not readable before API transcription request.', [
                     'stored_path' => $path,
                     'absolute_path' => $absolutePath,
                     'clip_index' => $clip['clip_index'] ?? null,

@@ -132,7 +132,7 @@ class TranscriptionWorkflowService
                 $languageCode,
             );
         } catch (Throwable $exception) {
-            Log::info('Web audio async transcription job could not be started.', [
+            Log::error('Web audio async transcription job could not be started.', [
                 'user_id' => $request->user()?->id,
                 'transcript_id' => $transcript->id,
                 'exception' => $exception::class,
@@ -164,7 +164,7 @@ class TranscriptionWorkflowService
             try {
                 $payload = $this->transcriptionClient->jobStatus($user, $apiJobId);
             } catch (Throwable $exception) {
-                Log::info('Web audio async transcription status sync failed.', [
+                Log::error('Web audio async transcription status sync failed.', [
                     'user_id' => $user?->id,
                     'project_id' => $project->id,
                     'transcript_id' => $transcript->id,
@@ -189,6 +189,15 @@ class TranscriptionWorkflowService
             }
 
             if ($status === 'failed') {
+                Log::error('Web audio async transcription job returned failed status.', [
+                    'user_id' => $user?->id,
+                    'project_id' => $project->id,
+                    'transcript_id' => $transcript->id,
+                    'api_job_id' => $apiJobId,
+                    'api_status_code' => $payload['status_code'] ?? null,
+                    'message' => $payload['message'] ?? null,
+                ]);
+
                 $this->processor->failTranscription($transcript);
 
                 continue;

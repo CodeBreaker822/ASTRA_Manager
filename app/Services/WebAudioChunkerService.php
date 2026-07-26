@@ -25,7 +25,7 @@ class WebAudioChunkerService
         $sourcePath = $file->getRealPath();
 
         if (! is_string($sourcePath) || ! is_file($sourcePath)) {
-            Log::info('Audio upload source file is not readable.', [
+            Log::error('Audio upload source file is not readable.', [
                 'original_name' => $file->getClientOriginalName(),
                 'mime_type' => $file->getClientMimeType(),
                 'size' => $file->getSize(),
@@ -120,7 +120,7 @@ class WebAudioChunkerService
         try {
             $process->run();
         } catch (ProcessRuntimeException $exception) {
-            Log::info('FFmpeg chunk process could not start.', [
+            Log::error('FFmpeg chunk process could not start.', [
                 'binary' => $this->ffmpegBinary(),
                 'source_path' => $sourcePath,
                 'source_size' => is_file($sourcePath) ? filesize($sourcePath) : null,
@@ -135,7 +135,7 @@ class WebAudioChunkerService
         }
 
         if (! $process->isSuccessful() || ! is_file($outputPath)) {
-            Log::info('FFmpeg chunk process failed.', [
+            Log::error('FFmpeg chunk process failed.', [
                 'binary' => $this->ffmpegBinary(),
                 'exit_code' => $process->getExitCode(),
                 'source_path' => $sourcePath,
@@ -187,7 +187,7 @@ class WebAudioChunkerService
         try {
             $process->run();
         } catch (ProcessRuntimeException $exception) {
-            Log::info('FFmpeg duration probe could not start.', [
+            Log::error('FFmpeg duration probe could not start.', [
                 'binary' => $this->ffmpegBinary(),
                 'source_path' => $sourcePath,
                 'source_size' => is_file($sourcePath) ? filesize($sourcePath) : null,
@@ -201,7 +201,7 @@ class WebAudioChunkerService
         $output = $process->getErrorOutput()."\n".$process->getOutput();
 
         if (! preg_match('/Duration:\s*(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/', $output, $matches)) {
-            Log::info('FFmpeg duration probe did not return a readable duration.', [
+            Log::error('FFmpeg duration probe did not return a readable duration.', [
                 'binary' => $this->ffmpegBinary(),
                 'exit_code' => $process->getExitCode(),
                 'source_path' => $sourcePath,
