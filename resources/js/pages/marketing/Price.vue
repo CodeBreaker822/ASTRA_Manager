@@ -3,6 +3,7 @@ import { Head, Link } from '@inertiajs/vue3';
 import { Check } from '@lucide/vue';
 import { computed } from 'vue';
 import { Button } from '@/components/ui/button';
+import { useCurrency } from '@/composables/useCurrency';
 
 type Plan = {
     key: string;
@@ -11,12 +12,14 @@ type Plan = {
     monthly_price: number | null;
     yearly_price: number | null;
     price_label: string;
-    price_per_second: number;
+    upload_price_per_hour: number;
+    live_price_per_hour: number;
+    llm_price: number;
+    polish_price_per_character: number;
+    summary_price_per_character: number;
     minutes: number;
     free_polish_uses_per_day: number;
     free_summary_uses_per_day: number;
-    polish_characters: number;
-    summary_characters: number;
     cta: string;
     featured: boolean;
     features: string[];
@@ -38,8 +41,20 @@ const props = defineProps<{
     };
 }>();
 
+const currency = useCurrency();
+
 const planPrice = (plan: Plan): string => {
     return plan.price_label;
+};
+
+// Format price per hour for pay-as-you-go plans
+const formatPricePerHour = (price: number): string => {
+    return currency.formatWithSuffix(price, '/hour');
+};
+
+// Format price per character for text features
+const formatPricePerCharacter = (price: number): string => {
+    return currency.formatWithSuffix(price, '/1K chars');
 };
 
 const comparisonRows = computed(() => Object.entries(props.comparison));
@@ -98,18 +113,24 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                         </span>
                     </div>
 
-                    <div class="mt-8">
-                        <span class="text-4xl font-semibold text-slate-950">
-                            {{ planPrice(plan) }}
-                        </span>
+                    <div class="mt-8 space-y-3">
+                        <div v-if="plan.upload_price_per_hour" class="text-sm">
+                            <span class="font-medium">Audio Upload:</span>
+                            {{ currency.formatWithSuffix(plan.upload_price_per_hour, '/hour') }}
+                        </div>
+                        <div v-if="plan.live_price_per_hour" class="text-sm">
+                            <span class="font-medium">Live Recording:</span>
+                            {{ currency.formatWithSuffix(plan.live_price_per_hour, '/hour') }}
+                        </div>
+                        <div v-if="plan.polish_price_per_character" class="text-sm">
+                            <span class="font-medium">Polishing:</span>
+                            {{ currency.formatWithSuffix(plan.polish_price_per_character, '/1K chars') }}
+                        </div>
+                        <div v-if="plan.summary_price_per_character" class="text-sm">
+                            <span class="font-medium">Summarization:</span>
+                            {{ currency.formatWithSuffix(plan.summary_price_per_character, '/1K chars') }}
+                        </div>
                     </div>
-                    <p class="mt-2 text-sm text-slate-600">
-                        {{
-                            plan.key === 'free'
-                                ? `${plan.minutes.toLocaleString()} minutes, ${plan.free_polish_uses_per_day} polish, and ${plan.free_summary_uses_per_day} summarize reset every day`
-                                : `${plan.minutes.toLocaleString()} minutes, ${plan.polish_characters.toLocaleString()} polish characters, or ${plan.summary_characters.toLocaleString()} summarize characters`
-                        }}
-                    </p>
 
                     <Button as-child class="mt-8 w-full">
                         <Link href="/register">{{ plan.cta }}</Link>

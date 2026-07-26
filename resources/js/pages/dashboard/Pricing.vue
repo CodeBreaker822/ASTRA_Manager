@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import DashboardLayout from '@/layouts/dashboard/Layout.vue';
+import { useCurrency } from '@/composables/useCurrency';
 
 type TierKey = 'free' | 'payg';
 
@@ -28,6 +29,8 @@ type Tier = {
     featured: boolean;
     features: string[];
 };
+
+const currency = useCurrency();
 
 type ComparisonRow = {
     label: string;
@@ -240,16 +243,20 @@ const submit = () => {
                                 class="grid grid-cols-[9.5rem_1fr] items-center gap-3 text-sm"
                             >
                                 <span class="font-medium text-slate-600"
-                                    >Uploaded audio price per hour</span
+                                    >Uploaded audio price per hour (cents)</span
                                 >
                                 <Input
                                     :id="`upload-rate-${tier.key}`"
                                     v-model.number="tier.upload_price_per_hour"
                                     type="number"
                                     min="0"
-                                    step="0.01"
-                                    class="h-9"
+                                    step="1"
+                                    placeholder="190000"
+                                    class="h-9 font-mono text-sm"
                                 />
+                                <div class="col-span-2 text-xs text-slate-400">
+                                    Example: <strong>190000</strong> = $1.90
+                                </div>
                             </label>
 
                             <label
@@ -257,16 +264,20 @@ const submit = () => {
                                 class="grid grid-cols-[9.5rem_1fr] items-center gap-3 text-sm"
                             >
                                 <span class="font-medium text-slate-600"
-                                    >Live recording price per hour</span
+                                    >Live recording price per hour (cents)</span
                                 >
                                 <Input
                                     :id="`live-rate-${tier.key}`"
                                     v-model.number="tier.live_price_per_hour"
                                     type="number"
                                     min="0"
-                                    step="0.01"
-                                    class="h-9"
+                                    step="1"
+                                    placeholder="190000"
+                                    class="h-9 font-mono text-sm"
                                 />
+                                <div class="col-span-2 text-xs text-slate-400">
+                                    Example: <strong>190000</strong> = $1.90
+                                </div>
                             </label>
 
                             <label
@@ -310,7 +321,7 @@ const submit = () => {
                                 class="grid grid-cols-[9.5rem_1fr] items-center gap-3 text-sm"
                             >
                                 <span class="font-medium text-slate-600"
-                                    >Polish price per character</span
+                                    >Polish price per character (cents)</span
                                 >
                                 <Input
                                     :id="`polish-rate-${tier.key}`"
@@ -319,9 +330,13 @@ const submit = () => {
                                     "
                                     type="number"
                                     min="0"
-                                    step="0.00000001"
-                                    class="h-9"
+                                    step="0.01"
+                                    placeholder="5000"
+                                    class="h-9 font-mono text-sm"
                                 />
+                                <div class="col-span-2 text-xs text-slate-400">
+                                    Example: <strong>5000</strong> = $0.05
+                                </div>
                             </label>
 
                             <label
@@ -329,7 +344,7 @@ const submit = () => {
                                 class="grid grid-cols-[9.5rem_1fr] items-center gap-3 text-sm"
                             >
                                 <span class="font-medium text-slate-600"
-                                    >Summary price per character</span
+                                    >Summary price per character (cents)</span
                                 >
                                 <Input
                                     :id="`summary-rate-${tier.key}`"
@@ -338,9 +353,13 @@ const submit = () => {
                                     "
                                     type="number"
                                     min="0"
-                                    step="0.00000001"
-                                    class="h-9"
+                                    step="0.01"
+                                    placeholder="5000"
+                                    class="h-9 font-mono text-sm"
                                 />
+                                <div class="col-span-2 text-xs text-slate-400">
+                                    Example: <strong>5000</strong> = $0.05
+                                </div>
                             </label>
 
                             <label

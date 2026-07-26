@@ -45,28 +45,29 @@ class BillingController extends Controller
         abort_unless($user instanceof User, 403);
 
         $validated = $request->validate([
-            'amount' => ['required', 'integer', 'min:100'], // Minimum $1 = 100 minor units
+            'amount' => ['required', 'numeric', 'min:1', 'min:0.01'], // Minimum $1.00 in USD
         ]);
 
-        $amountInMinorUnits = $validated['amount'];
+        // Form sends amount in USD dollars, convert to cents for API
+        $amountInCents = (int) round($validated['amount'] * 100);
 
-        DB::transaction(function () use ($user, $amountInMinorUnits) {
+        DB::transaction(function () use ($user, $amountInCents) {
             $transaction = BillingTransaction::query()->create([
                 'user_id' => $user->id,
                 'provider' => 'paymongo',
                 'plan' => 'wallet_topup',
                 'reference' => 'JERVA-'.$user->id.'-'.Str::upper(Str::random(12)),
                 'status' => 'pending',
-                'amount' => $amountInMinorUnits,
+                'amount' => $amountInCents, // Store in cents for consistency
                 'currency' => 'USD',
             ]);
 
             try {
-                $checkout = $payMongo->createWalletTopupCheckout($user, $amountInMinorUnits, $transaction);
+                $checkout = $payMongo->createWalletTopupCheckout($user, $amountInCents, $transaction);
             } catch (RuntimeException $exception) {
                 Log::warning('PayMongo checkout could not be created.', [
                     'user_id' => $user->id,
-                    'amount' => $amountInMinorUnits,
+                    'amount' => $amountInCents, // Log in cents
                     'error' => $exception->getMessage(),
                 ]);
 

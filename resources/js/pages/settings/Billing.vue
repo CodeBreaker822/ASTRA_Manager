@@ -3,6 +3,7 @@ import { Head, Link, useForm } from '@inertiajs/vue3';
 import { DollarSign, Plus } from '@lucide/vue';
 import Heading from '@/components/Heading.vue';
 import { Button } from '@/components/ui/button';
+import { useCurrency } from '@/composables/useCurrency';
 import type { Plan } from '@/types';
 
 type PlanTier = {
@@ -34,6 +35,7 @@ defineOptions({
     },
 });
 
+const currency = useCurrency();
 const form = useForm({
     amount: null as number | null,
 });
@@ -41,11 +43,12 @@ const form = useForm({
 const paygPlan = props.plans.find(p => p.key === 'payg') as PlanTier | undefined;
 
 const formattedBalance = (balance: number) => {
-    return '$' + (balance / 100).toFixed(2);
+    return currency.fromCents(balance);
 };
 
 const handleTopup = () => {
-    if (!form.amount || form.amount < 100) {
+    // Form value is in USD dollars (e.g., 10.50)
+    if (!form.amount || form.amount < 1.00) {
         alert('Minimum top-up is $1.00');
         return;
     }
@@ -181,7 +184,7 @@ const handleTopup = () => {
                             <p class="text-xs text-slate-500">1 hour of recording</p>
                         </div>
                         <p class="text-sm font-bold text-slate-950">
-                            ${{ (paygPlan.upload_price_per_hour / 100).toFixed(2) }}/hour
+                            {{ currency.formatWithSuffix(paygPlan?.upload_price_per_hour || 0, '/hour') }}
                         </p>
                     </div>
 
@@ -194,7 +197,7 @@ const handleTopup = () => {
                             <p class="text-xs text-slate-500">1 hour of live recording</p>
                         </div>
                         <p class="text-sm font-bold text-slate-950">
-                            ${{ (paygPlan.live_price_per_hour / 100).toFixed(2) }}/hour
+                            {{ currency.formatWithSuffix(paygPlan?.live_price_per_hour || 0, '/hour') }}
                         </p>
                     </div>
 
@@ -207,7 +210,7 @@ const handleTopup = () => {
                             <p class="text-xs text-slate-500">Per 1,000 characters</p>
                         </div>
                         <p class="text-sm font-bold text-slate-950">
-                            ${{ (paygPlan.polish_price_per_character / 100).toFixed(3) }}/1K chars
+                            {{ currency.formatWithSuffix(paygPlan?.polish_price_per_character || 0, '/1K chars') }}
                         </p>
                     </div>
 
@@ -220,7 +223,7 @@ const handleTopup = () => {
                             <p class="text-xs text-slate-500">Per 1,000 characters</p>
                         </div>
                         <p class="text-sm font-bold text-slate-950">
-                            ${{ (paygPlan.summary_price_per_character / 100).toFixed(3) }}/1K chars
+                            {{ currency.formatWithSuffix(paygPlan?.summary_price_per_character || 0, '/1K chars') }}
                         </p>
                     </div>
                 </div>
@@ -235,8 +238,8 @@ const handleTopup = () => {
                         <input
                             v-model.number="form.amount"
                             type="number"
-                            min="100"
-                            step="1"
+                            min="1"
+                            step="0.01"
                             placeholder="Custom amount (minimum $1.00)"
                             class="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             @keyup.enter="handleTopup"
