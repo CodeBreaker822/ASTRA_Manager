@@ -20,8 +20,17 @@ type PlanTier = {
 };
 
 const props = defineProps<{
+    billing: {
+        checkout_available: boolean;
+    };
     walletBalance: number;
     plans: PlanTier[];
+    topup: {
+        wallet_currency: 'USD';
+        checkout_currency: 'PHP';
+        usd_to_php_rate: number;
+        payment_method_types: string[];
+    };
 }>();
 
 defineOptions({
@@ -59,8 +68,31 @@ const hourlyRate = (amount: number | undefined) =>
     `${formatDollars(amount ?? 0)}/hour`;
 const perThousandCharactersRate = (amount: number | undefined) =>
     `${formatDollars((amount ?? 0) * 1000, 4)}/1K chars`;
+const formatPesos = (amount: number) =>
+    new Intl.NumberFormat('en-PH', {
+        style: 'currency',
+        currency: 'PHP',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(amount);
+const estimatedCheckoutAmount = computed(() => {
+    const amount = Number(form.amount ?? 0);
+
+    return amount > 0 ? amount * props.topup.usd_to_php_rate : 0;
+});
+const paymentMethods = computed(() =>
+    props.topup.payment_method_types
+        .map((method) => method.replaceAll('_', ' ').toUpperCase())
+        .join(', '),
+);
 
 const handleTopup = () => {
+    if (!props.billing.checkout_available) {
+        notifyError('PayMongo checkout is not configured.');
+
+        return;
+    }
+
     if (!form.amount || form.amount < 1.0) {
         const message = 'Minimum top-up is $1.00.';
         form.setError('amount', message);
@@ -288,7 +320,9 @@ const handleTopup = () => {
                             @keyup.enter="handleTopup"
                         />
                         <Button
-                            :disabled="form.processing"
+                            :disabled="
+                                form.processing || !billing.checkout_available
+                            "
                             @click="handleTopup"
                         >
                             <Plus class="mr-2 size-4" />
@@ -305,7 +339,29 @@ const handleTopup = () => {
                     <p v-if="billingError" class="mt-2 text-xs text-red-600">
                         {{ billingError }}
                     </p>
-                    <p class="mt-2 text-xs text-slate-500">
+                    <p
+                        v-if="!billing.checkout_available"
+                        class="mt-2 text-xs text-red-600"
+                    >
+                        PayMongo checkout is not configured.
+                    </p>
+                    <p
+                        v-else-if="estimatedCheckoutAmount > 0"
+                        class="mt-2 text-xs text-slate-500"
+                    >
+                        PayMongo charges
+                        {{ formatPesos(estimatedCheckoutAmount) }} through
+                        {{ paymentMethods }}. Your wallet receives
+                        {{ formatDollars(form.amount ?? 0) }} after payment
+                        confirmation.
+                    </p>
+                    <p
+                        v-if="
+                            billing.checkout_available &&
+                            estimatedCheckoutAmount <= 0
+                        "
+                        class="mt-2 text-xs text-slate-500"
+                    >
                         Credits appear after PayMongo confirms payment.
                     </p>
                 </div>

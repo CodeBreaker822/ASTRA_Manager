@@ -20,13 +20,16 @@ test('paymongo wallet top-up checkout creates a billing transaction and redirect
     config([
         'services.paymongo.secret_key' => 'sk_test_123',
         'services.paymongo.usd_to_php_rate' => 56.50,
+        'services.paymongo.payment_method_types' => ['card', 'gcash', 'qrph'],
     ]);
 
     $user = User::factory()->create();
 
     $this->actingAs($user)
+        ->withHeader('X-Inertia', 'true')
         ->post(route('billing.checkout'), ['amount' => '10.00'])
-        ->assertRedirect('https://checkout.paymongo.com/cs_test_123');
+        ->assertStatus(409)
+        ->assertHeader('X-Inertia-Location', 'https://checkout.paymongo.com/cs_test_123');
 
     $transaction = BillingTransaction::query()->firstOrFail();
 
@@ -43,7 +46,10 @@ test('paymongo wallet top-up checkout creates a billing transaction and redirect
         && $request['data']['attributes']['metadata']['wallet_topup_amount'] === '1000'
         && $request['data']['attributes']['metadata']['wallet_topup_currency'] === 'USD'
         && $request['data']['attributes']['line_items'][0]['amount'] === 56500
-        && $request['data']['attributes']['line_items'][0]['currency'] === 'PHP');
+        && $request['data']['attributes']['line_items'][0]['currency'] === 'PHP'
+        && str_contains($request['data']['attributes']['success_url'], $transaction->reference)
+        && str_contains($request['data']['attributes']['cancel_url'], $transaction->reference)
+        && $request['data']['attributes']['payment_method_types'] === ['card', 'gcash', 'qrph']);
 });
 
 test('paymongo wallet top-up checkout records failed sessions without throwing an undefined variable error', function () {
@@ -63,12 +69,40 @@ test('paymongo wallet top-up checkout records failed sessions without throwing a
         ->from(route('billing.edit'))
         ->post(route('billing.checkout'), ['amount' => '5.00'])
         ->assertRedirect(route('billing.edit'))
-        ->assertSessionHasErrors('billing');
+        ->assertSessionHasErrors([
+            'billing' => 'PayMongo checkout could not be started: Invalid test checkout request.',
+        ]);
 
     $transaction = BillingTransaction::query()->firstOrFail();
 
     expect($transaction->status)->toBe('failed')
         ->and($transaction->amount)->toBe(500);
+});
+
+test('paymongo wallet top-up fails clearly when usd to php rate is invalid', function () {
+    Http::fake();
+
+    config([
+        'services.paymongo.secret_key' => 'sk_test_123',
+        'services.paymongo.usd_to_php_rate' => 0,
+    ]);
+
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->from(route('billing.edit'))
+        ->post(route('billing.checkout'), ['amount' => '5.00'])
+        ->assertRedirect(route('billing.edit'))
+        ->assertSessionHasErrors([
+            'billing' => 'PayMongo checkout could not be started: PAYMONGO_USD_TO_PHP_RATE must be greater than 0.',
+        ]);
+
+    $transaction = BillingTransaction::query()->firstOrFail();
+
+    expect($transaction->status)->toBe('failed')
+        ->and($transaction->amount)->toBe(500);
+
+    Http::assertNothingSent();
 });
 
 test('paymongo webhook credits wallet after a verified paid wallet top-up event', function () {
@@ -93,6 +127,85 @@ test('paymongo webhook credits wallet after a verified paid wallet top-up event'
         ->and($transaction->refresh()->status)->toBe('paid')
         ->and($transaction->payment_id)->toBe('pay_test_123')
         ->and($transaction->paid_at)->not->toBeNull();
+});
+
+test('billing success verifies paid checkout and credits wallet when webhook has not arrived', function () {
+    Http::fake([
+        'https://api.paymongo.com/v1/checkout_sessions/cs_test_return_paid' => Http::response([
+            'data' => [
+                'id' => 'cs_test_return_paid',
+                'attributes' => [
+                    'reference_number' => 'JERVA-1-RETURN',
+                    'payments' => [
+                        [
+                            'id' => 'pay_test_return',
+                            'attributes' => [
+                                'status' => 'paid',
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+
+    config(['services.paymongo.secret_key' => 'sk_test_123']);
+
+    $user = User::factory()->create(['plan' => 'free', 'wallet_balance' => 0]);
+    $transaction = BillingTransaction::query()->create([
+        'user_id' => $user->id,
+        'provider' => 'paymongo',
+        'plan' => 'wallet_topup',
+        'reference' => 'JERVA-1-RETURN',
+        'checkout_session_id' => 'cs_test_return_paid',
+        'status' => 'checkout_created',
+        'amount' => 1000,
+        'currency' => 'USD',
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('billing.success', ['reference' => $transaction->reference]))
+        ->assertRedirect(route('billing.edit'))
+        ->assertSessionHas('success', 'Payment confirmed. Credits added to your wallet.');
+
+    expect((float) $user->refresh()->wallet_balance)->toBe(10.0)
+        ->and($transaction->refresh()->status)->toBe('paid')
+        ->and($transaction->payment_id)->toBe('pay_test_return');
+});
+
+test('billing success does not credit wallet when checkout is not paid yet', function () {
+    Http::fake([
+        'https://api.paymongo.com/v1/checkout_sessions/cs_test_return_active' => Http::response([
+            'data' => [
+                'id' => 'cs_test_return_active',
+                'attributes' => [
+                    'payments' => [],
+                ],
+            ],
+        ]),
+    ]);
+
+    config(['services.paymongo.secret_key' => 'sk_test_123']);
+
+    $user = User::factory()->create(['plan' => 'free', 'wallet_balance' => 0]);
+    $transaction = BillingTransaction::query()->create([
+        'user_id' => $user->id,
+        'provider' => 'paymongo',
+        'plan' => 'wallet_topup',
+        'reference' => 'JERVA-1-ACTIVE',
+        'checkout_session_id' => 'cs_test_return_active',
+        'status' => 'checkout_created',
+        'amount' => 1000,
+        'currency' => 'USD',
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('billing.success', ['reference' => $transaction->reference]))
+        ->assertRedirect(route('billing.edit'))
+        ->assertSessionHas('warning', 'Payment is not confirmed yet. Credits will update when PayMongo confirms payment.');
+
+    expect((float) $user->refresh()->wallet_balance)->toBe(0.0)
+        ->and($transaction->refresh()->status)->toBe('checkout_created');
 });
 
 test('paymongo webhook does not credit wallet twice for duplicate paid events', function () {
@@ -125,6 +238,39 @@ test('paymongo webhook rejects invalid signatures', function () {
         ->assertUnauthorized();
 });
 
+test('paymongo webhook rejects paid events without a transaction reference', function () {
+    config(['services.paymongo.webhook_secret' => 'whsec_test']);
+
+    $user = User::factory()->create(['plan' => 'free', 'wallet_balance' => 0]);
+    BillingTransaction::query()->create([
+        'user_id' => $user->id,
+        'provider' => 'paymongo',
+        'plan' => 'wallet_topup',
+        'reference' => 'JERVA-1-FIRST',
+        'checkout_session_id' => 'cs_test_first',
+        'status' => 'checkout_created',
+        'amount' => 1000,
+        'currency' => 'USD',
+    ]);
+
+    paymongoSignedWebhook([
+        'data' => [
+            'attributes' => [
+                'type' => 'checkout_session.payment.paid',
+                'data' => [
+                    'attributes' => [
+                        'payments' => [
+                            ['id' => 'pay_test_missing_reference'],
+                        ],
+                    ],
+                ],
+            ],
+        ],
+    ])->assertUnprocessable();
+
+    expect((float) $user->refresh()->wallet_balance)->toBe(0.0);
+});
+
 function paymongoPaidWebhook(BillingTransaction $transaction, array $metadata): TestResponse
 {
     $payload = [
@@ -144,6 +290,12 @@ function paymongoPaidWebhook(BillingTransaction $transaction, array $metadata): 
             ],
         ],
     ];
+
+    return paymongoSignedWebhook($payload);
+}
+
+function paymongoSignedWebhook(array $payload): TestResponse
+{
     $body = json_encode($payload, JSON_THROW_ON_ERROR);
     $timestamp = (string) now()->timestamp;
     $signature = hash_hmac('sha256', $timestamp.'.'.$body, 'whsec_test');

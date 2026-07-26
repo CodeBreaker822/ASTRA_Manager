@@ -3,14 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\BillingTransaction;
+use App\Services\WalletTopupService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 class PayMongoWebhookController extends Controller
 {
-    public function __invoke(Request $request): JsonResponse
+    public function __invoke(Request $request, WalletTopupService $topups): JsonResponse
     {
         if (! $this->hasValidSignature($request)) {
             return response()->json(['message' => 'Invalid signature.'], 401);
@@ -28,9 +28,16 @@ class PayMongoWebhookController extends Controller
         $sessionId = data_get($resource, 'id');
         $paymentId = data_get($resource, 'attributes.payments.0.id');
 
+        if (! is_string($reference) && ! is_string($sessionId)) {
+            return response()->json(['message' => 'Missing transaction reference.'], 422);
+        }
+
         $transaction = BillingTransaction::query()
-            ->when(is_string($reference), fn ($query) => $query->orWhere('reference', $reference))
-            ->when(is_string($sessionId), fn ($query) => $query->orWhere('checkout_session_id', $sessionId))
+            ->where(function ($query) use ($reference, $sessionId): void {
+                $query
+                    ->when(is_string($reference), fn ($query) => $query->orWhere('reference', $reference))
+                    ->when(is_string($sessionId), fn ($query) => $query->orWhere('checkout_session_id', $sessionId));
+            })
             ->first();
 
         if (! $transaction) {
@@ -41,28 +48,11 @@ class PayMongoWebhookController extends Controller
             return response()->json(['message' => 'Unknown plan.'], 422);
         }
 
-        DB::transaction(function () use ($transaction, $paymentId, $payload): void {
-            $lockedTransaction = BillingTransaction::query()
-                ->whereKey($transaction->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            $alreadyPaid = $lockedTransaction->status === 'paid';
-
-            $lockedTransaction->update([
-                'payment_id' => is_string($paymentId) ? $paymentId : $lockedTransaction->payment_id,
-                'status' => 'paid',
-                'payload' => $payload,
-                'paid_at' => Carbon::now(),
-            ]);
-
-            if (! $alreadyPaid && $lockedTransaction->amount > 0) {
-                $user = $lockedTransaction->user()->lockForUpdate()->firstOrFail();
-                $user->forceFill([
-                    'wallet_balance' => round((float) $user->wallet_balance + ($lockedTransaction->amount / 100), 2),
-                ])->save();
-            }
-        });
+        try {
+            $topups->markPaid($transaction, is_string($paymentId) ? $paymentId : null, $payload);
+        } catch (RuntimeException) {
+            return response()->json(['message' => 'Unknown plan.'], 422);
+        }
 
         return response()->json(['message' => 'Payment recorded. Credits added.']);
     }

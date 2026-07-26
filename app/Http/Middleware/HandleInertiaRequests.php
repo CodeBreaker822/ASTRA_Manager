@@ -150,12 +150,16 @@ class HandleInertiaRequests extends Middleware
 
         return [
             'billing' => [
-                'provider' => config('services.billing.provider'),
                 'checkout_available' => $payMongo->isConfiguredForWalletTopup(),
-                'portal_available' => false,
             ],
             'entitlements' => app(EntitlementService::class)->summaryFor($user),
             'plans' => app(PlanService::class)->tiersForDisplay(),
+            'topup' => [
+                'wallet_currency' => 'USD',
+                'checkout_currency' => 'PHP',
+                'usd_to_php_rate' => $payMongo->walletTopupRate(),
+                'payment_method_types' => $payMongo->paymentMethodTypes(),
+            ],
             'walletBalance' => (int) round(((float) $user->wallet_balance) * 100),
         ];
     }

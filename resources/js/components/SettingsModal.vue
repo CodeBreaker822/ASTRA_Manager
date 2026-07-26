@@ -76,12 +76,16 @@ type SettingsModalProps = {
     } | null;
     billing?: {
         billing: {
-            provider: string | null;
             checkout_available: boolean;
-            portal_available: boolean;
         };
         entitlements: Entitlements;
         plans: Plan[];
+        topup: {
+            wallet_currency: 'USD';
+            checkout_currency: 'PHP';
+            usd_to_php_rate: number;
+            payment_method_types: string[];
+        };
         walletBalance: number;
     } | null;
 };

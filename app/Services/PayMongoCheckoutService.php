@@ -61,8 +61,8 @@ class PayMongoCheckoutService
                         'payment_method_types' => $this->paymentMethodTypes(),
                         'reference_number' => $transaction->reference,
                         'send_email_receipt' => (bool) config('services.paymongo.send_email_receipt', true),
-                        'success_url' => route('billing.success', [], true),
-                        'cancel_url' => route('billing.cancel', [], true),
+                        'success_url' => route('billing.success', ['reference' => $transaction->reference], true),
+                        'cancel_url' => route('billing.cancel', ['reference' => $transaction->reference], true),
                     ],
                 ],
             ]);
@@ -94,13 +94,75 @@ class PayMongoCheckoutService
     public function isConfiguredForWalletTopup(): bool
     {
         return is_string(config('services.paymongo.secret_key'))
-            && config('services.paymongo.secret_key') !== '';
+            && config('services.paymongo.secret_key') !== ''
+            && $this->walletTopupRate() > 0
+            && $this->paymentMethodTypes() !== [];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function retrieveCheckoutSession(string $sessionId): array
+    {
+        $secretKey = config('services.paymongo.secret_key');
+
+        if (! is_string($secretKey) || $secretKey === '') {
+            throw new RuntimeException('PayMongo secret key is not configured.');
+        }
+
+        $response = $this->http
+            ->withBasicAuth($secretKey, '')
+            ->acceptJson()
+            ->get($this->apiUrl().'/v1/checkout_sessions/'.$sessionId);
+
+        if ($response->failed()) {
+            $message = data_get($response->json(), 'errors.0.detail')
+                ?? data_get($response->json(), 'errors.0.title')
+                ?? 'PayMongo checkout session could not be retrieved.';
+
+            throw new RuntimeException((string) $message);
+        }
+
+        $payload = $response->json();
+
+        return is_array($payload) ? $payload : [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    public function checkoutSessionIsPaid(array $payload): bool
+    {
+        return $this->checkoutSessionPaymentId($payload) !== null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    public function checkoutSessionPaymentId(array $payload): ?string
+    {
+        $payments = data_get($payload, 'data.attributes.payments', []);
+
+        if (! is_array($payments)) {
+            return null;
+        }
+
+        foreach ($payments as $payment) {
+            $status = data_get($payment, 'attributes.status', data_get($payment, 'status'));
+            $paymentId = data_get($payment, 'id');
+
+            if ($status === 'paid' && is_string($paymentId)) {
+                return $paymentId;
+            }
+        }
+
+        return null;
     }
 
     /**
      * @return list<string>
      */
-    private function paymentMethodTypes(): array
+    public function paymentMethodTypes(): array
     {
         $types = config('services.paymongo.payment_method_types', []);
 
@@ -109,13 +171,15 @@ class PayMongoCheckoutService
         }
 
         if (! is_array($types)) {
-            return ['card', 'gcash', 'grab_pay', 'paymaya', 'qrph'];
+            return ['card', 'gcash', 'qrph'];
         }
 
-        return array_values(array_filter(array_map(
+        $types = array_values(array_filter(array_map(
             fn (mixed $type): string => trim((string) $type),
             $types,
         )));
+
+        return $types !== [] ? $types : ['card', 'gcash', 'qrph'];
     }
 
     private function apiUrl(): string
@@ -127,8 +191,17 @@ class PayMongoCheckoutService
 
     private function walletTopupPayMongoAmount(int $usdCents): int
     {
-        $rate = (float) config('services.paymongo.usd_to_php_rate', 56.50);
+        $rate = $this->walletTopupRate();
+
+        if ($rate <= 0) {
+            throw new RuntimeException('PAYMONGO_USD_TO_PHP_RATE must be greater than 0.');
+        }
 
         return (int) round(($usdCents / 100) * $rate * 100);
+    }
+
+    public function walletTopupRate(): float
+    {
+        return (float) config('services.paymongo.usd_to_php_rate', 56.50);
     }
 }
