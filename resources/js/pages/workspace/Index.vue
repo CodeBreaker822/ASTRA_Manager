@@ -818,27 +818,14 @@ onMounted(() => {
 <template>
     <Head title="Workspace" />
 
-    <main class="min-h-screen bg-white text-[14px] leading-5 text-slate-950">
+    <main
+        class="min-h-dvh bg-white text-[14px] leading-5 text-slate-950 lg:h-screen lg:min-h-0 lg:overflow-hidden"
+    >
         <div
-            class="flex min-h-screen items-center justify-center bg-slate-50 p-6 lg:hidden"
+            class="flex min-h-dvh flex-col overflow-y-auto lg:h-screen lg:min-h-0 lg:flex-row lg:overflow-hidden"
         >
-            <div
-                class="max-w-md rounded-lg border border-blue-100 bg-blue-50 p-6 text-center"
-            >
-                <h1 class="text-xl font-semibold text-blue-950">
-                    Workspace needs more room
-                </h1>
-                <p class="mt-3 text-sm leading-6 text-blue-900">
-                    JERVA Web beta is optimized for tablets and desktops at
-                    1024px and wider. Marketing and auth pages remain fully
-                    responsive.
-                </p>
-            </div>
-        </div>
-
-        <div class="hidden min-h-screen lg:flex">
             <aside
-                class="flex w-[19rem] shrink-0 flex-col border-r border-slate-200 bg-slate-50"
+                class="flex max-h-[48dvh] w-full shrink-0 flex-col border-b border-slate-200 bg-slate-50 lg:min-h-0 lg:max-h-none lg:w-[19rem] lg:border-r lg:border-b-0"
             >
                 <div class="border-b border-slate-200 p-4">
                     <div class="flex h-[72px] items-center gap-3 px-2">
@@ -985,9 +972,11 @@ onMounted(() => {
                 </div>
             </aside>
 
-            <section class="relative flex min-w-0 flex-1 flex-col bg-white">
+            <section
+                class="relative flex min-h-[70dvh] min-w-0 flex-1 flex-col bg-white lg:min-h-0"
+            >
                 <header
-                    class="flex h-[72px] shrink-0 items-center justify-between border-b border-slate-200 px-6"
+                    class="flex h-[72px] shrink-0 items-center justify-between border-b border-slate-200 px-4 lg:px-6"
                 >
                     <div class="min-w-0">
                         <p
@@ -1016,8 +1005,10 @@ onMounted(() => {
                     </div>
                 </header>
 
-                <div class="flex-1 overflow-y-auto pb-28">
-                    <div class="h-full px-8 py-6">
+                <div class="min-h-0 flex-1 overflow-hidden">
+                    <div
+                        class="h-full w-full overflow-y-auto px-4 pt-6 pb-40 [scrollbar-gutter:stable] lg:px-8 lg:pb-32"
+                    >
                         <div
                             v-if="upgradeBanner"
                             class="mb-4 flex items-center justify-between gap-4 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900"
@@ -1038,18 +1029,18 @@ onMounted(() => {
                             <article
                                 v-for="row in transcriptRows"
                                 :key="row.id"
-                                class="w-full border-b border-slate-200 py-4 last:border-b-0"
+                                class="w-full border-b border-slate-200 py-2.5 last:border-b-0"
                             >
                                 <div
-                                    class="flex w-full flex-col gap-3 md:flex-row md:items-start md:gap-6"
+                                    class="flex w-full flex-col gap-2.5 md:flex-row md:items-start md:gap-4"
                                 >
                                     <div
-                                        class="shrink-0 text-sm leading-6 font-medium tracking-[0.02em] text-blue-600 md:w-60"
+                                        class="shrink-0 text-xs leading-5 font-medium text-blue-600 md:w-[12.5rem]"
                                     >
                                         {{ row.range }}
                                     </div>
                                     <p
-                                        class="min-w-0 flex-1 text-sm leading-6 break-words whitespace-pre-line text-slate-950"
+                                        class="min-w-0 flex-1 text-xs leading-5 break-words whitespace-pre-line text-slate-950"
                                     >
                                         {{ row.text }}
                                     </p>
@@ -1080,7 +1071,7 @@ onMounted(() => {
 
                         <div
                             v-else
-                            class="mx-auto flex min-h-[calc(100vh-14rem)] max-w-3xl flex-col items-center justify-center text-center"
+                            class="mx-auto flex min-h-full max-w-3xl flex-col items-center justify-center py-16 text-center"
                         >
                             <p
                                 class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
@@ -1103,10 +1094,10 @@ onMounted(() => {
 
                 <div
                     v-if="displayProject"
-                    class="pointer-events-none absolute inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 px-6 py-4"
+                    class="pointer-events-none absolute inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 px-3 py-3 lg:px-6 lg:py-4"
                 >
                     <div
-                        class="pointer-events-auto mx-auto flex max-w-[calc(100%-2rem)] flex-col items-center justify-center gap-4"
+                        class="pointer-events-auto mx-auto flex w-full max-w-[calc(100%-1rem)] flex-col items-center justify-center gap-3 lg:max-w-[calc(100%-2rem)] lg:gap-4"
                     >
                         <input
                             ref="uploadInput"
@@ -1117,11 +1108,11 @@ onMounted(() => {
                         />
                         <template v-if="workspaceMode === 'choose'">
                             <div
-                                class="order-1 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center justify-center gap-3 rounded-lg border border-blue-100 bg-white px-3 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.1)]"
+                                class="order-1 mx-auto flex w-full flex-wrap items-center justify-center gap-2 rounded-lg border border-blue-100 bg-white px-3 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.1)] sm:w-fit sm:gap-3"
                             >
                                 <button
                                     type="button"
-                                    class="h-12 min-w-40 cursor-pointer rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    class="h-12 min-w-32 flex-1 cursor-pointer rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-40 sm:flex-none"
                                     :disabled="!displayProject"
                                     @click="chooseLiveMode"
                                 >
@@ -1129,7 +1120,7 @@ onMounted(() => {
                                 </button>
                                 <button
                                     type="button"
-                                    class="h-12 min-w-40 cursor-pointer rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    class="h-12 min-w-32 flex-1 cursor-pointer rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-40 sm:flex-none"
                                     :disabled="!displayProject"
                                     @click="chooseUploadMode"
                                 >
@@ -1140,11 +1131,11 @@ onMounted(() => {
 
                         <template v-if="workspaceMode === 'live'">
                             <div
-                                class="order-1 flex w-fit max-w-[calc(100%-2rem)] items-center gap-3 rounded-lg border border-blue-100 bg-white px-3 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.1)] transition"
+                                class="order-1 flex w-full flex-wrap items-center justify-center gap-2 rounded-lg border border-blue-100 bg-white px-3 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.1)] transition sm:w-fit sm:gap-3"
                             >
                                 <button
                                     type="button"
-                                    class="group flex h-12 min-w-40 cursor-pointer items-center justify-center gap-3 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition outline-none hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-60"
+                                    class="group flex h-12 min-w-32 flex-1 cursor-pointer items-center justify-center gap-3 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition outline-none hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-40 sm:flex-none"
                                     :disabled="
                                         !displayProject &&
                                         !live.isUnavailable.value
@@ -1172,7 +1163,7 @@ onMounted(() => {
                                 </button>
                                 <div
                                     v-if="live.isPanelVisible.value"
-                                    class="w-80 min-w-0 flex-none"
+                                    class="w-full min-w-0 flex-none sm:w-80"
                                 >
                                     <div
                                         class="flex min-w-0 items-center gap-2 text-sm"
@@ -1214,11 +1205,11 @@ onMounted(() => {
 
                         <template v-if="workspaceMode === 'upload'">
                             <div
-                                class="order-1 flex w-fit max-w-[calc(100%-2rem)] flex-wrap items-center justify-center gap-3 rounded-lg border border-blue-100 bg-white px-3 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.1)] transition"
+                                class="order-1 flex w-full flex-wrap items-center justify-center gap-2 rounded-lg border border-blue-100 bg-white px-3 py-3 shadow-[0_12px_32px_rgba(15,23,42,0.1)] transition sm:w-fit sm:gap-3"
                             >
                                 <button
                                     type="button"
-                                    class="inline-flex h-12 min-w-32 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    class="inline-flex h-12 min-w-28 flex-1 cursor-pointer items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-32 sm:flex-none"
                                     :disabled="
                                         !canUseUpload ||
                                         upload.inFlight.value ||
@@ -1233,7 +1224,7 @@ onMounted(() => {
                                         upload.hasFile.value ||
                                         upload.isActive.value
                                     "
-                                    class="w-80 min-w-0 flex-none"
+                                    class="w-full min-w-0 flex-none sm:w-80"
                                 >
                                     <p
                                         class="truncate text-sm font-semibold text-slate-950"
@@ -1289,7 +1280,7 @@ onMounted(() => {
                                         upload.isActive.value
                                     "
                                     type="button"
-                                    class="h-12 min-w-20 cursor-pointer rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                                    class="h-12 min-w-20 flex-1 cursor-pointer rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 sm:flex-none"
                                     :disabled="!upload.canStart.value"
                                     @click="upload.start"
                                 >
@@ -1298,7 +1289,7 @@ onMounted(() => {
                                 <button
                                     v-if="upload.canPause.value"
                                     type="button"
-                                    class="h-12 min-w-20 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    class="h-12 min-w-20 flex-1 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
                                     :disabled="!upload.canPause.value"
                                     @click="upload.pause"
                                 >
@@ -1307,7 +1298,7 @@ onMounted(() => {
                                 <button
                                     v-if="upload.canContinue.value"
                                     type="button"
-                                    class="h-12 min-w-24 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    class="h-12 min-w-24 flex-1 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
                                     :disabled="!upload.canContinue.value"
                                     @click="upload.resume"
                                 >
@@ -1316,7 +1307,7 @@ onMounted(() => {
                                 <button
                                     v-if="upload.canRetry.value"
                                     type="button"
-                                    class="h-12 min-w-20 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    class="h-12 min-w-20 flex-1 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
                                     :disabled="!upload.canRetry.value"
                                     @click="upload.retry"
                                 >
@@ -1325,7 +1316,7 @@ onMounted(() => {
                                 <button
                                     v-if="upload.canCancel.value"
                                     type="button"
-                                    class="h-12 min-w-20 cursor-pointer rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 transition hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    class="h-12 min-w-20 flex-1 cursor-pointer rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 transition hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
                                     :disabled="!upload.canCancel.value"
                                     @click="upload.cancel"
                                 >
@@ -1335,7 +1326,7 @@ onMounted(() => {
                         </template>
                         <template v-if="activeTranscriptActionMode">
                             <div
-                                class="order-2 flex items-center gap-2 rounded-lg border border-blue-100 bg-white p-1.5 shadow-[0_12px_32px_rgba(15,23,42,0.08)]"
+                                class="order-2 flex w-full flex-wrap items-center justify-center gap-2 rounded-lg border border-blue-100 bg-white p-1.5 shadow-[0_12px_32px_rgba(15,23,42,0.08)] sm:w-fit"
                             >
                                 <Dialog v-model:open="polishOpen">
                                     <DialogTrigger as-child>
@@ -1687,7 +1678,7 @@ onMounted(() => {
             />
             <aside
                 ref="logPanel"
-                class="fixed top-0 right-0 z-50 h-full w-96 border-l border-slate-200 bg-white shadow-2xl transition duration-300"
+                class="fixed top-0 right-0 z-50 h-full w-full max-w-sm border-l border-slate-200 bg-white shadow-2xl transition duration-300"
                 :class="logOpen ? 'translate-x-0' : 'translate-x-full'"
                 aria-label="Processing log"
                 role="dialog"
