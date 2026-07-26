@@ -4,6 +4,7 @@ use App\Models\BillingTransaction;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
+use Inertia\Testing\AssertableInertia;
 use Worksome\Exchange\Facades\Exchange;
 
 test('paymongo wallet top-up checkout creates a billing transaction and redirects to hosted checkout', function () {
@@ -212,6 +213,116 @@ test('billing success does not credit wallet when checkout is not paid yet', fun
         ->and($transaction->refresh()->status)->toBe('checkout_created');
 });
 
+test('billing page refresh reconciles paid paymongo checkout and credits wallet', function () {
+    $this->withoutVite();
+
+    Http::fake([
+        'https://api.paymongo.com/v1/checkout_sessions/cs_test_refresh_paid' => Http::response(paymongoCheckoutSessionPayload(
+            'cs_test_refresh_paid',
+            'JERVA-1-REFRESH',
+            [['id' => 'pay_test_refresh', 'attributes' => ['status' => 'paid']]],
+        )),
+    ]);
+
+    config(['services.paymongo.secret_key' => 'sk_test_123']);
+
+    $user = User::factory()->create(['plan' => 'free', 'wallet_balance' => 0]);
+    BillingTransaction::query()->create([
+        'user_id' => $user->id,
+        'provider' => 'paymongo',
+        'plan' => 'wallet_topup',
+        'reference' => 'JERVA-1-REFRESH',
+        'checkout_session_id' => 'cs_test_refresh_paid',
+        'status' => 'checkout_created',
+        'amount' => 1000,
+        'currency' => 'USD',
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('billing.edit'))
+        ->assertOk()
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->component('settings/Billing')
+            ->where('walletBalance', 1000)
+        );
+
+    $transaction = BillingTransaction::query()->firstOrFail();
+
+    expect((float) $user->refresh()->wallet_balance)->toBe(10.0)
+        ->and($transaction->refresh()->status)->toBe('paid')
+        ->and($transaction->payment_id)->toBe('pay_test_refresh')
+        ->and(data_get($transaction->payload, 'data.attributes.reference_number'))->toBe('JERVA-1-REFRESH');
+});
+
+test('billing page refresh stores failed payment attempts without crediting wallet', function () {
+    $this->withoutVite();
+
+    Http::fake([
+        'https://api.paymongo.com/v1/checkout_sessions/cs_test_failed_attempt' => Http::response(paymongoCheckoutSessionPayload(
+            'cs_test_failed_attempt',
+            'JERVA-1-FAILED-ATTEMPT',
+            [['id' => 'pay_test_failed', 'attributes' => ['status' => 'failed']]],
+        )),
+    ]);
+
+    config(['services.paymongo.secret_key' => 'sk_test_123']);
+
+    $user = User::factory()->create(['plan' => 'free', 'wallet_balance' => 0]);
+    $transaction = BillingTransaction::query()->create([
+        'user_id' => $user->id,
+        'provider' => 'paymongo',
+        'plan' => 'wallet_topup',
+        'reference' => 'JERVA-1-FAILED-ATTEMPT',
+        'checkout_session_id' => 'cs_test_failed_attempt',
+        'status' => 'checkout_created',
+        'amount' => 1000,
+        'currency' => 'USD',
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('billing.edit'))
+        ->assertOk();
+
+    expect((float) $user->refresh()->wallet_balance)->toBe(0.0)
+        ->and($transaction->refresh()->status)->toBe('checkout_created')
+        ->and(data_get($transaction->payload, 'data.attributes.payments.0.attributes.status'))->toBe('failed');
+});
+
+test('billing page refresh stores expired unpaid checkout without crediting wallet', function () {
+    $this->withoutVite();
+
+    Http::fake([
+        'https://api.paymongo.com/v1/checkout_sessions/cs_test_expired' => Http::response(paymongoCheckoutSessionPayload(
+            'cs_test_expired',
+            'JERVA-1-EXPIRED',
+            [],
+            'expired',
+        )),
+    ]);
+
+    config(['services.paymongo.secret_key' => 'sk_test_123']);
+
+    $user = User::factory()->create(['plan' => 'free', 'wallet_balance' => 0]);
+    $transaction = BillingTransaction::query()->create([
+        'user_id' => $user->id,
+        'provider' => 'paymongo',
+        'plan' => 'wallet_topup',
+        'reference' => 'JERVA-1-EXPIRED',
+        'checkout_session_id' => 'cs_test_expired',
+        'status' => 'checkout_created',
+        'amount' => 1000,
+        'currency' => 'USD',
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('billing.edit'))
+        ->assertOk();
+
+    expect((float) $user->refresh()->wallet_balance)->toBe(0.0)
+        ->and($transaction->refresh()->status)->toBe('expired')
+        ->and(data_get($transaction->payload, 'data.attributes.status'))->toBe('expired');
+});
+
 test('paymongo webhook does not credit wallet twice for duplicate paid events', function () {
     config(['services.paymongo.webhook_secret' => 'whsec_test']);
 
@@ -296,6 +407,25 @@ function paymongoPaidWebhook(BillingTransaction $transaction, array $metadata): 
     ];
 
     return paymongoSignedWebhook($payload);
+}
+
+function paymongoCheckoutSessionPayload(
+    string $sessionId,
+    string $reference,
+    array $payments,
+    string $status = 'active',
+): array {
+    return [
+        'data' => [
+            'id' => $sessionId,
+            'type' => 'checkout_session',
+            'attributes' => [
+                'reference_number' => $reference,
+                'status' => $status,
+                'payments' => $payments,
+            ],
+        ],
+    ];
 }
 
 function paymongoSignedWebhook(array $payload): TestResponse

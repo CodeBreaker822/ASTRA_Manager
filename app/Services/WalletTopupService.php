@@ -9,6 +9,9 @@ use RuntimeException;
 
 class WalletTopupService
 {
+    /**
+     * @param  array<string, mixed>  $payload
+     */
     public function markPaid(BillingTransaction $transaction, ?string $paymentId, array $payload): bool
     {
         if ($transaction->plan !== 'wallet_topup') {
@@ -40,6 +43,34 @@ class WalletTopupService
             ])->save();
 
             return true;
+        });
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    public function recordCheckoutSnapshot(BillingTransaction $transaction, array $payload): void
+    {
+        if ($transaction->plan !== 'wallet_topup') {
+            throw new RuntimeException('Unknown billing transaction plan.');
+        }
+
+        DB::transaction(function () use ($transaction, $payload): void {
+            $lockedTransaction = BillingTransaction::query()
+                ->whereKey($transaction->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($lockedTransaction->status === 'paid') {
+                return;
+            }
+
+            $remoteStatus = data_get($payload, 'data.attributes.status');
+
+            $lockedTransaction->update([
+                'payload' => $payload,
+                'status' => $remoteStatus === 'expired' ? 'expired' : $lockedTransaction->status,
+            ]);
         });
     }
 }

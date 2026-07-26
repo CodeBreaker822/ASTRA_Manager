@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Services\DashboardAccessService;
 use App\Services\EntitlementService;
 use App\Services\PayMongoCheckoutService;
+use App\Services\PayMongoWalletTopupReconciler;
 use App\Services\PlanService;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\Request;
@@ -147,6 +148,8 @@ class HandleInertiaRequests extends Middleware
     private function billingSettings(User $user): array
     {
         $payMongo = app(PayMongoCheckoutService::class);
+        app(PayMongoWalletTopupReconciler::class)->reconcileFor($user);
+        $user->refresh();
 
         return [
             'billing' => [

@@ -7,6 +7,7 @@ use App\Models\BillingTransaction;
 use App\Models\User;
 use App\Services\EntitlementService;
 use App\Services\PayMongoCheckoutService;
+use App\Services\PayMongoWalletTopupReconciler;
 use App\Services\PlanService;
 use App\Services\WalletTopupService;
 use Illuminate\Http\RedirectResponse;
@@ -25,10 +26,14 @@ class BillingController extends Controller
         Request $request,
         EntitlementService $entitlements,
         PayMongoCheckoutService $payMongo,
+        PayMongoWalletTopupReconciler $reconciler,
         PlanService $plans,
     ): Response {
         $user = $request->user();
         abort_unless($user instanceof User, 403);
+
+        $reconciler->reconcileFor($user);
+        $user->refresh();
 
         return Inertia::render('settings/Billing', [
             'billing' => [
@@ -154,6 +159,8 @@ class BillingController extends Controller
         }
 
         if (! $payMongo->checkoutSessionIsPaid($payload)) {
+            $topups->recordCheckoutSnapshot($transaction, $payload);
+
             return redirect()
                 ->route('billing.edit')
                 ->with('warning', 'Payment is not confirmed yet. Credits will update when PayMongo confirms payment.');
@@ -166,8 +173,25 @@ class BillingController extends Controller
             ->with('success', $credited ? 'Payment confirmed. Credits added to your wallet.' : 'Payment already confirmed. Credits are in your wallet.');
     }
 
-    public function cancel(): RedirectResponse
+    public function cancel(Request $request): RedirectResponse
     {
+        $user = $request->user();
+        $reference = $request->query('reference');
+
+        if ($user instanceof User && is_string($reference) && $reference !== '') {
+            BillingTransaction::query()
+                ->where('user_id', $user->id)
+                ->where('reference', $reference)
+                ->whereIn('status', ['pending', 'checkout_created'])
+                ->update([
+                    'status' => 'cancelled',
+                    'payload' => [
+                        'local_status' => 'cancelled',
+                        'message' => 'User returned from PayMongo cancel URL.',
+                    ],
+                ]);
+        }
+
         return redirect()
             ->route('billing.edit')
             ->withErrors(['billing' => 'PayMongo checkout was cancelled.']);
