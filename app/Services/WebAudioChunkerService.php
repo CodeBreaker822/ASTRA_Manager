@@ -4,7 +4,9 @@ namespace App\Services;
 
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Symfony\Component\Process\Exception\RuntimeException as ProcessRuntimeException;
 use Symfony\Component\Process\Process;
 
 class WebAudioChunkerService
@@ -23,6 +25,13 @@ class WebAudioChunkerService
         $sourcePath = $file->getRealPath();
 
         if (! is_string($sourcePath) || ! is_file($sourcePath)) {
+            Log::info('Audio upload source file is not readable.', [
+                'original_name' => $file->getClientOriginalName(),
+                'mime_type' => $file->getClientMimeType(),
+                'size' => $file->getSize(),
+                'real_path' => $sourcePath,
+            ]);
+
             throw new RuntimeException('Audio upload could not be processed.');
         }
 
@@ -89,7 +98,7 @@ class WebAudioChunkerService
     private function runFfmpeg(string $sourcePath, string $outputPath, int $startMs, int $durationMs): void
     {
         $process = new Process([
-            base_path('ffmpeg/bin/ffmpeg.exe'),
+            $this->ffmpegBinary(),
             '-y',
             '-ss',
             sprintf('%.3f', $startMs / 1000),
@@ -107,9 +116,38 @@ class WebAudioChunkerService
             $outputPath,
         ]);
         $process->setTimeout(120);
-        $process->run();
+
+        try {
+            $process->run();
+        } catch (ProcessRuntimeException $exception) {
+            Log::info('FFmpeg chunk process could not start.', [
+                'binary' => $this->ffmpegBinary(),
+                'source_path' => $sourcePath,
+                'source_size' => is_file($sourcePath) ? filesize($sourcePath) : null,
+                'output_path' => $outputPath,
+                'start_ms' => $startMs,
+                'duration_ms' => $durationMs,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
+            throw new RuntimeException('Audio upload could not be processed because FFmpeg is not available.', 0, $exception);
+        }
 
         if (! $process->isSuccessful() || ! is_file($outputPath)) {
+            Log::info('FFmpeg chunk process failed.', [
+                'binary' => $this->ffmpegBinary(),
+                'exit_code' => $process->getExitCode(),
+                'source_path' => $sourcePath,
+                'source_size' => is_file($sourcePath) ? filesize($sourcePath) : null,
+                'output_path' => $outputPath,
+                'output_exists' => is_file($outputPath),
+                'start_ms' => $startMs,
+                'duration_ms' => $durationMs,
+                'stderr' => $this->logSnippet($process->getErrorOutput()),
+                'stdout' => $this->logSnippet($process->getOutput()),
+            ]);
+
             throw new RuntimeException('Audio upload could not be processed.');
         }
     }
@@ -139,17 +177,39 @@ class WebAudioChunkerService
     private function audioDurationMs(string $sourcePath): int
     {
         $process = new Process([
-            base_path('ffmpeg/bin/ffmpeg.exe'),
+            $this->ffmpegBinary(),
             '-hide_banner',
             '-i',
             $sourcePath,
         ]);
         $process->setTimeout(30);
-        $process->run();
+
+        try {
+            $process->run();
+        } catch (ProcessRuntimeException $exception) {
+            Log::info('FFmpeg duration probe could not start.', [
+                'binary' => $this->ffmpegBinary(),
+                'source_path' => $sourcePath,
+                'source_size' => is_file($sourcePath) ? filesize($sourcePath) : null,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
+            throw new RuntimeException('Audio upload could not be processed because FFmpeg is not available.', 0, $exception);
+        }
 
         $output = $process->getErrorOutput()."\n".$process->getOutput();
 
         if (! preg_match('/Duration:\s*(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/', $output, $matches)) {
+            Log::info('FFmpeg duration probe did not return a readable duration.', [
+                'binary' => $this->ffmpegBinary(),
+                'exit_code' => $process->getExitCode(),
+                'source_path' => $sourcePath,
+                'source_size' => is_file($sourcePath) ? filesize($sourcePath) : null,
+                'stderr' => $this->logSnippet($process->getErrorOutput()),
+                'stdout' => $this->logSnippet($process->getOutput()),
+            ]);
+
             throw new RuntimeException('Audio upload could not be processed.');
         }
 
@@ -158,5 +218,17 @@ class WebAudioChunkerService
             + (float) $matches[3];
 
         return max(1, (int) ceil($seconds * 1000));
+    }
+
+    private function ffmpegBinary(): string
+    {
+        $binary = config('services.ffmpeg.binary', 'ffmpeg');
+
+        return is_string($binary) && trim($binary) !== '' ? trim($binary) : 'ffmpeg';
+    }
+
+    private function logSnippet(string $value): string
+    {
+        return mb_substr(trim($value), 0, 4000);
     }
 }

@@ -327,7 +327,7 @@ const submit = () => {
                                     "
                                     type="number"
                                     min="0"
-                                    step="0.01"
+                                    step="0.0001"
                                     placeholder="0.0002"
                                     class="h-9 font-mono text-sm"
                                 />
@@ -351,7 +351,7 @@ const submit = () => {
                                     "
                                     type="number"
                                     min="0"
-                                    step="0.01"
+                                    step="0.0001"
                                     placeholder="0.0002"
                                     class="h-9 font-mono text-sm"
                                 />

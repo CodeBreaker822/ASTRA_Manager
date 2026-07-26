@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Jobs\ProcessAsyncTranscriptionJob;
 use App\Models\API;
 use App\Models\ApiTranscriptionJob;
 use App\Services\AppSettingsService;
@@ -627,6 +626,14 @@ class TranscriptionController extends Controller
                 $path = $audio?->getRealPath();
 
                 if (! is_string($path) || ! is_file($path)) {
+                    Log::info('Async transcription upload source file is not readable.', [
+                        'license_id' => $license->id,
+                        'job_id' => $jobId,
+                        'clip_index' => $clip['queue_index'] ?? null,
+                        'original_name' => $audio?->getClientOriginalName(),
+                        'real_path' => $path,
+                    ]);
+
                     throw new \RuntimeException(ServiceUserMessage::audioReadFailed());
                 }
 
@@ -636,6 +643,15 @@ class TranscriptionController extends Controller
                 $contents = file_get_contents($path);
 
                 if ($contents === false) {
+                    Log::info('Async transcription upload source file could not be read.', [
+                        'license_id' => $license->id,
+                        'job_id' => $jobId,
+                        'clip_index' => $clip['queue_index'] ?? null,
+                        'original_name' => $audio?->getClientOriginalName(),
+                        'real_path' => $path,
+                        'size' => is_file($path) ? filesize($path) : null,
+                    ]);
+
                     throw new \RuntimeException(ServiceUserMessage::audioReadFailed());
                 }
 
@@ -654,7 +670,6 @@ class TranscriptionController extends Controller
                 'mode' => 'queue',
             ];
             $status = 'queued';
-            $dispatchQueueJob = true;
 
             if (($providers[0]['provider'] ?? null) === AppSettingsService::PROVIDER_RUNPOD) {
                 try {
@@ -677,7 +692,6 @@ class TranscriptionController extends Controller
                 }
 
                 $status = 'processing';
-                $dispatchQueueJob = false;
             }
 
             $transcriptionJob = ApiTranscriptionJob::query()->create([
@@ -687,10 +701,6 @@ class TranscriptionController extends Controller
                 'request_payload' => $requestPayload,
                 'started_at' => $status === 'processing' ? now() : null,
             ]);
-
-            if ($dispatchQueueJob) {
-                ProcessAsyncTranscriptionJob::dispatch($transcriptionJob->id);
-            }
 
             $response = response()->json([
                 'job_id' => $transcriptionJob->id,
@@ -704,6 +714,12 @@ class TranscriptionController extends Controller
                 'clip_count' => count($storedClips),
             ]);
         } catch (Throwable $exception) {
+            Log::info('Async transcription job creation failed.', [
+                'license_id' => $license->id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
             report($exception);
 
             return $this->logAndReturn($request, 'transcribe', $license, response()->json([
@@ -802,6 +818,14 @@ class TranscriptionController extends Controller
             $absolutePath = Storage::disk('local')->path($audioPath);
 
             if ($audioPath === '' || ! is_file($absolutePath)) {
+                Log::info('Async transcription stored audio file is not readable.', [
+                    'stored_path' => $audioPath,
+                    'absolute_path' => $absolutePath,
+                    'clip_index' => $clip['clip_index'] ?? null,
+                    'queue_index' => $clip['queue_index'] ?? null,
+                    'audio_name' => $clip['audio_name'] ?? null,
+                ]);
+
                 throw new \RuntimeException(ServiceUserMessage::audioReadFailed());
             }
 

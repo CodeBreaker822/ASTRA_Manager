@@ -45,9 +45,10 @@ class WebTranscriptProcessor
             $this->recordUsage($transcript);
             $this->appendLog($transcript, 'completed', 'Complete');
         } catch (Throwable $exception) {
-            Log::warning('Web transcription through API pipeline failed.', [
+            Log::info('Web transcription through API pipeline failed.', [
                 'transcript_id' => $transcript->id,
-                'error' => $exception->getMessage(),
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
             ]);
 
             $this->fail($transcript, 'Audio upload could not be processed.');

@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class WebApiTranscriptionClient
@@ -35,6 +36,12 @@ class WebApiTranscriptionClient
         $payload = $this->payload($response);
 
         if ($response->getStatusCode() >= 400) {
+            Log::info('Web audio sync transcription API request failed.', [
+                'user_id' => $user->id,
+                'status_code' => $response->getStatusCode(),
+                'payload' => $this->logPayload($payload),
+            ]);
+
             throw new \RuntimeException('Audio upload could not be processed.');
         }
 
@@ -56,6 +63,12 @@ class WebApiTranscriptionClient
         $payload = $this->payload($response);
 
         if ($response->getStatusCode() !== 202 || blank($payload['job_id'] ?? null)) {
+            Log::info('Web audio async transcription job creation failed.', [
+                'user_id' => $user->id,
+                'status_code' => $response->getStatusCode(),
+                'payload' => $this->logPayload($payload),
+            ]);
+
             throw new \RuntimeException('Transcription job could not be created.');
         }
 
@@ -75,6 +88,13 @@ class WebApiTranscriptionClient
         $payload = $this->payload($response);
 
         if ($response->getStatusCode() >= 500 && ($payload['status'] ?? null) !== 'failed') {
+            Log::info('Web audio async transcription status request failed.', [
+                'user_id' => $user->id,
+                'job_id' => $jobId,
+                'status_code' => $response->getStatusCode(),
+                'payload' => $this->logPayload($payload),
+            ]);
+
             throw new \RuntimeException('Audio upload could not be processed.');
         }
 
@@ -153,6 +173,13 @@ class WebApiTranscriptionClient
             $absolutePath = Storage::disk('local')->path($path);
 
             if ($path === '' || ! is_file($absolutePath)) {
+                Log::info('Stored web audio clip is not readable before API transcription request.', [
+                    'stored_path' => $path,
+                    'absolute_path' => $absolutePath,
+                    'clip_index' => $clip['clip_index'] ?? null,
+                    'name' => $clip['name'] ?? null,
+                ]);
+
                 throw new \RuntimeException(ServiceUserMessage::audioReadFailed());
             }
 
@@ -200,5 +227,19 @@ class WebApiTranscriptionClient
         $payload = json_decode((string) $response->getContent(), true);
 
         return is_array($payload) ? $payload : [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function logPayload(array $payload): array
+    {
+        return array_filter([
+            'message' => $payload['message'] ?? null,
+            'status' => $payload['status'] ?? null,
+            'job_id' => $payload['job_id'] ?? null,
+            'errors' => $payload['errors'] ?? null,
+        ], fn (mixed $value): bool => $value !== null && $value !== []);
     }
 }

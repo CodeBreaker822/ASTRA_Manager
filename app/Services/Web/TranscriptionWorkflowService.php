@@ -9,7 +9,9 @@ use App\Services\WebAudioChunkerService;
 use App\Services\WebTranscriptProcessor;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 class TranscriptionWorkflowService
 {
@@ -129,7 +131,14 @@ class TranscriptionWorkflowService
                 $this->storedClipPayloads($transcript),
                 $languageCode,
             );
-        } catch (\Throwable) {
+        } catch (Throwable $exception) {
+            Log::info('Web audio async transcription job could not be started.', [
+                'user_id' => $request->user()?->id,
+                'transcript_id' => $transcript->id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
             $this->processor->failTranscription($transcript);
 
             return;
@@ -154,7 +163,16 @@ class TranscriptionWorkflowService
 
             try {
                 $payload = $this->transcriptionClient->jobStatus($user, $apiJobId);
-            } catch (\Throwable) {
+            } catch (Throwable $exception) {
+                Log::info('Web audio async transcription status sync failed.', [
+                    'user_id' => $user?->id,
+                    'project_id' => $project->id,
+                    'transcript_id' => $transcript->id,
+                    'api_job_id' => $apiJobId,
+                    'exception' => $exception::class,
+                    'message' => $exception->getMessage(),
+                ]);
+
                 continue;
             }
 

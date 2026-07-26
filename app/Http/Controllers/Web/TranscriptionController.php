@@ -12,6 +12,7 @@ use App\Services\WebApiTranscriptionClient;
 use App\Services\WebTranscriptProcessor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class TranscriptionController extends Controller
@@ -77,7 +78,18 @@ class TranscriptionController extends Controller
                 'message' => 'Upload queued for transcription.',
                 'transcript' => $payloads->present($transcript->fresh()),
             ], 202);
-        } catch (RuntimeException) {
+        } catch (RuntimeException $exception) {
+            $previous = $exception->getPrevious();
+
+            Log::info('Web audio upload processing failed.', [
+                'user_id' => $request->user()?->id,
+                'project_id' => $project->id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+                'previous_exception' => $previous ? $previous::class : null,
+                'previous_message' => $previous?->getMessage(),
+            ]);
+
             return response()->json(['message' => 'Audio upload could not be processed.'], 422);
         } finally {
             $workflow->cleanupPreparedUpload($cleanup);

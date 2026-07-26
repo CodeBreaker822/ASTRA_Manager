@@ -50,6 +50,10 @@ return [
         'pass_on_fees' => env('PAYMONGO_PASS_ON_FEES', true),
     ],
 
+    'ffmpeg' => [
+        'binary' => env('FFMPEG_BINARY', 'ffmpeg'),
+    ],
+
     'lambda_pdf' => [
         'url' => env('LAMBDA_PDF_URL'),
     ],

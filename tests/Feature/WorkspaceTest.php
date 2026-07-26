@@ -1,7 +1,5 @@
 <?php
 
-use App\Http\Controllers\Api\TranscriptionController as ApiTranscriptionController;
-use App\Jobs\ProcessAsyncTranscriptionJob;
 use App\Models\ApiTranscriptionJob;
 use App\Models\TranscriptionProviderSetting;
 use App\Models\TranscriptProject;
@@ -9,7 +7,7 @@ use App\Models\User;
 use App\Services\WebAudioChunkerService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Queue;
+use Symfony\Component\Process\Process;
 
 test('workspace requires authentication', function () {
     $this->get(route('workspace.index'))
@@ -70,7 +68,13 @@ test('users cannot manage another users transcript project', function () {
 });
 
 test('web upload queues the local async transcribe api job and finalizes from status polling', function () {
-    Queue::fake();
+    $ffmpeg = availableFfmpegBinary();
+
+    if ($ffmpeg === null) {
+        $this->markTestSkipped('FFmpeg is not installed on this machine.');
+    }
+
+    config(['services.ffmpeg.binary' => $ffmpeg]);
 
     $user = User::factory()->create(['plan' => 'payg']);
     $project = TranscriptProject::query()->create([
@@ -110,14 +114,10 @@ test('web upload queues the local async transcribe api job and finalizes from st
     $transcriptId = $upload->json('transcript.id');
     $apiJob = ApiTranscriptionJob::query()->firstOrFail();
 
-    Queue::assertPushed(ProcessAsyncTranscriptionJob::class, fn (ProcessAsyncTranscriptionJob $job): bool => $job->transcriptionJobId === $apiJob->id);
-
     expect($apiJob->request_payload['mode'])->toBe('queue')
         ->and($apiJob->request_payload['clips'])->toHaveCount(1)
         ->and($apiJob->request_payload['clips'][0]['audio_path'])->not->toBeEmpty()
         ->and($project->transcripts()->whereKey($transcriptId)->firstOrFail()->status)->toBe('queued');
-
-    (new ProcessAsyncTranscriptionJob($apiJob->id))->handle(app(ApiTranscriptionController::class));
 
     $this->actingAs($user)
         ->getJson(route('workspace.status', $project))
@@ -131,6 +131,14 @@ test('web upload queues the local async transcribe api job and finalizes from st
 });
 
 test('server chunking does not create a tiny trailing audio clip', function () {
+    $ffmpeg = availableFfmpegBinary();
+
+    if ($ffmpeg === null) {
+        $this->markTestSkipped('FFmpeg is not installed on this machine.');
+    }
+
+    config(['services.ffmpeg.binary' => $ffmpeg]);
+
     $chunker = app(WebAudioChunkerService::class);
     $prepared = $chunker->clipsFromUpload(
         UploadedFile::fake()->createWithContent('near-minute.wav', wavContent(60.5)),
@@ -147,7 +155,13 @@ test('server chunking does not create a tiny trailing audio clip', function () {
 });
 
 test('web upload completes when transcription provider returns no speech text', function () {
-    Queue::fake();
+    $ffmpeg = availableFfmpegBinary();
+
+    if ($ffmpeg === null) {
+        $this->markTestSkipped('FFmpeg is not installed on this machine.');
+    }
+
+    config(['services.ffmpeg.binary' => $ffmpeg]);
 
     $user = User::factory()->create(['plan' => 'payg']);
     $project = TranscriptProject::query()->create([
@@ -183,9 +197,7 @@ test('web upload completes when transcription provider returns no speech text', 
         ])
         ->assertAccepted();
 
-    $apiJob = ApiTranscriptionJob::query()->firstOrFail();
-
-    (new ProcessAsyncTranscriptionJob($apiJob->id))->handle(app(ApiTranscriptionController::class));
+    expect(ApiTranscriptionJob::query()->firstOrFail()->status)->toBe('queued');
 
     $this->actingAs($user)
         ->getJson(route('workspace.status', $project))
@@ -219,4 +231,21 @@ function wavContent(int|float $seconds): string
         .'data'
         .pack('V', strlen($data))
         .$data;
+}
+
+function availableFfmpegBinary(): ?string
+{
+    $binary = config('services.ffmpeg.binary', 'ffmpeg');
+    $binary = is_string($binary) && trim($binary) !== '' ? trim($binary) : 'ffmpeg';
+
+    $process = new Process([$binary, '-version']);
+    $process->setTimeout(5);
+
+    try {
+        $process->run();
+    } catch (Throwable) {
+        return null;
+    }
+
+    return $process->isSuccessful() ? $binary : null;
 }
