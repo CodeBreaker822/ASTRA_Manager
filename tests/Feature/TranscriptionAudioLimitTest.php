@@ -23,7 +23,10 @@ it('publishes the transcribe batch limit in the license status response', functi
         ->assertJsonPath('apis.transcribe.supports_batch', true)
         ->assertJsonPath('apis.transcribe.max_batch_clips', 20)
         ->assertJsonPath('apis.transcribe.max_batch_duration_ms', 1200000)
-        ->assertJsonPath('apis.transcribe.max_batch_duration_minutes', 20);
+        ->assertJsonPath('apis.transcribe.max_batch_duration_minutes', 20)
+        ->assertJsonMissingPath('version')
+        ->assertJsonMissingPath('zipfile')
+        ->assertJsonMissingPath('apis.transcriber_update');
 });
 
 it('rejects transcribe audio over the twenty minute batch limit', function () {

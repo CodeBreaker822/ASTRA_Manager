@@ -44,10 +44,10 @@ return new class extends Migration
                         $minutesValue = ($user->credit_seconds / 3600) * ($paygPlan->upload_price_per_hour ?? 0);
 
                         // Convert polish characters
-                        $polishValue = ($user->polish_credit_characters / 1000) * ($paygPlan->polish_price_per_character ?? 0);
+                        $polishValue = $user->polish_credit_characters * ($paygPlan->polish_price_per_character ?? 0);
 
                         // Convert summary characters
-                        $summaryValue = ($user->summary_credit_characters / 1000) * ($paygPlan->summary_price_per_character ?? 0);
+                        $summaryValue = $user->summary_credit_characters * ($paygPlan->summary_price_per_character ?? 0);
 
                         $totalValue = $minutesValue + $polishValue + $summaryValue;
 

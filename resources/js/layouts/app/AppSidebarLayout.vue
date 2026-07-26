@@ -4,7 +4,6 @@ import AppShell from '@/components/AppShell.vue';
 import AppSidebar from '@/components/AppSidebar.vue';
 import AppSidebarHeader from '@/components/AppSidebarHeader.vue';
 import SettingsModal from '@/components/SettingsModal.vue';
-import { Toaster } from '@/components/ui/sonner';
 import type { BreadcrumbItem } from '@/types';
 
 type Props = {
@@ -24,6 +23,5 @@ withDefaults(defineProps<Props>(), {
             <slot />
         </AppContent>
         <SettingsModal />
-        <Toaster />
     </AppShell>
 </template>

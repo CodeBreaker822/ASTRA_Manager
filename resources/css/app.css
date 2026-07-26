@@ -9,9 +9,8 @@
 
 @theme inline {
     --font-sans:
-        Instrument Sans, ui-sans-serif, system-ui, sans-serif,
-        'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
-        'Noto Color Emoji';
+        ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
+        'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 
     --radius-lg: var(--radius);
     --radius-md: calc(var(--radius) - 2px);
@@ -83,9 +82,8 @@
     body,
     html {
         --font-sans:
-            'Instrument Sans', ui-sans-serif, system-ui, sans-serif,
-            'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
-            'Noto Color Emoji';
+            ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
+            'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
     }
 }
 
@@ -166,6 +164,21 @@
     * {
         @apply border-border outline-ring/50;
     }
+
+    button:not(:disabled),
+    [role='button']:not([aria-disabled='true']),
+    a[href],
+    input[type='button']:not(:disabled),
+    input[type='submit']:not(:disabled),
+    input[type='reset']:not(:disabled),
+    input[type='checkbox']:not(:disabled),
+    input[type='radio']:not(:disabled),
+    label[for],
+    select:not(:disabled),
+    summary {
+        cursor: pointer;
+    }
+
     body {
         @apply bg-background text-foreground selection:bg-blue-100 selection:text-black;
     }

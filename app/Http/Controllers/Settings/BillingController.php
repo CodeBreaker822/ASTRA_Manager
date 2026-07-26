@@ -10,6 +10,7 @@ use App\Services\PayMongoCheckoutService;
 use App\Services\PlanService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -35,7 +36,7 @@ class BillingController extends Controller
             ],
             'entitlements' => $entitlements->summaryFor($user),
             'plans' => $plans->tiersForDisplay(),
-            'walletBalance' => $user->wallet_balance,
+            'walletBalance' => (int) round(((float) $user->wallet_balance) * 100),
         ]);
     }
 
@@ -45,40 +46,39 @@ class BillingController extends Controller
         abort_unless($user instanceof User, 403);
 
         $validated = $request->validate([
-            'amount' => ['required', 'numeric', 'min:1', 'min:0.01'], // Minimum $1.00 in USD
+            'amount' => ['required', 'numeric', 'min:1'],
         ]);
 
-        // Form sends amount in USD dollars, convert to cents for API
-        $amountInCents = (int) round($validated['amount'] * 100);
+        $amountInCents = (int) round(((float) $validated['amount']) * 100);
 
-        DB::transaction(function () use ($user, $amountInCents) {
-            $transaction = BillingTransaction::query()->create([
+        $transaction = BillingTransaction::query()->create([
+            'user_id' => $user->id,
+            'provider' => 'paymongo',
+            'plan' => 'wallet_topup',
+            'reference' => 'JERVA-'.$user->id.'-'.Str::upper(Str::random(12)),
+            'status' => 'pending',
+            'amount' => $amountInCents,
+            'currency' => 'USD',
+        ]);
+
+        try {
+            $checkout = $payMongo->createWalletTopupCheckout($user, $amountInCents, $transaction);
+        } catch (RuntimeException $exception) {
+            Log::warning('PayMongo checkout could not be created.', [
                 'user_id' => $user->id,
-                'provider' => 'paymongo',
-                'plan' => 'wallet_topup',
-                'reference' => 'JERVA-'.$user->id.'-'.Str::upper(Str::random(12)),
-                'status' => 'pending',
-                'amount' => $amountInCents, // Store in cents for consistency
-                'currency' => 'USD',
+                'amount' => $amountInCents,
+                'error' => $exception->getMessage(),
             ]);
 
-            try {
-                $checkout = $payMongo->createWalletTopupCheckout($user, $amountInCents, $transaction);
-            } catch (RuntimeException $exception) {
-                Log::warning('PayMongo checkout could not be created.', [
-                    'user_id' => $user->id,
-                    'amount' => $amountInCents, // Log in cents
-                    'error' => $exception->getMessage(),
-                ]);
+            $transaction->update([
+                'status' => 'failed',
+                'payload' => ['error' => 'Checkout could not be started.'],
+            ]);
 
-                $transaction->update([
-                    'status' => 'failed',
-                    'payload' => ['error' => 'Checkout could not be started.'],
-                ]);
+            return back()->withErrors(['billing' => 'PayMongo checkout could not be started.']);
+        }
 
-                throw $exception;
-            }
-
+        DB::transaction(function () use ($transaction, $checkout): void {
             $transaction->update([
                 'checkout_session_id' => $checkout['session_id'],
                 'checkout_url' => $checkout['checkout_url'],

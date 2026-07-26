@@ -15,8 +15,6 @@ import { Button } from '@/components/ui/button';
 type Release = {
     available: boolean;
     platform: string;
-    version: string | null;
-    zipfile: string | null;
     size: string | null;
     published_at: string | null;
     download_url: string | null;
@@ -125,8 +123,6 @@ const requirements = computed(() =>
 
                     <div class="mt-4 text-sm text-slate-600">
                         <template v-if="release.available">
-                            Version {{ release.version ?? 'unknown' }}
-                            <span aria-hidden="true"> | </span>
                             {{ release.size ?? 'unknown size' }}
                             <span aria-hidden="true"> | </span>
                             {{ release.published_at ?? 'unknown date' }}
@@ -141,24 +137,11 @@ const requirements = computed(() =>
                         class="mt-6 flex flex-wrap justify-center gap-4 text-sm"
                     >
                         <a
-                            v-if="release.available"
-                            class="font-medium text-blue-600 hover:text-blue-700"
-                            href="/download/latest?platform=windows"
-                        >
-                            All releases
-                        </a>
-                        <span v-else class="font-medium text-slate-600">
-                            All releases
-                        </span>
-                        <a
                             class="font-medium text-blue-600 hover:text-blue-700"
                             href="#requirements"
                         >
                             System requirements
                         </a>
-                        <span class="font-medium text-slate-600">
-                            Update from within the app
-                        </span>
                     </div>
                 </div>
             </div>

@@ -1,14 +1,23 @@
 <script setup lang="ts">
 import { Link, router, usePage } from '@inertiajs/vue3';
 import { CreditCard, Palette, ShieldCheck, UserRound, X } from '@lucide/vue';
-import { computed } from 'vue';
+import { computed, defineAsyncComponent } from 'vue';
 import { useSettingsModal } from '@/composables/useSettingsModal';
 import type { SettingsTab } from '@/composables/useSettingsModal';
-import Appearance from '@/pages/settings/Appearance.vue';
-import Billing from '@/pages/settings/Billing.vue';
-import Profile from '@/pages/settings/Profile.vue';
-import Security from '@/pages/settings/Security.vue';
 import type { Passkey } from '@/types/auth';
+
+const Appearance = defineAsyncComponent(
+    () => import('@/pages/settings/Appearance.vue'),
+);
+const Billing = defineAsyncComponent(
+    () => import('@/pages/settings/Billing.vue'),
+);
+const Profile = defineAsyncComponent(
+    () => import('@/pages/settings/Profile.vue'),
+);
+const Security = defineAsyncComponent(
+    () => import('@/pages/settings/Security.vue'),
+);
 
 type Plan = {
     key: string;
@@ -18,9 +27,9 @@ type Plan = {
     minutes: number;
     cta: string;
     featured: boolean;
-    price_per_second: number;
-    polish_characters: number;
-    summary_characters: number;
+    upload_price_per_hour: number;
+    live_price_per_hour: number;
+    llm_price: number;
     polish_price_per_character: number;
     summary_price_per_character: number;
     free_polish_uses_per_day: number;
@@ -41,15 +50,13 @@ type Entitlements = {
         period: string;
         minutes_used: number;
         minutes_remaining: number;
-        minutes_credit_balance: number;
         seconds_transcribed: number;
-        seconds_credit_balance: number;
         polish_count: number;
         summary_count: number;
         free_polish_remaining: number;
         free_summary_remaining: number;
-        polish_credit_characters: number;
-        summary_credit_characters: number;
+        wallet_balance: number;
+        wallet_balance_cents: number;
     };
 };
 
@@ -72,10 +79,10 @@ type SettingsModalProps = {
             provider: string | null;
             checkout_available: boolean;
             portal_available: boolean;
-            paymongo_ready: Record<string, boolean>;
         };
         entitlements: Entitlements;
         plans: Plan[];
+        walletBalance: number;
     } | null;
 };
 

@@ -10,6 +10,7 @@ import {
 } from '@lucide/vue';
 import { computed, nextTick, reactive, ref } from 'vue';
 import DashboardLayout from '@/layouts/dashboard/Layout.vue';
+import { notify } from '@/lib/notify';
 
 type ApiKey = {
     id: number;
@@ -94,7 +95,6 @@ const methodList: HttpMethod[] = ['post', 'get', 'put', 'patch', 'delete'];
 const apis = ref<ApiKey[]>([...props.apis]);
 const providers = ref<ProviderCard[]>([...props.transcriptionProviders]);
 const transcriberPackage = reactive({ ...props.transcriberPackage });
-const notice = ref<{ type: NoticeType; message: string } | null>(null);
 
 const apiModalOpen = ref(false);
 const apiSaving = ref(false);
@@ -211,7 +211,7 @@ async function requestJson<T>(
 }
 
 function showNotice(message: string, type: NoticeType = 'success') {
-    notice.value = { message, type };
+    notify(message, type);
 }
 
 function openApiModal() {
@@ -776,21 +776,6 @@ function exceptionMessage(error: unknown): string {
     <Head title="API Management" />
 
     <div class="space-y-6">
-        <div
-            v-if="notice"
-            class="rounded-lg border px-4 py-3 text-sm"
-            :class="{
-                'border-green-200 bg-green-50 text-green-800':
-                    notice.type === 'success',
-                'border-red-200 bg-red-50 text-red-800':
-                    notice.type === 'error',
-                'border-blue-200 bg-blue-50 text-blue-800':
-                    notice.type === 'info',
-            }"
-        >
-            {{ notice.message }}
-        </div>
-
         <section
             class="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800"
         >

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { Head, Link, useForm } from '@inertiajs/vue3';
-import { DollarSign, Plus } from '@lucide/vue';
+import { Head, useForm } from '@inertiajs/vue3';
+import { Check, DollarSign, Plus } from '@lucide/vue';
+import { computed } from 'vue';
 import Heading from '@/components/Heading.vue';
 import { Button } from '@/components/ui/button';
-import { useCurrency } from '@/composables/useCurrency';
-import type { Plan } from '@/types';
+import { notifyError } from '@/lib/notify';
 
 type PlanTier = {
     key: string;
@@ -21,7 +21,7 @@ type PlanTier = {
 
 const props = defineProps<{
     walletBalance: number;
-    plans: Plan[];
+    plans: PlanTier[];
 }>();
 
 defineOptions({
@@ -35,26 +35,46 @@ defineOptions({
     },
 });
 
-const currency = useCurrency();
 const form = useForm({
     amount: null as number | null,
 });
+const billingError = computed(
+    () => (form.errors as Record<string, string | undefined>).billing,
+);
 
-const paygPlan = props.plans.find(p => p.key === 'payg') as PlanTier | undefined;
+const paygPlan = props.plans.find((p) => p.key === 'payg') as
+    PlanTier | undefined;
 
-const formattedBalance = (balance: number) => {
-    return currency.fromCents(balance);
+const formatDollars = (amount: number, maximumFractionDigits = 2) => {
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits,
+    }).format(amount);
 };
 
+const formattedBalance = (balance: number) => formatDollars(balance / 100);
+const hourlyRate = (amount: number | undefined) =>
+    `${formatDollars(amount ?? 0)}/hour`;
+const perThousandCharactersRate = (amount: number | undefined) =>
+    `${formatDollars((amount ?? 0) * 1000, 4)}/1K chars`;
+
 const handleTopup = () => {
-    // Form value is in USD dollars (e.g., 10.50)
-    if (!form.amount || form.amount < 1.00) {
-        alert('Minimum top-up is $1.00');
+    if (!form.amount || form.amount < 1.0) {
+        const message = 'Minimum top-up is $1.00.';
+        form.setError('amount', message);
+        notifyError(message);
+
         return;
     }
+
+    form.clearErrors();
     form.post('/settings/billing/checkout', {
         onError: (errors) => {
-            console.error('Top-up failed:', errors);
+            const message =
+                Object.values(errors).at(0) ?? 'Unable to start checkout.';
+            notifyError(message);
         },
     });
 };
@@ -69,40 +89,39 @@ const handleTopup = () => {
         <Heading
             variant="small"
             title="Billing"
-            description="Free tier benefits and pay-as-you-go pricing"
+            description="Free tier first, then credit balance"
         />
 
-        <!-- Wallet Balance Banner -->
         <section
-            v-if="walletBalance > 0"
             class="grid gap-4 rounded-lg border border-green-200 bg-green-50 p-5 text-green-950"
         >
-            <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                    <DollarSign class="size-5 text-green-700" />
-                    <div>
-                        <p class="text-xs font-semibold tracking-wide text-green-600 uppercase">
-                            Wallet Balance
-                        </p>
-                        <p class="text-xl font-bold">
-                            {{ formattedBalance(walletBalance) }}
-                        </p>
-                    </div>
+            <div class="flex items-center gap-2">
+                <DollarSign class="size-5 text-green-700" />
+                <div>
+                    <p
+                        class="text-xs font-semibold tracking-wide text-green-600 uppercase"
+                    >
+                        Credit Balance
+                    </p>
+                    <p class="text-xl font-bold">
+                        {{ formattedBalance(walletBalance) }}
+                    </p>
                 </div>
-                <Link href="/settings/billing/checkout" method="post">
-                    <Button>Top Up</Button>
-                </Link>
             </div>
         </section>
 
-        <!-- Two-Card Layout -->
         <section class="grid gap-6 lg:grid-cols-2">
-            <!-- Free Tier Card -->
-            <article class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+            <article
+                class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
+            >
                 <div class="flex items-start justify-between gap-4">
                     <div>
-                        <h2 class="text-2xl font-bold text-slate-950">Free Tier</h2>
-                        <p class="mt-1 text-sm text-slate-600">Perfect for trying out the service</p>
+                        <h2 class="text-2xl font-bold text-slate-950">
+                            Free Tier
+                        </h2>
+                        <p class="mt-1 text-sm text-slate-600">
+                            Used before credit balance is charged
+                        </p>
                     </div>
                     <span
                         class="rounded-lg border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold text-green-700"
@@ -113,145 +132,181 @@ const handleTopup = () => {
 
                 <div class="mt-6 space-y-4">
                     <div class="flex items-start gap-3">
-                        <span class="mt-0.5 size-5 shrink-0 text-green-600">✓</span>
+                        <Check class="mt-0.5 size-5 shrink-0 text-green-600" />
                         <div>
                             <p class="text-sm font-semibold text-slate-950">
                                 60 transcription minutes per day
                             </p>
-                            <p class="text-xs text-slate-500 mt-0.5">Resets at midnight</p>
+                            <p class="mt-0.5 text-xs text-slate-500">
+                                Resets at midnight
+                            </p>
                         </div>
                     </div>
 
                     <div class="flex items-start gap-3">
-                        <span class="mt-0.5 size-5 shrink-0 text-green-600">✓</span>
+                        <Check class="mt-0.5 size-5 shrink-0 text-green-600" />
                         <div>
                             <p class="text-sm font-semibold text-slate-950">
-                                3 Polishing uses per day
+                                3 polishing uses per day
                             </p>
-                            <p class="text-xs text-slate-500 mt-0.5">Up to 1,000 characters each</p>
+                            <p class="mt-0.5 text-xs text-slate-500">
+                                No credit balance deducted
+                            </p>
                         </div>
                     </div>
 
                     <div class="flex items-start gap-3">
-                        <span class="mt-0.5 size-5 shrink-0 text-green-600">✓</span>
+                        <Check class="mt-0.5 size-5 shrink-0 text-green-600" />
                         <div>
                             <p class="text-sm font-semibold text-slate-950">
-                                3 Summarization uses per day
+                                3 summarization uses per day
                             </p>
-                            <p class="text-xs text-slate-500 mt-0.5">Up to 1,000 characters each</p>
+                            <p class="mt-0.5 text-xs text-slate-500">
+                                No credit balance deducted
+                            </p>
                         </div>
                     </div>
 
                     <div class="flex items-start gap-3">
-                        <span class="mt-0.5 size-5 shrink-0 text-green-600">✓</span>
+                        <Check class="mt-0.5 size-5 shrink-0 text-green-600" />
                         <div>
-                            <p class="text-sm font-semibold text-slate-950">TXT, Word, Excel exports</p>
+                            <p class="text-sm font-semibold text-slate-950">
+                                TXT, Word, Excel exports
+                            </p>
                         </div>
                     </div>
-                </div>
-
-                <div class="mt-8">
-                    <Button class="w-full" variant="outline" disabled>
-                        Included with your account
-                    </Button>
                 </div>
             </article>
 
-            <!-- Pay-as-you-go Card -->
             <article
                 v-if="paygPlan"
                 class="rounded-lg border border-blue-200 bg-blue-50 p-6 shadow-sm"
             >
                 <div class="flex items-start justify-between gap-4">
                     <div>
-                        <h2 class="text-2xl font-bold text-slate-950">Pay-as-you-go</h2>
-                        <p class="mt-1 text-sm text-slate-600">Add funds to your wallet as needed</p>
+                        <h2 class="text-2xl font-bold text-slate-950">
+                            Pay-as-you-go
+                        </h2>
+                        <p class="mt-1 text-sm text-slate-600">
+                            These rates are deducted from credit balance
+                        </p>
                     </div>
                     <span
                         class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700"
                     >
-                        Recommended
+                        Active
                     </span>
                 </div>
 
                 <div class="mt-6 space-y-4">
-                    <!-- Audio Upload Pricing -->
-                    <div class="flex items-start justify-between rounded-lg bg-white p-4">
+                    <div
+                        class="flex items-start justify-between rounded-lg bg-white p-4"
+                    >
                         <div>
                             <p class="text-sm font-semibold text-slate-950">
                                 Audio Upload
                             </p>
-                            <p class="text-xs text-slate-500">1 hour of recording</p>
+                            <p class="text-xs text-slate-500">
+                                Charged after free minutes
+                            </p>
                         </div>
                         <p class="text-sm font-bold text-slate-950">
-                            {{ currency.formatWithSuffix(paygPlan?.upload_price_per_hour || 0, '/hour') }}
+                            {{ hourlyRate(paygPlan.upload_price_per_hour) }}
                         </p>
                     </div>
 
-                    <!-- Live Recording Pricing -->
-                    <div class="flex items-start justify-between rounded-lg bg-white p-4">
+                    <div
+                        class="flex items-start justify-between rounded-lg bg-white p-4"
+                    >
                         <div>
                             <p class="text-sm font-semibold text-slate-950">
                                 Live Recording
                             </p>
-                            <p class="text-xs text-slate-500">1 hour of live recording</p>
+                            <p class="text-xs text-slate-500">
+                                Charged after free minutes
+                            </p>
                         </div>
                         <p class="text-sm font-bold text-slate-950">
-                            {{ currency.formatWithSuffix(paygPlan?.live_price_per_hour || 0, '/hour') }}
+                            {{ hourlyRate(paygPlan.live_price_per_hour) }}
                         </p>
                     </div>
 
-                    <!-- Polishing Pricing -->
-                    <div class="flex items-start justify-between rounded-lg bg-white p-4">
+                    <div
+                        class="flex items-start justify-between rounded-lg bg-white p-4"
+                    >
                         <div>
                             <p class="text-sm font-semibold text-slate-950">
                                 Polishing
                             </p>
-                            <p class="text-xs text-slate-500">Per 1,000 characters</p>
+                            <p class="text-xs text-slate-500">
+                                Charged after free uses
+                            </p>
                         </div>
                         <p class="text-sm font-bold text-slate-950">
-                            {{ currency.formatWithSuffix(paygPlan?.polish_price_per_character || 0, '/1K chars') }}
+                            {{
+                                perThousandCharactersRate(
+                                    paygPlan.polish_price_per_character,
+                                )
+                            }}
                         </p>
                     </div>
 
-                    <!-- Summarization Pricing -->
-                    <div class="flex items-start justify-between rounded-lg bg-white p-4">
+                    <div
+                        class="flex items-start justify-between rounded-lg bg-white p-4"
+                    >
                         <div>
                             <p class="text-sm font-semibold text-slate-950">
                                 Summarization
                             </p>
-                            <p class="text-xs text-slate-500">Per 1,000 characters</p>
+                            <p class="text-xs text-slate-500">
+                                Charged after free uses
+                            </p>
                         </div>
                         <p class="text-sm font-bold text-slate-950">
-                            {{ currency.formatWithSuffix(paygPlan?.summary_price_per_character || 0, '/1K chars') }}
+                            {{
+                                perThousandCharactersRate(
+                                    paygPlan.summary_price_per_character,
+                                )
+                            }}
                         </p>
                     </div>
                 </div>
 
                 <div class="mt-8">
                     <label class="text-sm font-semibold text-slate-700">
-                        Add funds to your wallet
+                        Add credit balance
                     </label>
 
-                    <!-- Custom Top-up Input (no presets) -->
                     <div class="mt-3 flex gap-2">
                         <input
                             v-model.number="form.amount"
                             type="number"
                             min="1"
                             step="0.01"
-                            placeholder="Custom amount (minimum $1.00)"
-                            class="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Amount in USD"
+                            class="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                             @keyup.enter="handleTopup"
                         />
-                        <Button @click="handleTopup">
+                        <Button
+                            :disabled="form.processing"
+                            @click="handleTopup"
+                        >
                             <Plus class="mr-2 size-4" />
                             Top Up
                         </Button>
                     </div>
 
+                    <p
+                        v-if="form.errors.amount"
+                        class="mt-2 text-xs text-red-600"
+                    >
+                        {{ form.errors.amount }}
+                    </p>
+                    <p v-if="billingError" class="mt-2 text-xs text-red-600">
+                        {{ billingError }}
+                    </p>
                     <p class="mt-2 text-xs text-slate-500">
-                        Amounts are charged in USD. Funds are added to your wallet immediately after payment confirmation.
+                        Credits appear after PayMongo confirms payment.
                     </p>
                 </div>
             </article>

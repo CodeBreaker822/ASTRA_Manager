@@ -42,7 +42,7 @@ Status: Complete
 - Added `/`, `/features`, `/price`, `/blog`, `/blog/{slug}`, `/download`, and `/download/latest`.
 - Added `config/plans.php` as the single source for pricing and entitlement tiers.
 - Added markdown-backed blog posts under `resources/blog`.
-- Added download controller that reads the existing transcriber package storage and redirects through the existing `/transcriber/{zipfile}` distribution route.
+- Added download controller that reads the existing transcriber package storage and serves `/download/latest` publicly without a license-gated updater route.
 
 Verification:
 

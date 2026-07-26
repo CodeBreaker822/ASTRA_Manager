@@ -3,11 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Services\PageContentService;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class DownloadController extends Controller
 {
@@ -19,34 +19,40 @@ class DownloadController extends Controller
         ]);
     }
 
-    public function latest(): RedirectResponse
+    public function latest(): BinaryFileResponse
     {
-        $release = $this->latestRelease();
+        $package = $this->latestPackage();
 
-        abort_unless($release['available'], 404, 'No JERVA desktop release has been uploaded yet.');
+        abort_unless($package !== null, 404, 'No JERVA desktop release has been uploaded yet.');
 
-        return redirect()->route('transcriber.update.download', [
-            'zipfile' => $release['zipfile'],
+        return response()->download($package['path'], $package['filename'], [
+            'Content-Type' => 'application/zip',
+            'Cache-Control' => 'public, max-age=300',
         ]);
     }
 
     /**
-     * @return array{available: bool, platform: string, version: mixed, zipfile: string|null, size: string|null, published_at: string|null, download_url: string|null}
+     * @return array{available: bool, platform: string, size: string|null, published_at: string|null, download_url: string|null}
      */
     private function latestRelease(): array
     {
-        $directory = Storage::disk('local')->path('transcriber');
-        $versionPath = $directory.DIRECTORY_SEPARATOR.'version.json';
-        $version = null;
+        $package = $this->latestPackage();
 
-        if (File::isReadable($versionPath)) {
-            try {
-                $payload = json_decode(File::get($versionPath), true, 512, JSON_THROW_ON_ERROR);
-                $version = is_array($payload) ? ($payload['version'] ?? null) : null;
-            } catch (\Throwable) {
-                $version = null;
-            }
-        }
+        return [
+            'available' => $package !== null,
+            'platform' => 'Windows',
+            'size' => $package ? $this->humanFileSize($package['size']) : null,
+            'published_at' => $package ? date('F j, Y', $package['modified_at']) : null,
+            'download_url' => $package ? route('download.latest') : null,
+        ];
+    }
+
+    /**
+     * @return array{path: string, filename: string, size: int, modified_at: int}|null
+     */
+    private function latestPackage(): ?array
+    {
+        $directory = Storage::disk('local')->path('transcriber');
 
         $zipFiles = File::isDirectory($directory)
             ? array_values(array_filter(
@@ -59,14 +65,15 @@ class DownloadController extends Controller
 
         $zip = $zipFiles[0] ?? null;
 
+        if ($zip === null) {
+            return null;
+        }
+
         return [
-            'available' => $zip !== null,
-            'platform' => 'Windows',
-            'version' => $version,
-            'zipfile' => $zip?->getFilename(),
-            'size' => $zip ? $this->humanFileSize($zip->getSize()) : null,
-            'published_at' => $zip ? date('F j, Y', $zip->getMTime()) : null,
-            'download_url' => $zip ? route('download.latest', ['platform' => 'windows']) : null,
+            'path' => $zip->getPathname(),
+            'filename' => $zip->getFilename(),
+            'size' => $zip->getSize(),
+            'modified_at' => $zip->getMTime(),
         ];
     }
 

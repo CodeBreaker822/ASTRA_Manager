@@ -48,6 +48,7 @@ return [
         'payment_method_types' => array_values(array_filter(explode(',', env('PAYMONGO_PAYMENT_METHOD_TYPES', 'card')))),
         'send_email_receipt' => env('PAYMONGO_SEND_EMAIL_RECEIPT', true),
         'credits_per_dollar' => env('PAYMONGO_CREDITS_PER_DOLLAR', 1),
+        'usd_to_php_rate' => env('PAYMONGO_USD_TO_PHP_RATE', 56.50),
     ],
 
     'lambda_pdf' => [

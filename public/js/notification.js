@@ -1,5 +1,12 @@
 let notificationSequence = 0;
 
+const notificationClasses = {
+    success: 'bg-green-500',
+    error: 'bg-red-500',
+    warning: 'bg-amber-500',
+    info: 'bg-blue-500',
+};
+
 function notificationContainer() {
     let container = document.getElementById('notification-container');
 
@@ -16,10 +23,11 @@ function notificationContainer() {
 
 function showNotification(message, type = 'success') {
     const normalizedMessage = String(message || 'An unknown error occurred.');
+    const normalizedType = notificationClasses[type] ? type : 'success';
     const container = notificationContainer();
     const duplicate = Array.from(container.querySelectorAll('.notification')).find(notification => (
         notification.dataset.message === normalizedMessage
-        && notification.dataset.type === type
+        && notification.dataset.type === normalizedType
     ));
 
     if (duplicate) {
@@ -30,8 +38,8 @@ function showNotification(message, type = 'success') {
     const notification = document.createElement('div');
     notification.id = notificationId;
     notification.dataset.message = normalizedMessage;
-    notification.dataset.type = type;
-    notification.className = `${type === 'success' ? 'bg-green-500' : 'bg-red-500'} text-white px-6 py-3 rounded shadow-lg notification`;
+    notification.dataset.type = normalizedType;
+    notification.className = `${notificationClasses[normalizedType]} text-white px-6 py-3 rounded shadow-lg notification`;
     notification.style.cssText = 'display:block;visibility:visible;opacity:1;transition:transform .3s ease-out,opacity .3s ease-out;';
 
     const content = document.createElement('div');
@@ -75,3 +83,6 @@ function closeNotification(notificationId) {
         }
     }, 300);
 }
+
+window.showNotification = showNotification;
+window.closeNotification = closeNotification;

@@ -3,14 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\BillingTransaction;
-use App\Services\PlanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class PayMongoWebhookController extends Controller
 {
-    public function __invoke(Request $request, PlanService $plans): JsonResponse
+    public function __invoke(Request $request): JsonResponse
     {
         if (! $this->hasValidSignature($request)) {
             return response()->json(['message' => 'Invalid signature.'], 401);
@@ -27,7 +27,6 @@ class PayMongoWebhookController extends Controller
         $reference = data_get($resource, 'attributes.reference_number');
         $sessionId = data_get($resource, 'id');
         $paymentId = data_get($resource, 'attributes.payments.0.id');
-        $plan = data_get($resource, 'attributes.metadata.plan');
 
         $transaction = BillingTransaction::query()
             ->when(is_string($reference), fn ($query) => $query->orWhere('reference', $reference))
@@ -38,35 +37,32 @@ class PayMongoWebhookController extends Controller
             return response()->json(['message' => 'Transaction not found.'], 404);
         }
 
-        $plan = is_string($plan) && $plan !== '' ? $plan : $transaction->plan;
-        $creditType = data_get($resource, 'attributes.metadata.credit_type');
-        $creditType = in_array($creditType, ['audio', 'polish', 'summary'], true) ? $creditType : 'audio';
-        $creditMinutes = data_get($resource, 'attributes.metadata.credit_minutes');
-        $polishCharacters = data_get($resource, 'attributes.metadata.polish_characters');
-        $summaryCharacters = data_get($resource, 'attributes.metadata.summary_characters');
-        $planKey = in_array($plan, ['pro', 'team'], true) ? 'payg' : $plan;
-
-        if ($plans->plan($planKey) === null) {
+        if ($transaction->plan !== 'wallet_topup') {
             return response()->json(['message' => 'Unknown plan.'], 422);
         }
 
-        $alreadyPaid = $transaction->status === 'paid';
+        DB::transaction(function () use ($transaction, $paymentId, $payload): void {
+            $lockedTransaction = BillingTransaction::query()
+                ->whereKey($transaction->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        $transaction->update([
-            'payment_id' => is_string($paymentId) ? $paymentId : $transaction->payment_id,
-            'status' => 'paid',
-            'payload' => $payload,
-            'paid_at' => Carbon::now(),
-        ]);
+            $alreadyPaid = $lockedTransaction->status === 'paid';
 
-        if (! $alreadyPaid) {
-            $amountInMinorUnits = $transaction->amount;
+            $lockedTransaction->update([
+                'payment_id' => is_string($paymentId) ? $paymentId : $lockedTransaction->payment_id,
+                'status' => 'paid',
+                'payload' => $payload,
+                'paid_at' => Carbon::now(),
+            ]);
 
-            if ($amountInMinorUnits > 0) {
-                // Credit the wallet balance
-                $transaction->user()->increment('wallet_balance', $amountInMinorUnits);
+            if (! $alreadyPaid && $lockedTransaction->amount > 0) {
+                $user = $lockedTransaction->user()->lockForUpdate()->firstOrFail();
+                $user->forceFill([
+                    'wallet_balance' => round((float) $user->wallet_balance + ($lockedTransaction->amount / 100), 2),
+                ])->save();
             }
-        }
+        });
 
         return response()->json(['message' => 'Payment recorded. Credits added.']);
     }

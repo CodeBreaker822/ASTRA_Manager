@@ -9,43 +9,70 @@ return new class extends Migration
     /**
      * Drop obsolete credit fields from users and plan_tiers tables
      *
-     * These fields are replaced by the new wallet system:
-     * - users.credit_seconds -> user_wallets.balance_nanos
-     * - users.polish_credit_characters -> user_wallets.balance_nanos
-     * - users.summary_credit_characters -> user_wallets.balance_nanos
+     * These fields are replaced by users.wallet_balance:
+     * - users.credit_seconds
+     * - users.polish_credit_characters
+     * - users.summary_credit_characters
      * - plan_tiers.price_per_second -> removed (use hourly rates instead)
      * - plan_tiers.polish_characters -> removed (use per-character pricing)
      * - plan_tiers.summary_characters -> removed (use per-character pricing)
      */
     public function up(): void
     {
-        // Drop obsolete plan_tiers columns
-        Schema::table('plan_tiers', function (Blueprint $table) {
-            $table->dropColumn(['price_per_second', 'polish_characters', 'summary_characters']);
-        });
+        $this->dropColumnsIfPresent('users', [
+            'credit_seconds',
+            'polish_credit_characters',
+            'summary_credit_characters',
+        ]);
 
-        // Drop obsolete user columns
-        Schema::table('users', function (Blueprint $table) {
-            $table->dropColumn(['credit_seconds', 'polish_credit_characters', 'summary_credit_characters']);
-        });
-
-        // Remove plan_tiers from users (move to user_wallets table)
-        // If users have a plan_tier_id, preserve it but it won't be used for billing anymore
+        $this->dropColumnsIfPresent('plan_tiers', [
+            'price_per_second',
+            'polish_characters',
+            'summary_characters',
+        ]);
     }
 
     public function down(): void
     {
         // Restore columns for rollback
-        Schema::table('users', function (Blueprint $table) {
-            $table->integer('credit_seconds')->nullable()->default(0)->after('plan_tier_id');
-            $table->integer('polish_credit_characters')->nullable()->default(0)->after('credit_seconds');
-            $table->integer('summary_credit_characters')->nullable()->default(0)->after('polish_credit_characters');
-        });
+        if (! Schema::hasColumn('users', 'credit_seconds')) {
+            Schema::table('users', function (Blueprint $table) {
+                $table->integer('credit_seconds')->nullable()->default(0)->after('wallet_balance');
+                $table->integer('polish_credit_characters')->nullable()->default(0)->after('credit_seconds');
+                $table->integer('summary_credit_characters')->nullable()->default(0)->after('polish_credit_characters');
+            });
+        }
 
-        Schema::table('plan_tiers', function (Blueprint $table) {
-            $table->decimal('price_per_second', 15, 8)->nullable()->after('summary_price_per_character');
-            $table->integer('polish_characters')->nullable()->default(1000)->after('monthly_price');
-            $table->integer('summary_characters')->nullable()->default(1000)->after('polish_characters');
+        if (! Schema::hasColumn('plan_tiers', 'price_per_second')) {
+            Schema::table('plan_tiers', function (Blueprint $table) {
+                $table->decimal('price_per_second', 15, 8)->nullable()->after('summary_price_per_character');
+            });
+        }
+
+        if (! Schema::hasColumn('plan_tiers', 'polish_characters')) {
+            Schema::table('plan_tiers', function (Blueprint $table) {
+                $table->integer('polish_characters')->nullable()->default(1000)->after('monthly_price');
+                $table->integer('summary_characters')->nullable()->default(1000)->after('polish_characters');
+            });
+        }
+    }
+
+    /**
+     * @param  list<string>  $columns
+     */
+    private function dropColumnsIfPresent(string $tableName, array $columns): void
+    {
+        $columns = array_values(array_filter(
+            $columns,
+            fn (string $column): bool => Schema::hasColumn($tableName, $column),
+        ));
+
+        if ($columns === []) {
+            return;
+        }
+
+        Schema::table($tableName, function (Blueprint $table) use ($columns): void {
+            $table->dropColumn($columns);
         });
     }
 };

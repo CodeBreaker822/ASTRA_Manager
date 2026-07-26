@@ -47,8 +47,6 @@ test('pricing managers can update tiers and comparison rows', function () {
     $payload['tiers'][1]['llm_price'] = 8;
     $payload['tiers'][0]['free_polish_uses_per_day'] = 3;
     $payload['tiers'][0]['free_summary_uses_per_day'] = 3;
-    $payload['tiers'][1]['polish_characters'] = 125000;
-    $payload['tiers'][1]['summary_characters'] = 90000;
     $payload['tiers'][1]['polish_price_per_character'] = 0.0003;
     $payload['tiers'][1]['summary_price_per_character'] = 0.0004;
     $payload['tiers'][1]['features'][0] = '750 one-time transcription minutes';
@@ -72,12 +70,9 @@ test('pricing managers can update tiers and comparison rows', function () {
     $proTier = PlanTier::query()->where('key', 'payg')->firstOrFail();
 
     expect($proTier->minutes)->toBe(750)
-        ->and($proTier->price_per_second)->toBe(round(220 / 3600, 8))
         ->and($proTier->upload_price_per_hour)->toBe(220.0)
         ->and($proTier->live_price_per_hour)->toBe(260.0)
         ->and($proTier->llm_price)->toBe(8.0)
-        ->and($proTier->polish_characters)->toBe(125000)
-        ->and($proTier->summary_characters)->toBe(90000)
         ->and($proTier->polish_price_per_character)->toBe(0.0003)
         ->and($proTier->summary_price_per_character)->toBe(0.0004)
         ->and($proTier->entitlements)->toMatchArray([
@@ -114,8 +109,6 @@ test('pricing managers can update tiers and comparison rows', function () {
             ->where('plans.1.upload_price_per_hour', 220)
             ->where('plans.1.live_price_per_hour', 260)
             ->where('plans.1.llm_price', 8)
-            ->where('plans.1.polish_characters', 125000)
-            ->where('plans.1.summary_characters', 90000)
             ->where('plans.1.polish_price_per_character', 0.0003)
             ->where('plans.1.summary_price_per_character', 0.0004)
         );
@@ -178,8 +171,6 @@ function pricingPayload(): array
                 'minutes' => $tier['minutes'],
                 'free_polish_uses_per_day' => $tier['free_polish_uses_per_day'],
                 'free_summary_uses_per_day' => $tier['free_summary_uses_per_day'],
-                'polish_characters' => $tier['polish_characters'],
-                'summary_characters' => $tier['summary_characters'],
                 'cta' => $tier['cta'],
                 'featured' => $tier['featured'],
                 'features' => $tier['features'],

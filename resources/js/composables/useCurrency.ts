@@ -18,8 +18,6 @@
  * // Get value from user input (dollars) and convert to cents
  * const priceInCents = useCurrency().toCents(userInputDollars)
  */
-import { ref, computed } from 'vue';
-
 export type CurrencyFormattingOptions = {
     /**
      * Minimum decimal places to show
@@ -73,7 +71,9 @@ export function useCurrency() {
      * useCurrency().fromCents(12345) // '$123.45'
      */
     const fromCents = (cents: number | null | undefined, options: CurrencyFormattingOptions = {}): string => {
-        if (cents === null || cents === undefined) return '';
+        if (cents === null || cents === undefined) {
+            return '';
+        }
 
         const {
             minDecimals = 2,
@@ -107,7 +107,9 @@ export function useCurrency() {
      * useCurrency().toCents(1.00) // 100
      */
     const toCents = (dollars: string | number | null | undefined): number | null => {
-        if (dollars === null || dollars === undefined) return null;
+        if (dollars === null || dollars === undefined) {
+            return null;
+        }
 
         let dollarValue: number;
 
@@ -169,11 +171,14 @@ export function useCurrency() {
     const formatWithSuffix = (
         cents: number | null | undefined,
         suffix: string,
-        options: CurrencyFormattingOptions = {}
+        options: CurrencyFormattingOptions = {},
     ): string => {
-        if (cents === null || cents === undefined) return suffix;
+        if (cents === null || cents === undefined) {
+            return suffix;
+        }
 
         const formatted = fromCents(cents, options);
+
         return `${formatted}${suffix}`;
     };
 

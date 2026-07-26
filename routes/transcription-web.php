@@ -4,10 +4,6 @@ use App\Http\Controllers\Api\APIController;
 use App\Http\Controllers\Api\TranscriptionController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/transcriber/{zipfile}', [TranscriptionController::class, 'downloadUpdate'])
-    ->where('zipfile', '[^/]+')
-    ->name('transcriber.update.download');
-
 Route::get('/runpod/audio/{file}', [TranscriptionController::class, 'temporaryRunPodAudio'])
     ->middleware('signed')
     ->where('file', '[^/]+')

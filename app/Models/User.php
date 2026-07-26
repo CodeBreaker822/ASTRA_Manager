@@ -33,9 +33,16 @@ use Laravel\Sanctum\HasApiTokens;
  * @property string|null $user_status
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
- * @property-read UserWallet|null $wallet
  */
-#[Fillable(['name', 'email', 'password', 'plan', 'position_id', 'user_status'])]
+#[Fillable([
+    'name',
+    'email',
+    'password',
+    'plan',
+    'position_id',
+    'user_status',
+    'wallet_balance',
+])]
 #[Hidden(['password', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
 class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
 {
@@ -96,11 +103,4 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
         return $this->hasOne(API::class);
     }
 
-    /**
-     * @return HasOne<UserWallet, $this>
-     */
-    public function wallet(): HasOne
-    {
-        return $this->hasOne(UserWallet::class);
-    }
 }

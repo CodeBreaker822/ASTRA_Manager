@@ -386,10 +386,7 @@ class TranscriptionController extends Controller
         }
 
         $canPost = (bool) $license->can_post && (bool) $license->is_active;
-        $canGet = (bool) $license->can_get && (bool) $license->is_active;
         $rateLimited = RateLimiter::tooManyAttempts($this->rateLimitKey($license), self::RATE_LIMIT_PER_MINUTE);
-        $update = $this->transcriberUpdate();
-        $updateAllowed = $canGet && $update['zipfile'] !== null;
         $transcriptionProvider = $settings->publicProviderCapability('transcriber');
         $polishingProvider = $settings->publicProviderCapability('text_fixer');
 
@@ -399,8 +396,6 @@ class TranscriptionController extends Controller
             'expired' => false,
             'rate_limited' => $rateLimited,
             'app_name' => $license->app_name,
-            'version' => $update['version'],
-            'zipfile' => $update['zipfile'],
             'rate_limit' => [
                 'limit_per_minute' => self::RATE_LIMIT_PER_MINUTE,
                 'retry_after' => $rateLimited ? RateLimiter::availableIn($this->rateLimitKey($license)) : 0,
@@ -450,14 +445,6 @@ class TranscriptionController extends Controller
                         'task',
                     ],
                 ],
-                'transcriber_update' => [
-                    'method' => 'GET',
-                    'path' => ! $updateAllowed
-                        ? null
-                        : '/transcriber/'.rawurlencode($update['zipfile']),
-                    'allowed' => $updateAllowed,
-                    'zipfile' => $update['zipfile'],
-                ],
             ],
             'providers' => [
                 'transcription' => [$transcriptionProvider],
@@ -468,34 +455,6 @@ class TranscriptionController extends Controller
         return $this->logAndReturn($request, 'license_status', $license, $response, $startedAt, [
             'status' => ! $license->is_active ? 'denied' : ($rateLimited ? 'rate_limited' : 'success'),
             'severity' => ! $license->is_active ? 'critical' : ($rateLimited ? 'high' : 'low'),
-        ]);
-    }
-
-    public function downloadUpdate(Request $request, ?string $zipfile = null): JsonResponse|BinaryFileResponse
-    {
-        $license = $this->licenseFor($request, 'get');
-
-        if ($license instanceof JsonResponse) {
-            return $license;
-        }
-
-        $zipPath = $this->transcriberZipPath();
-
-        if ($zipPath === null) {
-            return response()->json([
-                'message' => 'Transcriber update ZIP file is not available.',
-            ], 404);
-        }
-
-        if ($zipfile !== null && ! hash_equals(basename($zipPath), $zipfile)) {
-            return response()->json([
-                'message' => 'Transcriber update ZIP file is not available.',
-            ], 404);
-        }
-
-        return response()->download($zipPath, basename($zipPath), [
-            'Content-Type' => 'application/zip',
-            'Cache-Control' => 'private, no-store',
         ]);
     }
 
@@ -542,56 +501,6 @@ class TranscriptionController extends Controller
         }
 
         return $license;
-    }
-
-    /**
-     * @return array{version: string|null, zipfile: string|null}
-     */
-    private function transcriberUpdate(): array
-    {
-        $version = null;
-        $versionPath = Storage::disk('local')->path('transcriber/version.json');
-
-        if (is_file($versionPath) && is_readable($versionPath)) {
-            try {
-                $data = json_decode((string) file_get_contents($versionPath), true, 512, JSON_THROW_ON_ERROR);
-
-                if (is_array($data) && array_key_exists('version', $data)) {
-                    $version = is_string($data['version']) ? $data['version'] : null;
-                }
-            } catch (Throwable) {
-                // A bad manually uploaded file should not break the status endpoint.
-            }
-        }
-
-        $zipPath = $this->transcriberZipPath();
-
-        return [
-            'version' => $version,
-            'zipfile' => $zipPath === null ? null : basename($zipPath),
-        ];
-    }
-
-    private function transcriberZipPath(): ?string
-    {
-        $directory = Storage::disk('local')->path('transcriber');
-        $files = is_dir($directory) ? scandir($directory) : false;
-
-        if ($files === false) {
-            return null;
-        }
-
-        $zipFiles = array_values(array_filter($files, function (string $file) use ($directory): bool {
-            return strtolower(pathinfo($file, PATHINFO_EXTENSION)) === 'zip'
-                && is_file($directory.DIRECTORY_SEPARATOR.$file);
-        }));
-
-        natcasesort($zipFiles);
-        $zipFile = reset($zipFiles);
-
-        return $zipFile === false
-            ? null
-            : $directory.DIRECTORY_SEPARATOR.$zipFile;
     }
 
     private function hitRateLimit(API $license): ?JsonResponse

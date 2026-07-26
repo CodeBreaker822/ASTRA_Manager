@@ -11,9 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('plan_tiers', function (Blueprint $table) {
-            $table->dropColumn('price_per_second');
-        });
+        if (Schema::hasColumn('plan_tiers', 'price_per_second')) {
+            Schema::table('plan_tiers', function (Blueprint $table) {
+                $table->dropColumn('price_per_second');
+            });
+        }
     }
 
     /**
@@ -21,8 +23,10 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('plan_tiers', function (Blueprint $table) {
-            $table->decimal('price_per_second', 8, 8)->default(0.00000000);
-        });
+        if (! Schema::hasColumn('plan_tiers', 'price_per_second')) {
+            Schema::table('plan_tiers', function (Blueprint $table) {
+                $table->decimal('price_per_second', 8, 8)->default(0.00000000);
+            });
+        }
     }
 };

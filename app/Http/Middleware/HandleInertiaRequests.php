@@ -67,6 +67,13 @@ class HandleInertiaRequests extends Middleware
                 'canManagePricing' => $canManagePricing,
                 'canManagePages' => $canManagePages,
             ],
+            'flash' => fn () => [
+                'toast' => $request->session()->get('toast'),
+                'success' => $request->session()->get('success'),
+                'error' => $request->session()->get('error'),
+                'warning' => $request->session()->get('warning'),
+                'info' => $request->session()->get('info'),
+            ],
             'settingsModal' => fn () => $this->settingsModal($request),
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
         ];
@@ -144,18 +151,12 @@ class HandleInertiaRequests extends Middleware
         return [
             'billing' => [
                 'provider' => config('services.billing.provider'),
-                'checkout_available' => $payMongo->isConfiguredFor('payg', 'audio')
-                    || $payMongo->isConfiguredFor('payg', 'polish')
-                    || $payMongo->isConfiguredFor('payg', 'summary'),
+                'checkout_available' => $payMongo->isConfiguredForWalletTopup(),
                 'portal_available' => false,
-                'paymongo_ready' => [
-                    'audio' => $payMongo->isConfiguredFor('payg', 'audio'),
-                    'polish' => $payMongo->isConfiguredFor('payg', 'polish'),
-                    'summary' => $payMongo->isConfiguredFor('payg', 'summary'),
-                ],
             ],
             'entitlements' => app(EntitlementService::class)->summaryFor($user),
             'plans' => app(PlanService::class)->tiersForDisplay(),
+            'walletBalance' => (int) round(((float) $user->wallet_balance) * 100),
         ];
     }
 }

@@ -26,7 +26,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import ProcessingButton from '@/components/workspace/ProcessingButton.vue';
-import WorkspaceToast from '@/components/workspace/WorkspaceToast.vue';
 import { useAudioUpload } from '@/composables/useAudioUpload';
 import { useLiveRecorder } from '@/composables/useLiveRecorder';
 import { useSettingsModal } from '@/composables/useSettingsModal';
@@ -90,15 +89,13 @@ const props = defineProps<{
             period: string;
             minutes_used: number;
             minutes_remaining: number;
-            minutes_credit_balance: number;
             seconds_transcribed: number;
-            seconds_credit_balance: number;
             polish_count: number;
             summary_count: number;
             free_polish_remaining: number;
             free_summary_remaining: number;
-            polish_credit_characters: number;
-            summary_credit_characters: number;
+            wallet_balance: number;
+            wallet_balance_cents: number;
         };
     };
 }>();
@@ -134,9 +131,7 @@ const userName = computed(() => {
 });
 
 const totalTranscriptionMinutes = computed(
-    () =>
-        props.entitlements.plan.minutes +
-        props.entitlements.usage.minutes_credit_balance,
+    () => props.entitlements.plan.minutes,
 );
 
 const projectTitle = computed(() => {
@@ -455,29 +450,6 @@ const createProject = () => {
             workspaceMode.value = 'choose';
         },
     });
-};
-
-const showFlashToast = () => {
-    const flash = page.props.flash as
-        | {
-              success?: string;
-              toast?: { type?: string; message?: string };
-          }
-        | undefined;
-
-    if (flash?.toast?.message) {
-        if (flash.toast.type === 'error') {
-            toast.error(flash.toast.message);
-        } else {
-            toast.success(flash.toast.message);
-        }
-
-        return;
-    }
-
-    if (flash?.success) {
-        toast.success(flash.success);
-    }
 };
 
 const csrfToken = () =>
@@ -837,19 +809,14 @@ const closeLog = () => {
 };
 
 onMounted(() => {
-    showFlashToast();
-
     if (pendingTranscripts.value.length > 0) {
         startPolling();
     }
 });
-
-watch(() => page.props.flash, showFlashToast);
 </script>
 
 <template>
     <Head title="Workspace" />
-    <WorkspaceToast />
 
     <main class="min-h-screen bg-white text-[14px] leading-5 text-slate-950">
         <div

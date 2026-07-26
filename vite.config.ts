@@ -1,12 +1,8 @@
-import inertia from '@inertiajs/vite';
 import { wayfinder } from '@laravel/vite-plugin-wayfinder';
 import tailwindcss from '@tailwindcss/vite';
 import vue from '@vitejs/plugin-vue';
 import laravel from 'laravel-vite-plugin';
-import { bunny } from 'laravel-vite-plugin/fonts';
 import { defineConfig } from 'vite';
-
-const inertiaSsrEnabled = process.env.INERTIA_SSR_ENABLED === 'true';
 
 export default defineConfig({
     build: {
@@ -29,13 +25,7 @@ export default defineConfig({
         laravel({
             input: ['resources/css/app.css', 'resources/js/app.ts'],
             refresh: true,
-            fonts: [
-                bunny('Instrument Sans', {
-                    weights: [400, 500, 600],
-                }),
-            ],
         }),
-        inertiaSsrEnabled ? inertia() : inertia({ ssr: false }),
         tailwindcss(),
         vue({
             template: {

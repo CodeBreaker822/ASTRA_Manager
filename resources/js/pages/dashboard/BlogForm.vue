@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import DashboardLayout from '@/layouts/dashboard/Layout.vue';
+import { notifyError } from '@/lib/notify';
 
 type Post = {
     id: number;
@@ -43,6 +44,7 @@ const form = useForm({
 const previewHtml = ref(props.previewHtml);
 const slugTouched = ref(Boolean(props.post?.slug));
 const coverName = ref('');
+const previewErrorNotified = ref(false);
 let previewTimer: ReturnType<typeof setTimeout> | null = null;
 
 const isEditing = computed(() => props.post !== null);
@@ -61,19 +63,29 @@ const csrfToken = () =>
         ?.getAttribute('content') ?? '';
 
 const refreshPreview = async () => {
-    const response = await fetch('/dashboard/blog/preview', {
-        method: 'POST',
-        headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            'X-CSRF-TOKEN': csrfToken(),
-        },
-        body: JSON.stringify({ body_markdown: form.body_markdown }),
-    });
+    try {
+        const response = await fetch('/dashboard/blog/preview', {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+            body: JSON.stringify({ body_markdown: form.body_markdown }),
+        });
 
-    if (response.ok) {
+        if (!response.ok) {
+            throw new Error('Preview could not be refreshed.');
+        }
+
         const payload = (await response.json()) as { html: string };
         previewHtml.value = payload.html;
+        previewErrorNotified.value = false;
+    } catch {
+        if (!previewErrorNotified.value) {
+            notifyError('Preview could not be refreshed.');
+            previewErrorNotified.value = true;
+        }
     }
 };
 

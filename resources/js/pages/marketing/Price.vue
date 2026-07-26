@@ -3,7 +3,6 @@ import { Head, Link } from '@inertiajs/vue3';
 import { Check } from '@lucide/vue';
 import { computed } from 'vue';
 import { Button } from '@/components/ui/button';
-import { useCurrency } from '@/composables/useCurrency';
 
 type Plan = {
     key: string;
@@ -41,21 +40,18 @@ const props = defineProps<{
     };
 }>();
 
-const currency = useCurrency();
-
-const planPrice = (plan: Plan): string => {
-    return plan.price_label;
+const formatDollars = (amount: number, maximumFractionDigits = 2) => {
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits,
+    }).format(amount);
 };
 
-// Format price per hour for pay-as-you-go plans
-const formatPricePerHour = (price: number): string => {
-    return currency.formatWithSuffix(price, '/hour');
-};
-
-// Format price per character for text features
-const formatPricePerCharacter = (price: number): string => {
-    return currency.formatWithSuffix(price, '/1K chars');
-};
+const hourlyRate = (amount: number) => `${formatDollars(amount)}/hour`;
+const perThousandCharactersRate = (amount: number) =>
+    `${formatDollars(amount * 1000, 4)}/1K chars`;
 
 const comparisonRows = computed(() => Object.entries(props.comparison));
 </script>
@@ -116,19 +112,33 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                     <div class="mt-8 space-y-3">
                         <div v-if="plan.upload_price_per_hour" class="text-sm">
                             <span class="font-medium">Audio Upload:</span>
-                            {{ currency.formatWithSuffix(plan.upload_price_per_hour, '/hour') }}
+                            {{ hourlyRate(plan.upload_price_per_hour) }}
                         </div>
                         <div v-if="plan.live_price_per_hour" class="text-sm">
                             <span class="font-medium">Live Recording:</span>
-                            {{ currency.formatWithSuffix(plan.live_price_per_hour, '/hour') }}
+                            {{ hourlyRate(plan.live_price_per_hour) }}
                         </div>
-                        <div v-if="plan.polish_price_per_character" class="text-sm">
+                        <div
+                            v-if="plan.polish_price_per_character"
+                            class="text-sm"
+                        >
                             <span class="font-medium">Polishing:</span>
-                            {{ currency.formatWithSuffix(plan.polish_price_per_character, '/1K chars') }}
+                            {{
+                                perThousandCharactersRate(
+                                    plan.polish_price_per_character,
+                                )
+                            }}
                         </div>
-                        <div v-if="plan.summary_price_per_character" class="text-sm">
+                        <div
+                            v-if="plan.summary_price_per_character"
+                            class="text-sm"
+                        >
                             <span class="font-medium">Summarization:</span>
-                            {{ currency.formatWithSuffix(plan.summary_price_per_character, '/1K chars') }}
+                            {{
+                                perThousandCharactersRate(
+                                    plan.summary_price_per_character,
+                                )
+                            }}
                         </div>
                     </div>
 

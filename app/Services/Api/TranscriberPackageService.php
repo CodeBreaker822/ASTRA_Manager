@@ -101,6 +101,10 @@ class TranscriberPackageService
 
     public function uploadError(Throwable $exception, string $errorId): string
     {
+        if ($exception instanceof RuntimeException && $exception->getMessage() !== '') {
+            return $exception->getMessage()." Error reference: {$errorId}.";
+        }
+
         return "Transcriber package upload failed. Error reference: {$errorId}.";
     }
 

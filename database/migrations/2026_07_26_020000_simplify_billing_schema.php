@@ -6,40 +6,33 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
+        Schema::dropIfExists('billing_operations');
+        Schema::dropIfExists('wallet_ledger_entries');
+        Schema::dropIfExists('user_wallets');
+
         $this->dropColumnsIfPresent('users', [
             'credit_seconds',
             'polish_credit_characters',
             'summary_credit_characters',
+            'total_earned_credits',
+            'total_spent_credits',
         ]);
 
         $this->dropColumnsIfPresent('plan_tiers', [
+            'price_per_second',
             'polish_characters',
             'summary_characters',
         ]);
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
-        if (! Schema::hasColumn('users', 'credit_seconds')) {
-            Schema::table('users', function (Blueprint $table) {
-                $table->unsignedInteger('credit_seconds')->default(0)->after('wallet_balance');
-                $table->unsignedInteger('polish_credit_characters')->default(0);
-                $table->unsignedInteger('summary_credit_characters')->default(0);
-            });
-        }
-
-        if (! Schema::hasColumn('plan_tiers', 'polish_characters')) {
-            Schema::table('plan_tiers', function (Blueprint $table) {
-                $table->unsignedInteger('polish_characters')->default(0);
-                $table->unsignedInteger('summary_characters')->default(0);
+        if (! Schema::hasColumn('users', 'total_earned_credits')) {
+            Schema::table('users', function (Blueprint $table): void {
+                $table->unsignedInteger('total_earned_credits')->default(0)->after('wallet_balance');
+                $table->unsignedInteger('total_spent_credits')->default(0)->after('total_earned_credits');
             });
         }
     }
@@ -49,6 +42,10 @@ return new class extends Migration
      */
     private function dropColumnsIfPresent(string $tableName, array $columns): void
     {
+        if (! Schema::hasTable($tableName)) {
+            return;
+        }
+
         $columns = array_values(array_filter(
             $columns,
             fn (string $column): bool => Schema::hasColumn($tableName, $column),

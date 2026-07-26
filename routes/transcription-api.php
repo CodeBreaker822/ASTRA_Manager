@@ -14,7 +14,3 @@ Route::post('/transcribe', [TranscriptionController::class, 'transcribe']);
 Route::get('/transcribe/jobs/{job}', [TranscriptionController::class, 'transcriptionJobStatus']);
 Route::post('/polish', [TranscriptionController::class, 'polish']);
 Route::get('/license/status', [TranscriptionController::class, 'licenseStatus']);
-Route::get('/transcribe/update/zipfile', [TranscriptionController::class, 'downloadUpdate']);
-
-// Webhook routes (public - for Paymongo callbacks)
-Route::post('/credits/webhook', [App\Http\Controllers\Api\PaymentController::class, 'webhook']);

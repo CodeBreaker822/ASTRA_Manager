@@ -10,7 +10,6 @@ return [
             'monthly_price' => 0,
             'yearly_price' => 0,
             'price_label' => '$0',
-            'price_per_second' => 0,
             'upload_price_per_hour' => 0,
             'live_price_per_hour' => 0,
             'llm_price' => 0,
@@ -19,8 +18,6 @@ return [
             'minutes' => 60,
             'free_polish_uses_per_day' => 3,
             'free_summary_uses_per_day' => 3,
-            'polish_characters' => 0,
-            'summary_characters' => 0,
             'cta' => 'Start free',
             'featured' => false,
             'features' => [
@@ -45,7 +42,6 @@ return [
             'monthly_price' => null,
             'yearly_price' => null,
             'price_label' => 'Pay as you go',
-            'price_per_second' => 0.05277778,
             'upload_price_per_hour' => 190,
             'live_price_per_hour' => 240,
             'llm_price' => 5,
@@ -54,8 +50,6 @@ return [
             'minutes' => 600,
             'free_polish_uses_per_day' => 0,
             'free_summary_uses_per_day' => 0,
-            'polish_characters' => 100000,
-            'summary_characters' => 100000,
             'cta' => 'Buy minutes',
             'featured' => true,
             'features' => [
