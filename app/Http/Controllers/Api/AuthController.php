@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\EntitlementService;
 use App\Services\LicenseKeyService;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\JsonResponse;
@@ -14,7 +15,7 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    public function login(Request $request, LicenseKeyService $licenses): JsonResponse
+    public function login(Request $request, LicenseKeyService $licenses, EntitlementService $entitlements): JsonResponse
     {
         $validated = $request->validate([
             'email' => ['required', 'email'],
@@ -55,6 +56,7 @@ class AuthController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
             ],
+            'account' => $this->accountPayload($user, $entitlements),
             'license' => [
                 'key' => $license->app_token,
                 'suffix' => $license->app_token_suffix,
@@ -63,7 +65,7 @@ class AuthController extends Controller
         ]);
     }
 
-    public function me(Request $request, LicenseKeyService $licenses): JsonResponse
+    public function me(Request $request, LicenseKeyService $licenses, EntitlementService $entitlements): JsonResponse
     {
         $user = $request->user();
         abort_unless($user instanceof User, 401);
@@ -76,6 +78,7 @@ class AuthController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
             ],
+            'account' => $this->accountPayload($user, $entitlements),
             'license' => [
                 'key' => $license->app_token,
                 'suffix' => $license->app_token_suffix,
@@ -89,5 +92,24 @@ class AuthController extends Controller
         $request->user()?->currentAccessToken()?->delete();
 
         return response()->json(['message' => 'Signed out.']);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function accountPayload(User $user, EntitlementService $entitlements): array
+    {
+        $summary = $entitlements->summaryFor($user->refresh());
+        $walletBalanceCents = (int) data_get($summary, 'usage.wallet_balance_cents', 0);
+
+        return [
+            'credits' => [
+                'wallet_balance' => (float) data_get($summary, 'usage.wallet_balance', 0),
+                'wallet_balance_cents' => $walletBalanceCents,
+                'currency' => 'USD',
+                'label' => '$'.number_format($walletBalanceCents / 100, 2),
+            ],
+            'entitlements' => $summary,
+        ];
     }
 }

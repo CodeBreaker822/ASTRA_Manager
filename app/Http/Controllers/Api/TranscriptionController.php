@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\API;
 use App\Models\ApiTranscriptionJob;
+use App\Models\User;
 use App\Services\AppSettingsService;
 use App\Services\AssemblyAiSpeechToTextService;
 use App\Services\AwsTranscribeSpeechToTextService;
@@ -13,6 +14,7 @@ use App\Services\CerebrasTranscriptCleanerService;
 use App\Services\CloudflareTranscriptCleanerService;
 use App\Services\DeepgramSpeechToTextService;
 use App\Services\DeepSeekTranscriptCleanerService;
+use App\Services\EntitlementService;
 use App\Services\ElevenLabsSpeechToTextService;
 use App\Services\GeminiTranscriptCleanerService;
 use App\Services\GladiaSpeechToTextService;
@@ -366,7 +368,7 @@ class TranscriptionController extends Controller
         ]);
     }
 
-    public function licenseStatus(Request $request, AppSettingsService $settings): JsonResponse
+    public function licenseStatus(Request $request, AppSettingsService $settings, EntitlementService $entitlements): JsonResponse
     {
         $startedAt = microtime(true);
         $token = $request->bearerToken();
@@ -449,6 +451,7 @@ class TranscriptionController extends Controller
                 'transcription' => [$transcriptionProvider],
                 'polishing' => [$polishingProvider],
             ],
+            ...($license->user ? ['account' => $this->accountPayload($license->user, $entitlements)] : []),
         ]);
 
         return $this->logAndReturn($request, 'license_status', $license, $response, $startedAt, [
@@ -1834,6 +1837,25 @@ class TranscriptionController extends Controller
     {
         return [
             'used' => count($attemptedProviders) > 1,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function accountPayload(User $user, EntitlementService $entitlements): array
+    {
+        $summary = $entitlements->summaryFor($user->refresh());
+        $walletBalanceCents = (int) data_get($summary, 'usage.wallet_balance_cents', 0);
+
+        return [
+            'credits' => [
+                'wallet_balance' => (float) data_get($summary, 'usage.wallet_balance', 0),
+                'wallet_balance_cents' => $walletBalanceCents,
+                'currency' => 'USD',
+                'label' => '$'.number_format($walletBalanceCents / 100, 2),
+            ],
+            'entitlements' => $summary,
         ];
     }
 }

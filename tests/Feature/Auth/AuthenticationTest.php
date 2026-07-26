@@ -24,6 +24,30 @@ test('users can authenticate using the login screen', function () {
     $response->assertRedirect(route('workspace.index', absolute: false));
 });
 
+test('desktop login returns a token license and account credits', function () {
+    $user = User::factory()->create([
+        'wallet_balance' => 12.50,
+    ]);
+
+    $response = $this->postJson('/api/auth/login', [
+        'email' => $user->email,
+        'password' => 'password',
+        'device_name' => 'JERVA Transcriber',
+    ]);
+
+    $response
+        ->assertOk()
+        ->assertJsonPath('token_type', 'Bearer')
+        ->assertJsonPath('license.active', true)
+        ->assertJsonPath('account.credits.wallet_balance', 12.5)
+        ->assertJsonPath('account.credits.wallet_balance_cents', 1250)
+        ->assertJsonPath('account.credits.label', '$12.50')
+        ->assertJsonPath('account.entitlements.plan.key', 'payg');
+
+    expect($response->json('access_token'))->not->toBeEmpty()
+        ->and($response->json('license.key'))->toStartWith('is_license_');
+});
+
 test('configured admins are redirected to dashboard after login', function () {
     config([
         'admin.email' => 'work.jgnc@gmail.com',

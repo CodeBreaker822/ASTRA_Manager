@@ -3,6 +3,7 @@
 use App\Exceptions\InsufficientWalletBalanceException;
 use App\Models\User;
 use App\Services\EntitlementService;
+use App\Services\LicenseKeyService;
 use Inertia\Testing\AssertableInertia;
 
 test('billing settings require authentication', function () {
@@ -42,6 +43,25 @@ test('verified users can view billing settings with credit balance', function ()
             ->where('entitlements.usage.period', now()->toDateString())
             ->has('plans', 2)
         );
+});
+
+test('license status includes account credit balance for user licenses', function () {
+    $user = User::factory()->create([
+        'plan' => 'free',
+        'wallet_balance' => 12.50,
+    ]);
+
+    $license = app(LicenseKeyService::class)->provisionForUser($user);
+
+    $this
+        ->withToken($license->app_token)
+        ->getJson('/api/license/status')
+        ->assertOk()
+        ->assertJsonPath('valid', true)
+        ->assertJsonPath('account.credits.wallet_balance', 12.5)
+        ->assertJsonPath('account.credits.wallet_balance_cents', 1250)
+        ->assertJsonPath('account.credits.label', '$12.50')
+        ->assertJsonPath('account.entitlements.plan.key', 'payg');
 });
 
 test('free transcription minutes are consumed before credit balance', function () {
