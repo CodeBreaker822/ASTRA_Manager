@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\BillingTransaction;
+use App\Support\Money;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -38,8 +39,9 @@ class WalletTopupService
             }
 
             $user = $lockedTransaction->user()->lockForUpdate()->firstOrFail();
+            $balanceCents = Money::decimalDollarsToUsdCents($user->wallet_balance);
             $user->forceFill([
-                'wallet_balance' => round((float) $user->wallet_balance + ($lockedTransaction->amount / 100), 2),
+                'wallet_balance' => Money::usdCentsToDecimalDollars($balanceCents + $lockedTransaction->amount),
             ])->save();
 
             return true;

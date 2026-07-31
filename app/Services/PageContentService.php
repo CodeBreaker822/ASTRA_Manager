@@ -4,7 +4,8 @@ namespace App\Services;
 
 use App\Models\PageContent;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
 
 class PageContentService
 {
@@ -14,12 +15,6 @@ class PageContentService
     public function page(string $page): array
     {
         return Cache::rememberForever("page.{$page}.content", function () use ($page): array {
-            $fallback = $this->fallback($page);
-
-            if (! Schema::hasTable('page_contents')) {
-                return $fallback;
-            }
-
             $rows = PageContent::query()
                 ->where('page', $page)
                 ->get()
@@ -29,10 +24,14 @@ class PageContentService
                 ->all();
 
             if ($rows === []) {
-                return $fallback;
+                Log::error('CMS page content is missing.', [
+                    'page' => $page,
+                ]);
+
+                throw new RuntimeException("CMS page content [{$page}] is not configured.");
             }
 
-            return array_replace_recursive($fallback, $rows);
+            return $rows;
         });
     }
 
@@ -59,21 +58,20 @@ class PageContentService
     /**
      * @return array<string, mixed>
      */
-    private function fallback(string $page): array
-    {
-        $pages = config('marketing.pages', []);
-        $content = is_array($pages) ? ($pages[$page] ?? []) : [];
-
-        return is_array($content) ? $content : [];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
     private function contentArray(PageContent $content): array
     {
         $value = $content->getAttribute('content');
 
-        return is_array($value) ? $value : [];
+        if (! is_array($value)) {
+            Log::error('CMS page section content is invalid.', [
+                'page' => $content->page,
+                'section' => $content->section,
+                'content_id' => $content->id,
+            ]);
+
+            throw new RuntimeException("CMS page content [{$content->page}.{$content->section}] is invalid.");
+        }
+
+        return $value;
     }
 }

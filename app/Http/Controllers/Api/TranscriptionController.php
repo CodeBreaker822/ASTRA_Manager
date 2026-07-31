@@ -1112,25 +1112,63 @@ class TranscriptionController extends Controller
         $service = match ($provider['provider']) {
             AppSettingsService::PROVIDER_DEEPGRAM => new DeepgramSpeechToTextService(
                 apiKey: $provider['api_key'],
+                endpoint: $this->providerMetadataString($provider, 'listen_url'),
                 modelId: $provider['model'],
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_ELEVENLABS => new ElevenLabsSpeechToTextService(
                 apiKey: $provider['api_key'],
+                endpoint: $this->providerMetadataString($provider, 'speech_to_text_url'),
                 modelId: $provider['model'],
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_SPEECHMATICS => new SpeechmaticsSpeechToTextService(
                 apiKey: $provider['api_key'],
+                baseUrl: $this->providerMetadataString($provider, 'base_url'),
                 modelId: $provider['model'],
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
+                pollIntervalMs: $this->providerMetadataInt($provider, 'poll_interval_ms'),
+                maxWaitSeconds: $this->providerMetadataInt($provider, 'max_wait_seconds'),
             ),
             AppSettingsService::PROVIDER_GROQ_TRANSCRIPTION => new GroqSpeechToTextService(
                 apiKey: $provider['api_key'],
+                endpoint: $this->providerMetadataString($provider, 'transcription_url'),
                 modelId: $provider['model'],
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
-            AppSettingsService::PROVIDER_GLADIA => new GladiaSpeechToTextService($provider['api_key'], $provider['model']),
-            AppSettingsService::PROVIDER_ASSEMBLYAI => new AssemblyAiSpeechToTextService($provider['api_key'], $provider['model']),
-            AppSettingsService::PROVIDER_AZURE_SPEECH => new AzureSpeechToTextService($provider['api_key'], $provider['model']),
-            AppSettingsService::PROVIDER_GOOGLE_SPEECH => new GoogleCloudSpeechToTextService($provider['api_key'], $provider['model']),
-            AppSettingsService::PROVIDER_AWS_TRANSCRIBE => new AwsTranscribeSpeechToTextService($provider['api_key'], $provider['model']),
+            AppSettingsService::PROVIDER_GLADIA => new GladiaSpeechToTextService(
+                $provider['api_key'],
+                $provider['model'],
+                $this->providerMetadataString($provider, 'base_url'),
+                $this->providerMetadataInt($provider, 'poll_interval_ms'),
+                $this->providerMetadataInt($provider, 'max_wait_seconds'),
+                $this->providerMetadataInt($provider, 'timeout'),
+            ),
+            AppSettingsService::PROVIDER_ASSEMBLYAI => new AssemblyAiSpeechToTextService(
+                $provider['api_key'],
+                $provider['model'],
+                $this->providerMetadataString($provider, 'base_url'),
+                $this->providerMetadataInt($provider, 'poll_interval_ms'),
+                $this->providerMetadataInt($provider, 'max_wait_seconds'),
+                $this->providerMetadataInt($provider, 'timeout'),
+            ),
+            AppSettingsService::PROVIDER_AZURE_SPEECH => new AzureSpeechToTextService(
+                $provider['api_key'],
+                $provider['model'],
+                $this->providerMetadataString($provider, 'fast_transcription_url'),
+            ),
+            AppSettingsService::PROVIDER_GOOGLE_SPEECH => new GoogleCloudSpeechToTextService(
+                $provider['api_key'],
+                $provider['model'],
+                $this->providerMetadataString($provider, 'base_url'),
+                $this->providerMetadataString($provider, 'token_url'),
+            ),
+            AppSettingsService::PROVIDER_AWS_TRANSCRIBE => new AwsTranscribeSpeechToTextService(
+                $provider['api_key'],
+                $provider['model'],
+                pollIntervalMs: $this->providerMetadataInt($provider, 'poll_interval_ms'),
+                maxWaitSeconds: $this->providerMetadataInt($provider, 'max_wait_seconds'),
+            ),
             AppSettingsService::PROVIDER_RUNPOD => $this->runPodService($provider),
         };
 
@@ -1161,6 +1199,7 @@ class TranscriptionController extends Controller
             $provider['api_key'],
             $provider['model'],
             $this->runPodRunsyncUrl($provider['metadata'] ?? []),
+            $this->providerMetadataInt($provider, 'timeout'),
         );
     }
 
@@ -1186,6 +1225,7 @@ class TranscriptionController extends Controller
                 $provider['api_key'],
                 $provider['model'],
                 $this->runPodRunsyncUrl($provider['metadata'] ?? []),
+                $this->providerMetadataInt($provider, 'timeout'),
             );
             $results = $service->transcribeBatch(array_map(
                 fn (array $clip): array => [
@@ -1804,33 +1844,97 @@ class TranscriptionController extends Controller
             AppSettingsService::PROVIDER_GEMINI => new GeminiTranscriptCleanerService(
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
+                endpointTemplate: $this->providerMetadataString($provider, 'endpoint_template'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_GROQ_TEXT_FIXER => new GroqTranscriptCleanerService(
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
+                endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_DEEPSEEK => new DeepSeekTranscriptCleanerService(
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
+                endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_CEREBRAS => new CerebrasTranscriptCleanerService(
+                allowedModels: $this->providerModels($provider),
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
+                endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
+                maxRetries: $this->providerMetadataInt($provider, 'max_retries'),
             ),
             AppSettingsService::PROVIDER_MISTRAL => new MistralTranscriptCleanerService(
+                allowedModels: $this->providerModels($provider),
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
+                endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
+                maxRetries: $this->providerMetadataInt($provider, 'max_retries'),
             ),
             AppSettingsService::PROVIDER_OPENROUTER => new OpenRouterTranscriptCleanerService(
+                allowedModels: $this->providerModels($provider),
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
+                endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
+                maxRetries: $this->providerMetadataInt($provider, 'max_retries'),
             ),
             AppSettingsService::PROVIDER_CLOUDFLARE => new CloudflareTranscriptCleanerService(
+                allowedModels: $this->providerModels($provider),
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
-                endpoint: app(AppSettingsService::class)->cloudflareChatCompletionsUrl($provider['metadata']['account_id'] ?? null),
+                endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
+                maxRetries: $this->providerMetadataInt($provider, 'max_retries'),
             ),
         };
+    }
+
+    /**
+     * @param  array<string, mixed>  $provider
+     */
+    private function providerMetadataString(array $provider, string $key): string
+    {
+        $value = ($provider['metadata'] ?? [])[$key] ?? null;
+
+        if (! is_string($value) || trim($value) === '') {
+            throw new \RuntimeException("Provider [{$provider['provider']}] runtime setting [{$key}] is not configured in API Manager.");
+        }
+
+        return trim($value);
+    }
+
+    /**
+     * @param  array<string, mixed>  $provider
+     */
+    private function providerMetadataInt(array $provider, string $key): int
+    {
+        $value = ($provider['metadata'] ?? [])[$key] ?? null;
+
+        if (! is_numeric($value)) {
+            throw new \RuntimeException("Provider [{$provider['provider']}] runtime setting [{$key}] is not configured in API Manager.");
+        }
+
+        return (int) $value;
+    }
+
+    /**
+     * @param  array<string, mixed>  $provider
+     * @return array<int, string>
+     */
+    private function providerModels(array $provider): array
+    {
+        $models = $provider['models'] ?? null;
+
+        if (! is_array($models) || array_values(array_filter($models, is_string(...))) === []) {
+            throw new \RuntimeException("Provider [{$provider['provider']}] model list is not configured in API Manager.");
+        }
+
+        return array_values(array_filter($models, is_string(...)));
     }
 
     private function fallbackDetails(array $attemptedProviders): array

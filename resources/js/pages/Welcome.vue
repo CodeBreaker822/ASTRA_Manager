@@ -5,7 +5,13 @@ import { dashboard, login } from '@/routes';
 </script>
 
 <template>
-    <Head title="" />
+    <Head title="JERVA Transcriber">
+        <meta
+            name="description"
+            content="Use JERVA Transcriber to access the online transcription portal."
+        />
+        <meta property="og:image" content="/JervaLogo.png" />
+    </Head>
 
     <main
         class="flex min-h-screen items-center justify-center bg-background px-6 py-12 text-foreground"
@@ -16,13 +22,17 @@ import { dashboard, login } from '@/routes';
         >
             <div class="mb-6 flex flex-col items-center text-center">
                 <div
-                    class="mb-4 flex size-12 items-center justify-center rounded-md bg-primary text-primary-foreground"
+                    class="mb-4 flex size-12 items-center justify-center rounded-md border border-slate-200 bg-slate-100"
                 >
-                    <AppLogoIcon class="size-7 fill-current" />
+                    <AppLogoIcon class="size-7" />
                 </div>
 
-                <h1 id="portal-title" class="text-xl font-semibold">JERVA</h1>
-                <p class="mt-1 text-sm text-muted-foreground">Portal</p>
+                <h1 id="portal-title" class="text-xl font-semibold">
+                    JERVA Transcriber
+                </h1>
+                <p class="mt-1 text-sm text-muted-foreground">
+                    Use JERVA Portal
+                </p>
             </div>
 
             <Link

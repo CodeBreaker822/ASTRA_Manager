@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\MarketingSeoService;
 use App\Services\PageContentService;
+use App\Services\PlanService;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -13,11 +15,23 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class DownloadController extends Controller
 {
-    public function index(PageContentService $pages): Response
-    {
+    public function index(
+        PageContentService $pages,
+        PlanService $plans,
+        MarketingSeoService $seo,
+    ): Response {
+        $content = $pages->page('download');
+        $release = $this->latestRelease();
+
         return Inertia::render('marketing/Download', [
-            'release' => $this->latestRelease(),
-            'content' => $pages->page('download'),
+            'release' => $release,
+            'content' => $content,
+            'pricing' => $plans->marketingSummary(),
+            'seo' => $seo->metadata(
+                $content,
+                route('download'),
+                $seo->downloadStructuredData($release),
+            ),
         ]);
     }
 
@@ -34,7 +48,7 @@ class DownloadController extends Controller
     }
 
     /**
-     * @return array{available: bool, platform: string, size: string|null, published_at: string|null, download_url: string|null}
+     * @return array{available: bool, platform: string, size: string|null, published_at: string|null, published_at_iso: string|null, download_url: string|null}
      */
     private function latestRelease(): array
     {
@@ -45,6 +59,7 @@ class DownloadController extends Controller
             'platform' => 'Windows',
             'size' => $package ? $this->humanFileSize($package['size']) : null,
             'published_at' => $package ? date('F j, Y', $package['modified_at']) : null,
+            'published_at_iso' => $package ? date(DATE_ATOM, $package['modified_at']) : null,
             'download_url' => $package ? route('download.latest') : null,
         ];
     }

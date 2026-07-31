@@ -5,7 +5,7 @@ namespace App\Services;
 use App\Models\PlanComparisonRow;
 use App\Models\PlanTier;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Schema;
+use RuntimeException;
 
 class PlanService
 {
@@ -15,21 +15,13 @@ class PlanService
     public function tiers(): array
     {
         return Cache::rememberForever('plans.all', function (): array {
-            $fallback = $this->configTiers();
-
-            if (! Schema::hasTable('plan_tiers') || PlanTier::query()->where('is_active', true)->doesntExist()) {
-                return $fallback;
-            }
-
             return PlanTier::query()
                 ->where('is_active', true)
                 ->orderBy('sort_order')
                 ->get()
-                ->mapWithKeys(function (PlanTier $tier) use ($fallback): array {
-                    $defaults = $fallback[$tier->key] ?? [];
-
+                ->mapWithKeys(function (PlanTier $tier): array {
                     return [
-                        $tier->key => array_merge($defaults, [
+                        $tier->key => [
                             'name' => $tier->name,
                             'tagline' => $tier->tagline,
                             'monthly_price' => $tier->monthly_price,
@@ -46,8 +38,8 @@ class PlanService
                             'cta' => $tier->cta,
                             'featured' => $tier->featured,
                             'features' => $this->stringList($tier->features),
-                            'entitlements' => array_merge((array) ($defaults['entitlements'] ?? []), (array) $tier->entitlements),
-                        ]),
+                            'entitlements' => (array) $tier->entitlements,
+                        ],
                     ];
                 })
                 ->all();
@@ -66,6 +58,27 @@ class PlanService
     }
 
     /**
+     * @return array{
+     *     currency: string,
+     *     free_minutes_per_day: int|null,
+     *     upload_price_per_hour: float|null,
+     *     live_price_per_hour: float|null
+     * }
+     */
+    public function marketingSummary(): array
+    {
+        $free = $this->plan('free');
+        $payg = $this->plan('payg');
+
+        return [
+            'currency' => 'USD',
+            'free_minutes_per_day' => $this->positiveInt($free['minutes'] ?? null),
+            'upload_price_per_hour' => $this->positiveFloat($payg['upload_price_per_hour'] ?? null),
+            'live_price_per_hour' => $this->positiveFloat($payg['live_price_per_hour'] ?? null),
+        ];
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     public function plan(string $key): ?array
@@ -79,12 +92,6 @@ class PlanService
     public function comparison(): array
     {
         return Cache::rememberForever('plans.comparison', function (): array {
-            $fallback = $this->configComparison();
-
-            if (! Schema::hasTable('plan_comparison_rows') || PlanComparisonRow::query()->doesntExist()) {
-                return $fallback;
-            }
-
             return PlanComparisonRow::query()
                 ->orderBy('sort_order')
                 ->get()
@@ -93,37 +100,6 @@ class PlanService
                 ])
                 ->all();
         });
-    }
-
-    public function defaultKey(): string
-    {
-        return (string) config('plans.default', 'free');
-    }
-
-    public function forget(): void
-    {
-        Cache::forget('plans.all');
-        Cache::forget('plans.comparison');
-    }
-
-    /**
-     * @return array<string, array<string, mixed>>
-     */
-    private function configTiers(): array
-    {
-        $tiers = config('plans.tiers', []);
-
-        return is_array($tiers) ? $tiers : [];
-    }
-
-    /**
-     * @return array<string, array<int, string>>
-     */
-    private function configComparison(): array
-    {
-        $comparison = config('plans.comparison', []);
-
-        return is_array($comparison) ? $comparison : [];
     }
 
     /**
@@ -138,26 +114,56 @@ class PlanService
         return array_values(array_filter($value, is_string(...)));
     }
 
+    private function positiveInt(mixed $value): ?int
+    {
+        if (! is_numeric($value) || (int) $value <= 0) {
+            return null;
+        }
+
+        return (int) $value;
+    }
+
+    private function positiveFloat(mixed $value): ?float
+    {
+        if (! is_numeric($value) || (float) $value <= 0) {
+            return null;
+        }
+
+        return (float) $value;
+    }
+
     /**
      * Get the price per unit for a specific feature.
      *
-     * @param string $feature Feature name (upload, live, polish, summarize)
-     * @return float|null The rate per unit (e.g., $ per hour, $ per 1000 chars), or null if not found
+     * @param  string  $feature  Feature name (upload, live, polish, summarize)
+     * @return float The rate per unit (e.g., $ per hour or $ per character)
      */
-    public function ratePerUnit(string $feature): ?float
+    public function ratePerUnit(string $feature): float
     {
         $paygPlan = $this->plan('payg');
 
         if (! is_array($paygPlan)) {
-            return null;
+            throw new RuntimeException('Pay-as-you-go pricing is not configured. Update Pricing Manager before billing users.');
         }
 
-        return match ($feature) {
+        $rate = match ($feature) {
             'upload' => $paygPlan['upload_price_per_hour'] ?? null,
             'live' => $paygPlan['live_price_per_hour'] ?? null,
             'polish' => $paygPlan['polish_price_per_character'] ?? null,
             'summarize' => $paygPlan['summary_price_per_character'] ?? null,
-            default => null,
+            default => throw new \InvalidArgumentException("Unknown billing feature: {$feature}"),
         };
+
+        if (! is_numeric($rate)) {
+            throw new RuntimeException("Pay-as-you-go rate for [{$feature}] is not configured. Update Pricing Manager before billing users.");
+        }
+
+        return (float) $rate;
+    }
+
+    public function forget(): void
+    {
+        Cache::forget('plans.all');
+        Cache::forget('plans.comparison');
     }
 }

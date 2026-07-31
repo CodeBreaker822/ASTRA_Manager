@@ -20,7 +20,7 @@ if ($email === '' || $password === '') {
 $user = User::query()->updateOrCreate(
     ['email' => $email],
     [
-        'name' => 'JERVA Web Diagnostic',
+        'name' => 'JERVA Transcriber Diagnostic',
         'password' => Hash::make($password),
         'plan' => 'pro',
         'user_status' => 'active',

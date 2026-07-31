@@ -11,30 +11,38 @@ beforeEach(function () {
     Cache::flush();
 });
 
-test('features and download pages use marketing config fallback', function () {
+test('marketing pages fail when CMS content is missing', function () {
     $this->withoutVite();
 
+    $this->get(route('home'))
+        ->assertServerError();
+
     $this->get(route('features'))
-        ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('marketing/Features')
-            ->where('content.hero.title', 'Online transcription, shaped like the desktop workspace.')
-            ->where('content.feature_rows.0.icon', 'Mic')
-        );
+        ->assertServerError();
 
     $this->get(route('download'))
-        ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('marketing/Download')
-            ->where('content.hero.title', 'Get JERVA for desktop')
-            ->where('content.requirements.0.icon', 'Laptop')
-        );
+        ->assertServerError();
 });
 
-test('page managers can update features and download content', function () {
+test('page managers can update home features and download content', function () {
     $this->withoutVite();
 
     $manager = createPageManagerUser();
+
+    $home = config('marketing.pages.home');
+    $home['hero']['title'] = 'Editable home story';
+
+    $this->actingAs($manager)
+        ->put(route('dashboard.pages.home.update'), ['content' => $home])
+        ->assertRedirect();
+
+    $this->get(route('home'))
+        ->assertOk()
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->component('marketing/Landing')
+            ->where('content.hero.title', 'Editable home story')
+            ->where('seo.title', $home['seo']['title'])
+        );
 
     $features = config('marketing.pages.features');
     $features['hero']['title'] = 'Editable feature story';
@@ -72,6 +80,10 @@ test('page managers can update features and download content', function () {
 
 test('page dashboard routes require the pages management gate', function () {
     $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->get(route('dashboard.pages.home.edit'))
+        ->assertForbidden();
 
     $this->actingAs($user)
         ->get(route('dashboard.pages.features.edit'))

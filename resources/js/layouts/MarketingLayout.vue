@@ -13,7 +13,7 @@ import {
 
 const navItems = [
     { label: 'Features', href: '/features' },
-    { label: 'Price', href: '/price' },
+    { label: 'Pricing', href: '/price' },
     { label: 'Blog', href: '/blog' },
     { label: 'Download', href: '/download' },
 ];
@@ -30,12 +30,12 @@ const navItems = [
             >
                 <Link href="/" class="flex items-center gap-3">
                     <span
-                        class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white"
+                        class="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-100"
                     >
-                        <AppLogoIcon class="size-6 fill-current" />
+                        <AppLogoIcon class="size-6" />
                     </span>
                     <span class="text-base font-semibold text-slate-950">
-                        JERVA
+                        JERVA Transcriber
                     </span>
                 </Link>
 
@@ -73,7 +73,7 @@ const navItems = [
                     <SheetContent side="right" class="bg-white">
                         <SheetHeader>
                             <SheetTitle class="text-left text-slate-950">
-                                JERVA
+                                JERVA Transcriber
                             </SheetTitle>
                         </SheetHeader>
                         <div class="mt-8 grid gap-3">
@@ -106,17 +106,18 @@ const navItems = [
                 <div>
                     <div class="flex items-center gap-3">
                         <span
-                            class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white"
+                            class="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-100"
                         >
-                            <AppLogoIcon class="size-6 fill-current" />
+                            <AppLogoIcon class="size-6" />
                         </span>
                         <span class="text-base font-semibold text-slate-950">
-                            JERVA
+                            JERVA Transcriber
                         </span>
                     </div>
                     <p class="mt-4 text-sm leading-6 text-slate-600">
-                        Online transcription workspace for clean transcripts,
-                        summaries, and exports.
+                        Transcribe audio online or use the free Windows app for
+                        local Whisper transcription, cleanup, summaries, and
+                        exports.
                     </p>
                 </div>
 
@@ -129,7 +130,7 @@ const navItems = [
                             Features
                         </Link>
                         <Link href="/price" class="hover:text-blue-600">
-                            Price
+                            Pricing
                         </Link>
                         <Link href="/download" class="hover:text-blue-600">
                             Desktop app
@@ -157,14 +158,15 @@ const navItems = [
                         Workspace
                     </h2>
                     <p class="mt-4 text-sm leading-6 text-slate-600">
-                        The web edition is online-only. Offline Whisper, VAD,
-                        and diarization stay in the desktop app.
+                        Use the online workspace for convenience or download the
+                        free desktop app for offline Whisper, VAD, and speaker
+                        separation.
                     </p>
                 </div>
             </div>
             <div class="border-t border-slate-200 px-6 py-4">
                 <p class="mx-auto max-w-6xl text-sm text-slate-600">
-                    Copyright 2026 JERVA. All rights reserved.
+                    Copyright 2026 JERVA Transcriber. All rights reserved.
                 </p>
             </div>
         </footer>

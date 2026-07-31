@@ -1,10 +1,12 @@
 <?php
 
 use App\Models\PlanTier;
+use App\Models\PlanComparisonRow;
 use App\Models\User;
 use App\Models\UserPermissions;
 use App\Models\UserPositions;
 use App\Services\EntitlementService;
+use Database\Seeders\PlanTierSeeder;
 use Illuminate\Support\Facades\Cache;
 use Inertia\Testing\AssertableInertia;
 
@@ -12,43 +14,38 @@ beforeEach(function () {
     Cache::flush();
 });
 
-test('pricing uses config fallback when database rows are empty', function () {
+test('pricing does not use config fallback when database rows are empty', function () {
     $this->withoutVite();
+    PlanTier::query()->delete();
+    PlanComparisonRow::query()->delete();
+    Cache::flush();
 
     $user = User::factory()->create(['plan' => 'payg']);
 
-    expect(app(EntitlementService::class)->planFor($user))
-        ->toMatchArray([
-            'key' => 'payg',
-            'minutes' => 600,
-        ]);
+    expect(fn () => app(EntitlementService::class)->planFor($user))
+        ->toThrow(\RuntimeException::class, 'Pricing plan [payg] is not configured.');
 
     $this->get(route('price'))
-        ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('marketing/Price')
-            ->where('plans.0.key', 'free')
-            ->where('plans.1.key', 'payg')
-            ->where('content.hero.title', 'Pay as you go')
-            ->where('comparison.Upload audio transcription.0', 'free')
-        );
+        ->assertServerError();
 });
 
 test('pricing managers can update tiers and comparison rows', function () {
     $this->withoutVite();
+    $this->seed(PlanTierSeeder::class);
+    Cache::flush();
 
     $manager = createPricingManagerUser();
     $payload = pricingPayload();
     $payload['tiers'][0]['minutes'] = 45;
     $payload['tiers'][1]['minutes'] = 750;
     $payload['tiers'][1]['price_label'] = '$25';
-    $payload['tiers'][1]['upload_price_per_hour'] = 220;
-    $payload['tiers'][1]['live_price_per_hour'] = 260;
+    $payload['tiers'][1]['upload_price_per_hour'] = 0.123456789123;
+    $payload['tiers'][1]['live_price_per_hour'] = 0.153456789123;
     $payload['tiers'][1]['llm_price'] = 8;
     $payload['tiers'][0]['free_polish_uses_per_day'] = 3;
     $payload['tiers'][0]['free_summary_uses_per_day'] = 3;
-    $payload['tiers'][1]['polish_price_per_character'] = 0.0003;
-    $payload['tiers'][1]['summary_price_per_character'] = 0.0004;
+    $payload['tiers'][1]['polish_price_per_character'] = 0.000005123456;
+    $payload['tiers'][1]['summary_price_per_character'] = 0.000006123456;
     $payload['tiers'][1]['features'][0] = '750 one-time transcription minutes';
     $payload['tiers'][1]['entitlements'] = [
         'upload' => false,
@@ -65,22 +62,23 @@ test('pricing managers can update tiers and comparison rows', function () {
 
     $this->actingAs($manager)
         ->put(route('dashboard.pricing.update'), $payload)
+        ->assertSessionHasNoErrors()
         ->assertRedirect();
 
     $proTier = PlanTier::query()->where('key', 'payg')->firstOrFail();
 
     expect($proTier->minutes)->toBe(750)
-        ->and($proTier->upload_price_per_hour)->toBe(220.0)
-        ->and($proTier->live_price_per_hour)->toBe(260.0)
+        ->and((float) $proTier->upload_price_per_hour)->toBe(0.123456789123)
+        ->and((float) $proTier->live_price_per_hour)->toBe(0.153456789123)
         ->and($proTier->llm_price)->toBe(8.0)
-        ->and($proTier->polish_price_per_character)->toBe(0.0003)
-        ->and($proTier->summary_price_per_character)->toBe(0.0004)
+        ->and((float) $proTier->polish_price_per_character)->toBe(0.000005123456)
+        ->and((float) $proTier->summary_price_per_character)->toBe(0.000006123456)
         ->and($proTier->entitlements)->toMatchArray([
-            'upload' => true,
-            'live' => true,
-            'polish' => true,
-            'summarize' => true,
-            'exports' => ['txt', 'docx', 'xlsx'],
+            'upload' => false,
+            'live' => false,
+            'polish' => false,
+            'summarize' => false,
+            'exports' => [],
         ]);
 
     $proUser = User::factory()->create(['plan' => 'payg']);
@@ -106,11 +104,11 @@ test('pricing managers can update tiers and comparison rows', function () {
             ->where('entitlements.plan.key', 'payg')
             ->where('entitlements.plan.minutes', 45)
             ->where('plans.1.key', 'payg')
-            ->where('plans.1.upload_price_per_hour', 220)
-            ->where('plans.1.live_price_per_hour', 260)
+            ->where('plans.1.upload_price_per_hour', 0.123456789123)
+            ->where('plans.1.live_price_per_hour', 0.153456789123)
             ->where('plans.1.llm_price', 8)
-            ->where('plans.1.polish_price_per_character', 0.0003)
-            ->where('plans.1.summary_price_per_character', 0.0004)
+            ->where('plans.1.polish_price_per_character', 0.000005123456)
+            ->where('plans.1.summary_price_per_character', 0.000006123456)
         );
 });
 

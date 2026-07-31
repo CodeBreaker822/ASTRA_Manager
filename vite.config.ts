@@ -7,12 +7,17 @@ import { defineConfig } from 'vite';
 export default defineConfig({
     build: {
         rolldownOptions: {
-            onwarn(warning: { code?: string; id?: string; message?: string }, defaultHandler: (warning: unknown) => void) {
+            onwarn(
+                warning: { code?: string; id?: string; message?: string },
+                defaultHandler: (warning: unknown) => void,
+            ) {
                 const warningText = `${warning.id || ''} ${warning.message || ''} ${JSON.stringify(warning)}`;
 
                 if (
                     warning.code === 'INVALID_ANNOTATION' &&
-                    warningText.includes('node_modules/reka-ui/node_modules/@vueuse/core')
+                    warningText.includes(
+                        'node_modules/reka-ui/node_modules/@vueuse/core',
+                    )
                 ) {
                     return;
                 }
@@ -24,6 +29,7 @@ export default defineConfig({
     plugins: [
         laravel({
             input: ['resources/css/app.css', 'resources/js/app.ts'],
+            ssr: 'resources/js/ssr.ts',
             refresh: true,
         }),
         tailwindcss(),

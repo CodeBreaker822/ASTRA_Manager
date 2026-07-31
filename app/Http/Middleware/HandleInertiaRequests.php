@@ -8,6 +8,7 @@ use App\Services\EntitlementService;
 use App\Services\PayMongoCheckoutService;
 use App\Services\PayMongoWalletTopupReconciler;
 use App\Services\PlanService;
+use App\Support\Money;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rules\Password;
@@ -24,6 +25,25 @@ class HandleInertiaRequests extends Middleware
      * @var string
      */
     protected $rootView = 'app';
+
+    /**
+     * Keep private and interactive application routes out of the public SSR
+     * process. Public marketing pages remain server rendered.
+     *
+     * @var array<int, string>
+     */
+    protected $withoutSsr = [
+        'dashboard*',
+        'workspace*',
+        'settings*',
+        'login',
+        'register',
+        'forgot-password',
+        'reset-password*',
+        'verify-email*',
+        'confirm-password',
+        'two-factor-challenge',
+    ];
 
     /**
      * Determines the current asset version.
@@ -164,7 +184,7 @@ class HandleInertiaRequests extends Middleware
                 'payment_method_types' => $payMongo->paymentMethodTypes(),
                 'pass_on_fees' => (bool) config('services.paymongo.pass_on_fees', true),
             ],
-            'walletBalance' => (int) round(((float) $user->wallet_balance) * 100),
+            'walletBalance' => Money::decimalDollarsToUsdCents($user->wallet_balance),
         ];
     }
 }

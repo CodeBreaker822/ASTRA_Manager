@@ -118,14 +118,20 @@ class TranscriptActionController extends Controller
         $validated = $request->validate([
             'format' => ['required', 'string', 'in:txt,docx,xlsx'],
             'source' => ['nullable', 'string', 'in:raw,cleaned,summary'],
+            'summary_source' => ['nullable', 'string', 'in:raw,cleaned'],
         ]);
         $format = (string) $validated['format'];
+        $source = (string) ($validated['source'] ?? 'raw');
 
         if (! $entitlements->allowsExport($request->user(), $format)) {
             return $this->upgradeRequired('This export format is not available for this account.');
         }
 
-        $file = $exports->export($transcript, $format, (string) ($validated['source'] ?? 'raw'));
+        try {
+            $file = $exports->export($transcript, $format, $source, (string) ($validated['summary_source'] ?? 'raw'));
+        } catch (\RuntimeException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
 
         app(WebTranscriptProcessor::class)->appendLog($transcript, 'exported', strtoupper($format).' export generated.');
 
@@ -139,14 +145,6 @@ class TranscriptActionController extends Controller
         $this->authorize('view', $project);
         abort_unless($transcript->project_id === $project->id, 404);
         $this->authorize('view', $transcript);
-    }
-
-    private function upgradeRequired(string $message): JsonResponse
-    {
-        return response()->json([
-            'message' => $message,
-            'upgrade' => true,
-        ], 402);
     }
 
     private function hasRawTranscript(Transcript $transcript): bool

@@ -27,6 +27,13 @@ type Tier = {
     cta: string;
     featured: boolean;
     features: string[];
+    entitlements: {
+        upload: boolean;
+        live: boolean;
+        polish: boolean;
+        summarize: boolean;
+        exports: string[];
+    };
 };
 
 type ComparisonRow = {
@@ -55,32 +62,23 @@ defineOptions({
 });
 
 const pricingContent = {
-    hero: {
-        eyebrow: props.pricingContent?.hero?.eyebrow ?? '',
-        title: props.pricingContent?.hero?.title ?? '',
-        intro: props.pricingContent?.hero?.intro ?? '',
-    },
-    faq: Array.isArray(props.pricingContent?.faq)
-        ? props.pricingContent.faq.map((item) => ({
-              question: item.question ?? '',
-              answer: item.answer ?? '',
-          }))
-        : [],
+    hero: { ...props.pricingContent.hero },
+    faq: props.pricingContent.faq.map((item) => ({ ...item })),
 };
 
 const form = useForm({
     tiers: props.tiers.map((tier) => ({
         ...tier,
-        monthly_price: tier.monthly_price ?? '',
-        yearly_price: tier.yearly_price ?? '',
-        upload_price_per_hour: tier.upload_price_per_hour ?? 0,
-        live_price_per_hour: tier.live_price_per_hour ?? 0,
-        llm_price: tier.llm_price ?? 0,
-        polish_price_per_character: tier.polish_price_per_character ?? 0,
-        summary_price_per_character: tier.summary_price_per_character ?? 0,
-        free_polish_uses_per_day: tier.free_polish_uses_per_day ?? 0,
-        free_summary_uses_per_day: tier.free_summary_uses_per_day ?? 0,
+        monthly_price: tier.monthly_price,
+        yearly_price: tier.yearly_price,
         features: [...tier.features, '', '', '', ''].slice(0, 6),
+        entitlements: {
+            upload: tier.entitlements.upload,
+            live: tier.entitlements.live,
+            polish: tier.entitlements.polish,
+            summarize: tier.entitlements.summarize,
+            exports: [...tier.entitlements.exports],
+        },
     })),
     comparisonRows: props.comparisonRows.map((row) => ({
         label: row.label,
@@ -106,6 +104,12 @@ const addComparisonRow = () => {
 
 const removeComparisonRow = (index: number) => {
     form.comparisonRows.splice(index, 1);
+};
+
+const toggleExport = (tier: Tier, format: string) => {
+    tier.entitlements.exports = tier.entitlements.exports.includes(format)
+        ? tier.entitlements.exports.filter((item) => item !== format)
+        : [...tier.entitlements.exports, format];
 };
 
 const submit = () => {
@@ -247,12 +251,12 @@ const submit = () => {
                                     v-model.number="tier.upload_price_per_hour"
                                     type="number"
                                     min="0"
-                                    step="0.01"
-                                    placeholder="190"
+                                    step="any"
+                                    placeholder="0.12"
                                     class="h-9 font-mono text-sm"
                                 />
                                 <div class="col-span-2 text-xs text-slate-400">
-                                    Example: <strong>190</strong> = $190/hour
+                                    Example: <strong>0.12</strong> = $0.12/hour
                                 </div>
                             </label>
 
@@ -268,12 +272,12 @@ const submit = () => {
                                     v-model.number="tier.live_price_per_hour"
                                     type="number"
                                     min="0"
-                                    step="0.01"
-                                    placeholder="240"
+                                    step="any"
+                                    placeholder="0.15"
                                     class="h-9 font-mono text-sm"
                                 />
                                 <div class="col-span-2 text-xs text-slate-400">
-                                    Example: <strong>240</strong> = $240/hour
+                                    Example: <strong>0.15</strong> = $0.15/hour
                                 </div>
                             </label>
 
@@ -327,13 +331,14 @@ const submit = () => {
                                     "
                                     type="number"
                                     min="0"
-                                    step="0.0001"
-                                    placeholder="0.0002"
+                                    step="any"
+                                    placeholder="0.000005"
                                     class="h-9 font-mono text-sm"
                                 />
                                 <div class="col-span-2 text-xs text-slate-400">
-                                    Example: <strong>0.0002</strong> = $0.20 per
-                                    1,000 characters
+                                    Stored per character. Example:
+                                    <strong>0.000005</strong> displays as $0.005
+                                    per 1,000 characters.
                                 </div>
                             </label>
 
@@ -351,13 +356,14 @@ const submit = () => {
                                     "
                                     type="number"
                                     min="0"
-                                    step="0.0001"
-                                    placeholder="0.0002"
+                                    step="any"
+                                    placeholder="0.000005"
                                     class="h-9 font-mono text-sm"
                                 />
                                 <div class="col-span-2 text-xs text-slate-400">
-                                    Example: <strong>0.0002</strong> = $0.20 per
-                                    1,000 characters
+                                    Stored per character. Example:
+                                    <strong>0.000005</strong> displays as $0.005
+                                    per 1,000 characters.
                                 </div>
                             </label>
 
@@ -421,16 +427,83 @@ const submit = () => {
                                 </div>
                             </div>
 
-                            <Input
-                                :id="`yearly-${tier.key}`"
-                                v-model.number="tier.yearly_price"
-                                type="hidden"
-                            />
-                            <Input
-                                :id="`monthly-${tier.key}`"
-                                v-model.number="tier.monthly_price"
-                                type="hidden"
-                            />
+                            <div
+                                class="grid grid-cols-[9.5rem_1fr] gap-3 text-sm"
+                            >
+                                <span class="pt-2 font-medium text-slate-600"
+                                    >Allowed features</span
+                                >
+                                <div class="grid gap-2">
+                                    <label
+                                        class="flex items-center gap-2 text-slate-700"
+                                    >
+                                        <input
+                                            v-model="tier.entitlements.upload"
+                                            type="checkbox"
+                                            class="size-4"
+                                        />
+                                        Upload audio transcription
+                                    </label>
+                                    <label
+                                        class="flex items-center gap-2 text-slate-700"
+                                    >
+                                        <input
+                                            v-model="tier.entitlements.live"
+                                            type="checkbox"
+                                            class="size-4"
+                                        />
+                                        Live browser transcription
+                                    </label>
+                                    <label
+                                        class="flex items-center gap-2 text-slate-700"
+                                    >
+                                        <input
+                                            v-model="tier.entitlements.polish"
+                                            type="checkbox"
+                                            class="size-4"
+                                        />
+                                        Transcript polishing
+                                    </label>
+                                    <label
+                                        class="flex items-center gap-2 text-slate-700"
+                                    >
+                                        <input
+                                            v-model="
+                                                tier.entitlements.summarize
+                                            "
+                                            type="checkbox"
+                                            class="size-4"
+                                        />
+                                        Transcript summarization
+                                    </label>
+                                    <div class="flex flex-wrap gap-3 pt-1">
+                                        <label
+                                            v-for="format in [
+                                                'txt',
+                                                'docx',
+                                                'xlsx',
+                                            ]"
+                                            :key="`${tier.key}-${format}`"
+                                            class="flex items-center gap-2 text-slate-700 uppercase"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                class="size-4"
+                                                :checked="
+                                                    tier.entitlements.exports.includes(
+                                                        format,
+                                                    )
+                                                "
+                                                @change="
+                                                    toggleExport(tier, format)
+                                                "
+                                            />
+                                            {{ format }}
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
                             <Input
                                 :id="`llm-rate-${tier.key}`"
                                 v-model.number="tier.llm_price"

@@ -85,27 +85,27 @@ class ChatbotService
             AppSettingsService::PROVIDER_CEREBRAS => $this->chatWithOpenAICompatibleProvider(
                 $provider,
                 $messages,
-                (string) config('services.cerebras.chat_completions_url'),
-                $this->settings->cerebrasTimeout(),
+                $this->providerMetadataString($provider, 'chat_completions_url'),
+                $this->providerMetadataInt($provider, 'timeout'),
                 ['reasoning_effort' => 'low'],
             ),
             AppSettingsService::PROVIDER_MISTRAL => $this->chatWithOpenAICompatibleProvider(
                 $provider,
                 $messages,
-                (string) config('services.mistral.chat_completions_url'),
-                $this->settings->mistralTimeout(),
+                $this->providerMetadataString($provider, 'chat_completions_url'),
+                $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_OPENROUTER => $this->chatWithOpenAICompatibleProvider(
                 $provider,
                 $messages,
-                (string) config('services.openrouter.chat_completions_url'),
-                $this->settings->openRouterTimeout(),
+                $this->providerMetadataString($provider, 'chat_completions_url'),
+                $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_CLOUDFLARE => $this->chatWithOpenAICompatibleProvider(
                 $provider,
                 $messages,
-                $this->settings->cloudflareChatCompletionsUrl($provider['metadata']['account_id'] ?? null),
-                $this->settings->cloudflareTimeout(),
+                $this->providerMetadataString($provider, 'chat_completions_url'),
+                $this->providerMetadataInt($provider, 'timeout'),
             ),
             default => throw new RuntimeException('Unsupported chatbot provider.'),
         };
@@ -119,10 +119,13 @@ class ChatbotService
     {
         $response = Http::acceptJson()
             ->asJson()
-            ->timeout($this->settings->geminiTimeout())
+            ->timeout($this->providerMetadataInt($provider, 'timeout'))
             ->post(
-                rtrim((string) config('services.gemini.base_url'), '/')
-                    .'/models/'.rawurlencode($provider['model']).':generateContent?key='.urlencode($provider['api_key']),
+                sprintf(
+                    $this->providerMetadataString($provider, 'generate_content_url_template'),
+                    rawurlencode($provider['model']),
+                    urlencode($provider['api_key']),
+                ),
                 [
                     'system_instruction' => [
                         'parts' => [['text' => $this->systemPrompt()]],
@@ -149,8 +152,8 @@ class ChatbotService
         $response = Http::withToken($provider['api_key'])
             ->acceptJson()
             ->asJson()
-            ->timeout($this->settings->groqTimeout())
-            ->post((string) config('services.groq.chat_completions_url'), [
+            ->timeout($this->providerMetadataInt($provider, 'timeout'))
+            ->post($this->providerMetadataString($provider, 'chat_completions_url'), [
                 'model' => $provider['model'],
                 'messages' => [
                     ['role' => 'system', 'content' => $this->systemPrompt()],
@@ -175,8 +178,8 @@ class ChatbotService
         $response = Http::withToken($provider['api_key'])
             ->acceptJson()
             ->asJson()
-            ->timeout($this->settings->deepSeekTimeout())
-            ->post((string) config('services.deepseek.chat_completions_url'), [
+            ->timeout($this->providerMetadataInt($provider, 'timeout'))
+            ->post($this->providerMetadataString($provider, 'chat_completions_url'), [
                 'model' => $provider['model'],
                 'messages' => [
                     ['role' => 'system', 'content' => $this->systemPrompt()],
@@ -334,5 +337,33 @@ class ChatbotService
         $code = $exception->getCode();
 
         return is_int($code) && $code >= 100 && $code <= 599 ? $code : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $provider
+     */
+    private function providerMetadataString(array $provider, string $key): string
+    {
+        $value = ($provider['metadata'] ?? [])[$key] ?? null;
+
+        if (! is_string($value) || trim($value) === '') {
+            throw new RuntimeException("Provider [{$provider['provider']}] runtime setting [{$key}] is not configured in API Manager.");
+        }
+
+        return trim($value);
+    }
+
+    /**
+     * @param  array<string, mixed>  $provider
+     */
+    private function providerMetadataInt(array $provider, string $key): int
+    {
+        $value = ($provider['metadata'] ?? [])[$key] ?? null;
+
+        if (! is_numeric($value)) {
+            throw new RuntimeException("Provider [{$provider['provider']}] runtime setting [{$key}] is not configured in API Manager.");
+        }
+
+        return (int) $value;
     }
 }

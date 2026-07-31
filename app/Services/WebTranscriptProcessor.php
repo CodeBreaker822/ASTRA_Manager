@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Transcript;
 use App\Models\TranscriptSection;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -20,6 +21,10 @@ class WebTranscriptProcessor
      */
     public function transcribe(Transcript $transcript, array $options = []): void
     {
+        if ($this->isTerminalStatus($transcript->fresh()?->status)) {
+            return;
+        }
+
         $this->appendLog($transcript, 'processing', 'Transcribing');
 
         try {
@@ -36,14 +41,7 @@ class WebTranscriptProcessor
                 is_string($options['language_code'] ?? null) ? $options['language_code'] : null,
             );
 
-            if ($transcript->fresh()?->status === 'cancelled') {
-                return;
-            }
-
-            $this->appendLog($transcript, 'processing', 'Finalizing');
-            $this->persistTranscriptionResult($transcript, $result);
-            $this->recordUsage($transcript);
-            $this->appendLog($transcript, 'completed', 'Complete');
+            $this->finalizeTranscriptionOnce($transcript, $result);
         } catch (Throwable $exception) {
             Log::error('Web transcription through API pipeline failed.', [
                 'transcript_id' => $transcript->id,
@@ -60,14 +58,17 @@ class WebTranscriptProcessor
      */
     public function completeTranscription(Transcript $transcript, array $result): void
     {
-        if ($transcript->fresh()?->status === 'cancelled') {
-            return;
-        }
+        try {
+            $this->finalizeTranscriptionOnce($transcript, $result);
+        } catch (Throwable $exception) {
+            Log::error('Web async transcription finalization failed.', [
+                'transcript_id' => $transcript->id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
 
-        $this->appendLog($transcript, 'processing', 'Finalizing');
-        $this->persistTranscriptionResult($transcript, $result);
-        $this->recordUsage($transcript);
-        $this->appendLog($transcript, 'completed', 'Complete');
+            $this->fail($transcript, 'Audio upload could not be processed.');
+        }
     }
 
     public function failTranscription(Transcript $transcript): void
@@ -91,14 +92,25 @@ class WebTranscriptProcessor
             throw new \RuntimeException('Transcript could not be polished.');
         }
 
-        $transcript->forceFill([
-            'cleaned_text' => $cleaned,
-            'polish_status' => 'complete',
-            'polish_error_message' => null,
-        ])->save();
-        $this->appendLog($transcript, 'polished', 'Transcript polished.');
+        DB::transaction(function () use ($transcript, $user, $cleaned, $text): void {
+            $lockedTranscript = Transcript::query()
+                ->whereKey($transcript->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        app(EntitlementService::class)->charge($user, 'polish', mb_strlen($text));
+            if ($lockedTranscript->polish_status !== 'processing') {
+                return;
+            }
+
+            $lockedTranscript->forceFill([
+                'cleaned_text' => $cleaned,
+                'polish_status' => 'complete',
+                'polish_error_message' => null,
+            ])->save();
+            $this->appendLog($lockedTranscript, 'polished', 'Transcript polished.');
+
+            app(EntitlementService::class)->charge($user, 'polish', mb_strlen($text));
+        });
 
         return $cleaned;
     }
@@ -121,14 +133,25 @@ class WebTranscriptProcessor
         );
         $summary = trim((string) ($result['text'] ?? ''));
 
-        $transcript->forceFill([
-            'summary_text' => $summary,
-            'summary_status' => 'complete',
-            'summary_error_message' => null,
-        ])->save();
-        $this->appendLog($transcript, 'summarized', 'Transcript summarized.');
+        DB::transaction(function () use ($transcript, $user, $summary, $text): void {
+            $lockedTranscript = Transcript::query()
+                ->whereKey($transcript->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        app(EntitlementService::class)->charge($user, 'summarize', mb_strlen($text));
+            if ($lockedTranscript->summary_status !== 'processing') {
+                return;
+            }
+
+            $lockedTranscript->forceFill([
+                'summary_text' => $summary,
+                'summary_status' => 'complete',
+                'summary_error_message' => null,
+            ])->save();
+            $this->appendLog($lockedTranscript, 'summarized', 'Transcript summarized.');
+
+            app(EntitlementService::class)->charge($user, 'summarize', mb_strlen($text));
+        });
 
         return $summary;
     }
@@ -161,6 +184,35 @@ class WebTranscriptProcessor
     private function fail(Transcript $transcript, string $message, array $context = []): void
     {
         $this->appendLog($transcript, 'failed', $message, $context);
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function finalizeTranscriptionOnce(Transcript $transcript, array $result): bool
+    {
+        return DB::transaction(function () use ($transcript, $result): bool {
+            $lockedTranscript = Transcript::query()
+                ->whereKey($transcript->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($this->isTerminalStatus($lockedTranscript->status)) {
+                return false;
+            }
+
+            $this->appendLog($lockedTranscript, 'processing', 'Finalizing');
+            $this->persistTranscriptionResult($lockedTranscript, $result);
+            $this->recordUsage($lockedTranscript);
+            $this->appendLog($lockedTranscript, 'completed', 'Complete');
+
+            return true;
+        });
+    }
+
+    private function isTerminalStatus(?string $status): bool
+    {
+        return in_array($status, ['completed', 'cancelled', 'failed'], true);
     }
 
     /**
@@ -277,34 +329,98 @@ class WebTranscriptProcessor
             AppSettingsService::PROVIDER_GEMINI => new GeminiTranscriptCleanerService(
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
+                endpointTemplate: $this->providerMetadataString($provider, 'endpoint_template'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_GROQ_TEXT_FIXER => new GroqTranscriptCleanerService(
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
+                endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_DEEPSEEK => new DeepSeekTranscriptCleanerService(
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
+                endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_CEREBRAS => new CerebrasTranscriptCleanerService(
+                allowedModels: $this->providerModels($provider),
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
+                endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
+                maxRetries: $this->providerMetadataInt($provider, 'max_retries'),
             ),
             AppSettingsService::PROVIDER_MISTRAL => new MistralTranscriptCleanerService(
+                allowedModels: $this->providerModels($provider),
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
+                endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
+                maxRetries: $this->providerMetadataInt($provider, 'max_retries'),
             ),
             AppSettingsService::PROVIDER_OPENROUTER => new OpenRouterTranscriptCleanerService(
+                allowedModels: $this->providerModels($provider),
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
+                endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
+                maxRetries: $this->providerMetadataInt($provider, 'max_retries'),
             ),
             AppSettingsService::PROVIDER_CLOUDFLARE => new CloudflareTranscriptCleanerService(
+                allowedModels: $this->providerModels($provider),
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
-                endpoint: $this->settings->cloudflareChatCompletionsUrl($provider['metadata']['account_id'] ?? null),
+                endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
+                maxRetries: $this->providerMetadataInt($provider, 'max_retries'),
             ),
             default => throw new \InvalidArgumentException('Unsupported text fixer provider.'),
         };
+    }
+
+    /**
+     * @param  array<string, mixed>  $provider
+     */
+    private function providerMetadataString(array $provider, string $key): string
+    {
+        $value = ($provider['metadata'] ?? [])[$key] ?? null;
+
+        if (! is_string($value) || trim($value) === '') {
+            throw new \RuntimeException("Provider [{$provider['provider']}] runtime setting [{$key}] is not configured in API Manager.");
+        }
+
+        return trim($value);
+    }
+
+    /**
+     * @param  array<string, mixed>  $provider
+     */
+    private function providerMetadataInt(array $provider, string $key): int
+    {
+        $value = ($provider['metadata'] ?? [])[$key] ?? null;
+
+        if (! is_numeric($value)) {
+            throw new \RuntimeException("Provider [{$provider['provider']}] runtime setting [{$key}] is not configured in API Manager.");
+        }
+
+        return (int) $value;
+    }
+
+    /**
+     * @param  array<string, mixed>  $provider
+     * @return array<int, string>
+     */
+    private function providerModels(array $provider): array
+    {
+        $models = $provider['models'] ?? null;
+
+        if (! is_array($models) || array_values(array_filter($models, is_string(...))) === []) {
+            throw new \RuntimeException("Provider [{$provider['provider']}] model list is not configured in API Manager.");
+        }
+
+        return array_values(array_filter($models, is_string(...)));
     }
 
     private function sourceText(Transcript $transcript): string
@@ -326,6 +442,6 @@ class WebTranscriptProcessor
             throw new \RuntimeException('Transcript owner could not be resolved.');
         }
 
-        app(EntitlementService::class)->charge($user, 'upload', $seconds);
+        app(EntitlementService::class)->charge($user, $transcript->source === 'live' ? 'live' : 'upload', $seconds);
     }
 }

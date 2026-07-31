@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHmac } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -12,7 +13,7 @@ const baseUrl = String(args.base || process.env.JERVA_WEB_DIAGNOSTIC_URL || 'htt
 const runId = timestamp();
 const password = `JervaDiagnostic-${runId}!`;
 const user = {
-    name: 'JERVA Web Diagnostic',
+    name: 'JERVA Transcriber Diagnostic',
     email: `jerva-web-diagnostic-${runId}@example.test`,
     password,
 };
@@ -20,6 +21,9 @@ const audioRoot = path.join(root, 'storage/app/private/diagnostics/web-real-work
 const reportRoot = path.join(root, 'storage/app/private/diagnostics/reports');
 const uploadAudio = path.join(audioRoot, `${runId}-upload-near-minute.wav`);
 const liveAudio = path.join(audioRoot, `${runId}-live-2s.wav`);
+const topupAmountCents = Number(args.topupCents || process.env.JERVA_WEB_DIAGNOSTIC_TOPUP_CENTS || 1000);
+const topupReference = `JERVA-DIAG-${runId}`;
+const topupSessionId = `cs_diag_${runId.replace(/[^a-zA-Z0-9]/g, '_')}`;
 const cookieJar = new Map();
 
 class HttpError extends Error {
@@ -156,6 +160,27 @@ const getJson = async (url) => {
     return { status: response.status, payload };
 };
 
+const postJson = async (url, payload, headers = {}) => {
+    const response = await request(url, {
+        method: 'POST',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            ...headers,
+        },
+        body: JSON.stringify(payload),
+    });
+    const text = await response.text();
+    const parsed = parseJson(text);
+
+    if (!response.ok) {
+        throw new HttpError(messageFrom(parsed, text, response.status), { status: response.status, payload: parsed, text: text.slice(0, 1200) });
+    }
+
+    return { status: response.status, payload: parsed };
+};
+
 const parseJson = (text) => {
     try {
         return JSON.parse(text);
@@ -196,6 +221,20 @@ async function main() {
     });
     const projectId = projectIdFromLocation(createProject.location);
 
+    console.log('web diagnostic step: tracked wallet top-up');
+    const topup = createTrackedTopup();
+
+    console.log('web diagnostic step: paymongo webhook confirms top-up');
+    const topupWebhook = await postSignedPayMongoWebhook(paymongoPaidTopupPayload(topup));
+
+    console.log('web diagnostic step: workspace status shows credited wallet');
+    const topupStatus = await getJson(`/workspace/${projectId}/status`);
+    const walletBalanceCents = Number(topupStatus.payload?.entitlements?.usage?.wallet_balance_cents ?? 0);
+
+    if (walletBalanceCents < topupAmountCents) {
+        throw new Error(`Top-up was not visible in workspace status. Expected at least ${topupAmountCents} cents, got ${walletBalanceCents}.`);
+    }
+
     console.log('web diagnostic step: upload audio with server chunking');
     const upload = await formJson(`/workspace/${projectId}/upload`, token, {
         server_chunk: 1,
@@ -223,7 +262,7 @@ async function main() {
 
     console.log('web diagnostic step: poll processing status');
     const finalStatus = await pollStatus(projectId, [uploadTranscriptId, liveTranscriptId].filter(Boolean));
-    const output = report({ projectId, upload, live, finalStatus });
+    const output = report({ projectId, topup, topupWebhook, topupStatus, upload, live, finalStatus });
     const reportPath = path.join(reportRoot, `${runId}-web-real-workflow.md`);
     writeFileSync(reportPath, output, 'utf8');
     console.log(reportPath);
@@ -231,6 +270,89 @@ async function main() {
 
 function ensureDiagnosticUser() {
     execFileSync('php', ['scripts/web-diagnostic-user.php', user.email, user.password], { cwd: root, stdio: 'pipe' });
+}
+
+function createTrackedTopup() {
+    const output = execFileSync('php', [
+        'scripts/web-diagnostic-topup.php',
+        user.email,
+        String(topupAmountCents),
+        topupReference,
+        topupSessionId,
+    ], { cwd: root, stdio: 'pipe' });
+
+    return JSON.parse(String(output));
+}
+
+async function postSignedPayMongoWebhook(payload) {
+    const body = JSON.stringify(payload);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const secret = payMongoWebhookSecret();
+    const signature = hmacSha256(`${timestamp}.${body}`, secret);
+
+    return postJson('/paymongo/webhook', payload, {
+        'PayMongo-Signature': `t=${timestamp},te=${signature}`,
+    });
+}
+
+function payMongoWebhookSecret() {
+    const secret = envValue('PAYMONGO_WEBHOOK_SECRET');
+
+    if (!secret) {
+        throw new Error('PAYMONGO_WEBHOOK_SECRET is required for the top-up webhook diagnostic.');
+    }
+
+    return secret;
+}
+
+function envValue(key) {
+    if (process.env[key]) {
+        return process.env[key];
+    }
+
+    try {
+        const env = readFileSync(path.join(root, '.env'), 'utf8');
+        const match = env.match(new RegExp(`^${key}=(.*)$`, 'm'));
+
+        return match ? match[1].trim().replace(/^["']|["']$/g, '') : '';
+    } catch {
+        return '';
+    }
+}
+
+function hmacSha256(value, secret) {
+    return createHmac('sha256', secret).update(value).digest('hex');
+}
+
+function paymongoPaidTopupPayload(topup) {
+    return {
+        data: {
+            attributes: {
+                type: 'checkout_session.payment.paid',
+                data: {
+                    id: topup.checkout_session_id,
+                    type: 'checkout_session',
+                    attributes: {
+                        reference_number: topup.reference,
+                        metadata: {
+                            plan: 'wallet_topup',
+                            billing_transaction_id: String(topup.id),
+                            wallet_topup_amount: String(topup.amount),
+                            wallet_topup_currency: 'USD',
+                        },
+                        payments: [
+                            {
+                                id: `pay_diag_${runId.replace(/[^a-zA-Z0-9]/g, '_')}`,
+                                attributes: {
+                                    status: 'paid',
+                                },
+                            },
+                        ],
+                    },
+                },
+            },
+        },
+    };
 }
 
 function projectIdFromLocation(location) {
@@ -266,15 +388,24 @@ async function pollStatus(projectId, transcriptIds) {
     return latest;
 }
 
-function report({ projectId, upload, live, finalStatus }) {
+function report({ projectId, topup, topupWebhook, topupStatus, upload, live, finalStatus }) {
     const transcripts = finalStatus?.project?.transcripts || [];
     const lines = [
-        '# JERVA Web Real Workflow Diagnostic',
+        '# JERVA Transcriber Real Workflow Diagnostic',
         '',
         `- Generated: ${new Date().toISOString()}`,
         `- Base URL: ${baseUrl}`,
         `- Project ID: ${projectId}`,
         `- User: ${user.email}`,
+        '',
+        '## Wallet Top-Up Path',
+        '',
+        `- Endpoint: POST /paymongo/webhook`,
+        `- Webhook status: ${topupWebhook.status}`,
+        `- Reference: ${topup.reference}`,
+        `- Checkout session: ${topup.checkout_session_id}`,
+        `- Top-up amount cents: ${topup.amount}`,
+        `- Workspace wallet balance cents: ${topupStatus.payload?.entitlements?.usage?.wallet_balance_cents ?? ''}`,
         '',
         '## Upload Path',
         '',

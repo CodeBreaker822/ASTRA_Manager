@@ -1,10 +1,17 @@
 <?php
 
 use App\Exceptions\InsufficientWalletBalanceException;
+use Database\Seeders\PlanTierSeeder;
 use App\Models\User;
 use App\Services\EntitlementService;
 use App\Services\LicenseKeyService;
+use Illuminate\Support\Facades\Cache;
 use Inertia\Testing\AssertableInertia;
+
+beforeEach(function () {
+    $this->seed(PlanTierSeeder::class);
+    Cache::flush();
+});
 
 test('billing settings require authentication', function () {
     $this->get(route('billing.edit'))
@@ -32,7 +39,7 @@ test('verified users can view billing settings with credit balance', function ()
         ->assertInertia(fn (AssertableInertia $page) => $page
             ->component('settings/Billing')
             ->where('walletBalance', 1250)
-            ->where('entitlements.plan.key', 'payg')
+            ->where('entitlements.plan.key', 'free')
             ->where('entitlements.plan.minutes', 60)
             ->where('entitlements.usage.minutes_used', 3)
             ->where('entitlements.usage.minutes_remaining', 57)
@@ -61,7 +68,7 @@ test('license status includes account credit balance for user licenses', functio
         ->assertJsonPath('account.credits.wallet_balance', 12.5)
         ->assertJsonPath('account.credits.wallet_balance_cents', 1250)
         ->assertJsonPath('account.credits.label', '$12.50')
-        ->assertJsonPath('account.entitlements.plan.key', 'payg');
+        ->assertJsonPath('account.entitlements.plan.key', 'free');
 });
 
 test('free transcription minutes are consumed before credit balance', function () {
@@ -80,7 +87,7 @@ test('free transcription minutes are consumed before credit balance', function (
 
     $entitlements->charge($user, 'upload', 120);
 
-    expect((float) $user->refresh()->wallet_balance)->toBe(6.83)
+    expect((float) $user->refresh()->wallet_balance)->toBe(10.0)
         ->and($user->usageRecords()->where('period', now()->toDateString())->first()?->seconds_transcribed)->toBe(61 * 60);
 });
 
@@ -96,9 +103,9 @@ test('paid transcription fails when credit balance is not enough', function () {
         'seconds_transcribed' => 60 * 60,
     ]);
 
-    expect($entitlements->canAfford($user, 'upload', 60))->toBeFalse();
+    expect($entitlements->canAfford($user, 'upload', 31 * 60 * 60))->toBeFalse();
 
-    $entitlements->charge($user, 'upload', 60);
+    $entitlements->charge($user, 'upload', 31 * 60 * 60);
 })->throws(InsufficientWalletBalanceException::class);
 
 test('free polish and summarize uses are consumed before credit balance', function () {
@@ -117,7 +124,7 @@ test('free polish and summarize uses are consumed before credit balance', functi
     $entitlements->charge($user, 'polish', 1000);
     $entitlements->charge($user, 'summarize', 1000);
 
-    expect((float) $user->refresh()->wallet_balance)->toBe(1.80)
+    expect((float) $user->refresh()->wallet_balance)->toBe(1.99)
         ->and($today->refresh()->polish_count)->toBe(3)
         ->and($today->summary_count)->toBe(4);
 });

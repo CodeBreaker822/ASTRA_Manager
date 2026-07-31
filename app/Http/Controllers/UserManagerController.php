@@ -29,7 +29,7 @@ class UserManagerController extends Controller
                     'position:id,position_name',
                     'license:id,user_id,app_name,app_token_suffix,is_active',
                 ])
-                ->select(['id', 'name', 'email', 'email_verified_at', 'position_id', 'user_status', 'created_at', 'updated_at'])
+                ->select(['id', 'email', 'email_verified_at', 'position_id', 'user_status', 'created_at', 'updated_at'])
                 ->latest()
                 ->get()
                 ->map(fn (User $user): array => $this->presentUser($user))
@@ -52,7 +52,6 @@ class UserManagerController extends Controller
         Gate::authorize('user.manage-users');
 
         $user = User::create($request->validate([
-            'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', Rule::unique(User::class)],
             'password' => ['required', 'string', Password::defaults()],
             'position_id' => ['nullable', 'integer', Rule::exists(UserPositions::class, 'id')],
@@ -68,7 +67,6 @@ class UserManagerController extends Controller
         Gate::authorize('user.manage-users');
 
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', Rule::unique(User::class)->ignore($user->id)],
             'password' => ['nullable', 'string', Password::defaults()],
             'position_id' => ['nullable', 'integer', Rule::exists(UserPositions::class, 'id')],
@@ -188,7 +186,6 @@ class UserManagerController extends Controller
 
         return [
             'id' => $user->id,
-            'name' => $user->name,
             'email' => $user->email,
             'email_verified_at' => $user->email_verified_at,
             'position_id' => $user->position_id,

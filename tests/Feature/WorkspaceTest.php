@@ -1,12 +1,16 @@
 <?php
 
 use App\Models\ApiTranscriptionJob;
+use App\Models\Transcript;
 use App\Models\TranscriptionProviderSetting;
 use App\Models\TranscriptProject;
 use App\Models\User;
+use App\Services\TranscriptExportService;
 use App\Services\WebAudioChunkerService;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Symfony\Component\Process\Process;
 
 test('workspace requires authentication', function () {
@@ -15,7 +19,7 @@ test('workspace requires authentication', function () {
 });
 
 test('verified users can view the workspace', function () {
-    $user = User::factory()->create();
+    $user = User::factory()->create(['plan' => 'free']);
 
     $this->actingAs($user)
         ->get(route('workspace.index'))
@@ -88,6 +92,7 @@ test('web upload queues the local async transcribe api job and finalizes from st
         'model' => 'nova-3',
         'is_enabled' => true,
         'sort_order' => 0,
+        'metadata' => deepgramRuntimeMetadata(),
     ]);
 
     Http::fake([
@@ -175,6 +180,7 @@ test('web upload completes when transcription provider returns no speech text', 
         'model' => 'nova-3',
         'is_enabled' => true,
         'sort_order' => 0,
+        'metadata' => deepgramRuntimeMetadata(),
     ]);
 
     Http::fake([
@@ -208,6 +214,96 @@ test('web upload completes when transcription provider returns no speech text', 
         ->assertJsonPath('project.transcripts.0.sections.0.text', '');
 });
 
+test('workspace summary modal follows the jerva summary design surface', function () {
+    $workspace = File::get(resource_path('js/pages/workspace/Index.vue'));
+
+    expect($workspace)
+        ->toContain('renderSummaryMarkdown')
+        ->toContain('v-html')
+        ->toContain('data-summary-export-format')
+        ->toContain('summary_source')
+        ->toContain('Starting again replaces this')
+        ->toContain('No summary has been created')
+        ->toContain('for this project.');
+});
+
+test('summary exports include jerva project source and summary structure', function () {
+    $user = User::factory()->create();
+    $project = TranscriptProject::query()->create([
+        'user_id' => $user->id,
+        'title' => 'Council meeting',
+    ]);
+    $transcript = Transcript::query()->create([
+        'project_id' => $project->id,
+        'source' => 'upload',
+        'status' => 'completed',
+        'duration_seconds' => 120,
+        'raw_text' => 'Raw meeting transcript.',
+        'cleaned_text' => 'Cleaned meeting transcript.',
+        'summary_text' => "## Outcome\n- **Approved** the request\nNext step confirmed.",
+        'summary_status' => 'complete',
+    ]);
+
+    $exports = app(TranscriptExportService::class);
+    $txt = $exports->export($transcript, 'txt', 'summary', 'cleaned');
+
+    expect(File::get($txt['path']))
+        ->toContain('Council meeting - Summary')
+        ->toContain('Project: Council meeting')
+        ->toContain('Source: Cleaned transcript')
+        ->toContain('- Approved the request')
+        ->toContain('Next step confirmed.');
+
+    File::delete($txt['path']);
+
+    expect(File::get(app_path('Services/TranscriptExportService.php')))
+        ->toContain('PhpOffice\\PhpSpreadsheet\\Spreadsheet')
+        ->toContain('new Xlsx($spreadsheet)');
+
+    if (! class_exists(ZipArchive::class)) {
+        return;
+    }
+
+    $xlsx = $exports->export($transcript, 'xlsx', 'summary', 'cleaned');
+    $workbook = IOFactory::load($xlsx['path']);
+    $sheet = $workbook->getActiveSheet();
+
+    expect($sheet->getCell('A1')->getValue())->toBe('Council meeting - Summary')
+        ->and($sheet->getCell('A3')->getValue())->toBe('Project')
+        ->and($sheet->getCell('B3')->getValue())->toBe('Council meeting')
+        ->and($sheet->getCell('A4')->getValue())->toBe('Source')
+        ->and($sheet->getCell('B4')->getValue())->toBe('Cleaned transcript')
+        ->and($sheet->getCell('A6')->getValue())->toBe('Summary')
+        ->and($sheet->getCell('B6')->getValue())->toContain('- Approved the request');
+
+    $workbook->disconnectWorksheets();
+    File::delete($xlsx['path']);
+});
+
+test('excel exports report missing php spreadsheet extensions clearly', function () {
+    if (extension_loaded('zip') && extension_loaded('gd')) {
+        $this->markTestSkipped('PHP zip and gd extensions are enabled.');
+    }
+
+    $user = User::factory()->create();
+    $project = TranscriptProject::query()->create([
+        'user_id' => $user->id,
+        'title' => 'Council meeting',
+    ]);
+    $transcript = Transcript::query()->create([
+        'project_id' => $project->id,
+        'source' => 'upload',
+        'status' => 'completed',
+        'duration_seconds' => 120,
+        'raw_text' => 'Raw meeting transcript.',
+        'summary_text' => 'Meeting summary.',
+        'summary_status' => 'complete',
+    ]);
+
+    expect(fn () => app(TranscriptExportService::class)->export($transcript, 'xlsx', 'summary'))
+        ->toThrow(RuntimeException::class, 'Excel exports require the PHP zip and gd extensions.');
+});
+
 function wavContent(int|float $seconds): string
 {
     $sampleRate = 16000;
@@ -231,6 +327,17 @@ function wavContent(int|float $seconds): string
         .'data'
         .pack('V', strlen($data))
         .$data;
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function deepgramRuntimeMetadata(): array
+{
+    return [
+        'listen_url' => (string) config('services.deepgram.listen_url'),
+        'timeout' => 120,
+    ];
 }
 
 function availableFfmpegBinary(): ?string

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\BillingTransaction;
 use App\Models\User;
+use App\Support\Money;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use RuntimeException;
 
@@ -43,7 +44,6 @@ class PayMongoCheckoutService
                 'data' => [
                     'attributes' => [
                         'billing' => [
-                            'name' => $user->name,
                             'email' => $user->email,
                         ],
                         'description' => 'JERVA credit top-up',
@@ -117,7 +117,7 @@ class PayMongoCheckoutService
     /**
      * @return array<string, mixed>
      */
-    public function retrieveCheckoutSession(string $sessionId): array
+    public function retrieveCheckoutSession(string $sessionId, float $timeoutSeconds = 8.0, float $connectTimeoutSeconds = 3.0): array
     {
         $secretKey = config('services.paymongo.secret_key');
 
@@ -128,6 +128,8 @@ class PayMongoCheckoutService
         $response = $this->http
             ->withBasicAuth($secretKey, '')
             ->acceptJson()
+            ->timeout($timeoutSeconds)
+            ->connectTimeout($connectTimeoutSeconds)
             ->get($this->apiUrl().'/v1/checkout_sessions/'.$sessionId);
 
         if ($response->failed()) {
@@ -206,11 +208,7 @@ class PayMongoCheckoutService
 
     private function walletTopupPayMongoAmount(int $usdCents, float $rate): int
     {
-        if ($rate <= 0) {
-            throw new RuntimeException('Live USD to PHP exchange rate must be greater than 0.');
-        }
-
-        return (int) round(($usdCents / 100) * $rate * 100);
+        return Money::usdCentsToPhpCentavos($usdCents, $rate);
     }
 
     public function walletTopupRate(): float

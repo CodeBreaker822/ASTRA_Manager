@@ -16,7 +16,9 @@ class CanTranscribe
 
         abort_unless($user instanceof User, 403);
 
-        if (! app(EntitlementService::class)->canAfford($user, 'upload', 1)) {
+        $feature = $request->routeIs('workspace.chunk') ? 'live' : 'upload';
+
+        if (! app(EntitlementService::class)->canAfford($user, $feature, 1)) {
             if ($request->expectsJson()) {
                 return response()->json([
                     'message' => 'Insufficient balance. Please add funds to continue.',

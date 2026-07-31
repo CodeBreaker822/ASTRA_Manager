@@ -64,6 +64,7 @@ class FortifyServiceProvider extends ServiceProvider
     {
         Fortify::loginView(fn (Request $request) => Inertia::render('auth/Login', [
             'canResetPassword' => Features::enabled(Features::resetPasswords()),
+            'googleAuthAvailable' => $this->googleAuthAvailable(),
             'status' => $request->session()->get('status'),
         ]));
 
@@ -82,6 +83,7 @@ class FortifyServiceProvider extends ServiceProvider
         ]));
 
         Fortify::registerView(fn () => Inertia::render('auth/Register', [
+            'googleAuthAvailable' => $this->googleAuthAvailable(),
             'passwordRules' => Password::defaults()->toPasswordRulesString(),
         ]));
 
@@ -141,5 +143,12 @@ class FortifyServiceProvider extends ServiceProvider
                 .'|'.$request->ip()
             );
         });
+    }
+
+    private function googleAuthAvailable(): bool
+    {
+        return filled(config('services.google.client_id'))
+            && filled(config('services.google.client_secret'))
+            && filled(config('services.google.redirect'));
     }
 }

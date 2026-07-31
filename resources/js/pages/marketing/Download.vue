@@ -1,26 +1,41 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
+import { Link } from '@inertiajs/vue3';
 import {
     Check,
     Cpu,
     Download,
     HardDrive,
     Laptop,
+    Mic,
     MonitorDown,
+    Scissors,
     ShieldCheck,
+    Users,
 } from '@lucide/vue';
 import { computed } from 'vue';
+import PricingProof from '@/components/marketing/PricingProof.vue';
+import SeoHead from '@/components/marketing/SeoHead.vue';
 import { Button } from '@/components/ui/button';
+import type {
+    FaqItem,
+    MarketingPricing,
+    MarketingSeo,
+} from '@/types/marketing';
 
 type Release = {
     available: boolean;
     platform: string;
     size: string | null;
     published_at: string | null;
+    published_at_iso: string | null;
     download_url: string | null;
 };
 
 type DownloadContent = {
+    seo: {
+        title: string;
+        description: string;
+    };
     hero: {
         eyebrow: string;
         title: string;
@@ -32,45 +47,80 @@ type DownloadContent = {
         button_label: string;
         empty_label: string;
     };
-    requirements: Array<{
-        icon: keyof typeof iconMap;
+    benefits: Array<{
+        icon: keyof typeof benefitIconMap;
         title: string;
         body: string;
     }>;
+    models: {
+        title: string;
+        intro: string;
+        items: Array<{
+            name: string;
+            size: string;
+            best_for: string;
+        }>;
+        note: string;
+    };
+    requirements: Array<{
+        icon: keyof typeof requirementIconMap;
+        title: string;
+        body: string;
+    }>;
+    steps: {
+        title: string;
+        items: Array<{
+            title: string;
+            body: string;
+        }>;
+    };
     account: {
         title: string;
         body: string;
         bullets: string[];
         button_label: string;
     };
-    faq: Array<{
-        question: string;
-        answer: string;
-    }>;
+    faq: FaqItem[];
 };
 
-const iconMap = {
+const requirementIconMap = {
     Laptop,
     Cpu,
     HardDrive,
     ShieldCheck,
 };
 
+const benefitIconMap = {
+    ShieldCheck,
+    Mic,
+    Scissors,
+    Users,
+};
+
 const props = defineProps<{
     release: Release;
     content: DownloadContent;
+    pricing: MarketingPricing;
+    seo: MarketingSeo;
 }>();
 
 const requirements = computed(() =>
     props.content.requirements.map((requirement) => ({
         ...requirement,
-        icon: iconMap[requirement.icon] ?? Laptop,
+        icon: requirementIconMap[requirement.icon] ?? Laptop,
+    })),
+);
+
+const benefits = computed(() =>
+    props.content.benefits.map((benefit) => ({
+        ...benefit,
+        icon: benefitIconMap[benefit.icon] ?? ShieldCheck,
     })),
 );
 </script>
 
 <template>
-    <Head title="Download" />
+    <SeoHead :seo="seo" />
 
     <main>
         <section class="border-b border-slate-200 bg-white py-16 md:py-24">
@@ -81,7 +131,7 @@ const requirements = computed(() =>
                     {{ content.hero.eyebrow }}
                 </p>
                 <h1
-                    class="mx-auto mt-4 max-w-3xl text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl"
+                    class="mx-auto mt-4 max-w-4xl text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl"
                 >
                     {{ content.hero.title }}
                 </h1>
@@ -99,7 +149,12 @@ const requirements = computed(() =>
                     class="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-[0_12px_32px_rgba(15,23,42,0.08)]"
                 >
                     <MonitorDown class="mx-auto size-10 text-blue-600" />
-                    <h2 class="mt-4 text-2xl font-semibold text-slate-950">
+                    <p
+                        class="mt-4 text-xs font-semibold tracking-wide text-blue-600 uppercase"
+                    >
+                        Free • No subscription • Offline capable
+                    </p>
+                    <h2 class="mt-3 text-2xl font-semibold text-slate-950">
                         {{ content.download_card.title }}
                     </h2>
                     <p class="mt-3 text-sm leading-6 text-slate-700">
@@ -123,19 +178,27 @@ const requirements = computed(() =>
 
                     <div class="mt-4 text-sm text-slate-600">
                         <template v-if="release.available">
-                            {{ release.size ?? 'unknown size' }}
+                            Windows
                             <span aria-hidden="true"> | </span>
-                            {{ release.published_at ?? 'unknown date' }}
+                            {{ release.size ?? 'size unavailable' }}
+                            <span aria-hidden="true"> | </span>
+                            {{ release.published_at ?? 'date unavailable' }}
                         </template>
                         <template v-else>
-                            The desktop release is not available yet. Please
-                            check back later.
+                            The desktop release is not available right now.
+                            Online transcription is still available.
                         </template>
                     </div>
 
                     <div
-                        class="mt-6 flex flex-wrap justify-center gap-4 text-sm"
+                        class="mt-6 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm"
                     >
+                        <a
+                            class="font-medium text-blue-600 hover:text-blue-700"
+                            href="#models"
+                        >
+                            Whisper models
+                        </a>
                         <a
                             class="font-medium text-blue-600 hover:text-blue-700"
                             href="#requirements"
@@ -147,6 +210,95 @@ const requirements = computed(() =>
             </div>
         </section>
 
+        <section class="bg-slate-50 py-16 md:py-24">
+            <div class="mx-auto max-w-6xl px-6">
+                <div class="max-w-3xl">
+                    <h2
+                        class="text-3xl font-semibold tracking-tight text-slate-950"
+                    >
+                        More than a basic Whisper window
+                    </h2>
+                    <p class="mt-4 text-base leading-7 text-slate-700">
+                        JERVA brings local speech recognition, audio
+                        preparation, transcript review, and useful exports into
+                        one Windows workspace.
+                    </p>
+                </div>
+                <div class="mt-10 grid gap-6 md:grid-cols-2">
+                    <article
+                        v-for="benefit in benefits"
+                        :key="benefit.title"
+                        class="rounded-lg border border-slate-200 bg-white p-6"
+                    >
+                        <component
+                            :is="benefit.icon"
+                            class="size-5 text-blue-600"
+                        />
+                        <h3 class="mt-4 text-lg font-semibold text-slate-950">
+                            {{ benefit.title }}
+                        </h3>
+                        <p class="mt-2 text-sm leading-6 text-slate-700">
+                            {{ benefit.body }}
+                        </p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section id="models" class="bg-white py-16 md:py-24">
+            <div class="mx-auto max-w-6xl px-6">
+                <div class="max-w-3xl">
+                    <h2
+                        class="text-3xl font-semibold tracking-tight text-slate-950"
+                    >
+                        {{ content.models.title }}
+                    </h2>
+                    <p class="mt-4 text-base leading-7 text-slate-700">
+                        {{ content.models.intro }}
+                    </p>
+                </div>
+                <div
+                    class="mt-10 overflow-x-auto rounded-lg border border-slate-200"
+                >
+                    <table class="w-full min-w-[680px] text-left text-sm">
+                        <thead class="bg-blue-50 text-blue-950">
+                            <tr>
+                                <th class="px-5 py-4 font-semibold">Model</th>
+                                <th class="px-5 py-4 font-semibold">
+                                    Download
+                                </th>
+                                <th class="px-5 py-4 font-semibold">
+                                    A good starting point for
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-200 bg-white">
+                            <tr
+                                v-for="model in content.models.items"
+                                :key="model.name"
+                            >
+                                <th
+                                    scope="row"
+                                    class="px-5 py-4 font-semibold text-slate-950"
+                                >
+                                    {{ model.name }}
+                                </th>
+                                <td class="px-5 py-4 text-slate-700">
+                                    {{ model.size }}
+                                </td>
+                                <td class="px-5 py-4 leading-6 text-slate-700">
+                                    {{ model.best_for }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="mt-5 text-sm leading-6 text-slate-600">
+                    {{ content.models.note }}
+                </p>
+            </div>
+        </section>
+
         <section id="requirements" class="bg-slate-50 py-16 md:py-24">
             <div class="mx-auto max-w-6xl px-6">
                 <h2
@@ -155,7 +307,7 @@ const requirements = computed(() =>
                     System requirements
                 </h2>
                 <div class="mt-8 grid gap-6 md:grid-cols-2">
-                    <div
+                    <article
                         v-for="requirement in requirements"
                         :key="requirement.title"
                         class="rounded-lg border border-slate-200 bg-white p-6"
@@ -170,12 +322,41 @@ const requirements = computed(() =>
                         <p class="mt-2 text-sm leading-6 text-slate-700">
                             {{ requirement.body }}
                         </p>
-                    </div>
+                    </article>
                 </div>
             </div>
         </section>
 
-        <section class="bg-white px-6 py-16 md:py-24">
+        <section class="bg-white py-16 md:py-24">
+            <div class="mx-auto max-w-6xl px-6">
+                <h2
+                    class="text-3xl font-semibold tracking-tight text-slate-950"
+                >
+                    {{ content.steps.title }}
+                </h2>
+                <ol class="mt-10 grid gap-6 md:grid-cols-3">
+                    <li
+                        v-for="(step, index) in content.steps.items"
+                        :key="step.title"
+                        class="rounded-lg border border-slate-200 bg-white p-6"
+                    >
+                        <span
+                            class="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white"
+                        >
+                            {{ index + 1 }}
+                        </span>
+                        <h3 class="mt-5 text-lg font-semibold text-slate-950">
+                            {{ step.title }}
+                        </h3>
+                        <p class="mt-2 text-sm leading-6 text-slate-700">
+                            {{ step.body }}
+                        </p>
+                    </li>
+                </ol>
+            </div>
+        </section>
+
+        <section class="bg-slate-50 px-6 py-16 md:py-24">
             <div
                 class="mx-auto max-w-6xl rounded-lg border border-blue-100 bg-blue-50 p-6"
             >
@@ -204,10 +385,20 @@ const requirements = computed(() =>
                         }}</Link>
                     </Button>
                 </div>
+                <PricingProof :pricing="pricing" class="mt-8" />
+                <p class="mt-4 text-center text-sm text-blue-900">
+                    <Link
+                        href="/price"
+                        class="font-semibold text-blue-700 hover:text-blue-950"
+                    >
+                        See current online pricing
+                    </Link>
+                    for times when you prefer hosted processing.
+                </p>
             </div>
         </section>
 
-        <section class="bg-white px-6 pb-16 md:pb-24">
+        <section class="bg-white px-6 py-16 md:py-24">
             <div class="mx-auto max-w-3xl">
                 <h2
                     class="text-3xl font-semibold tracking-tight text-slate-950"

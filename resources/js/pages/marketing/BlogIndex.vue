@@ -17,7 +17,13 @@ defineProps<{
 </script>
 
 <template>
-    <Head title="Blog" />
+    <Head title="Blog">
+        <meta
+            name="description"
+            content="Read JERVA Transcriber product notes, workflow ideas, and release updates for web and desktop transcription."
+        />
+        <meta property="og:image" content="/JervaLogo.png" />
+    </Head>
 
     <main>
         <section class="border-b border-slate-200 bg-white py-16 md:py-24">
@@ -30,11 +36,11 @@ defineProps<{
                 <h1
                     class="mt-4 max-w-3xl text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl"
                 >
-                    Notes from the JERVA workspace
+                    Notes from the JERVA Transcriber workspace
                 </h1>
                 <p class="mt-5 max-w-2xl text-base leading-7 text-slate-700">
                     Product notes, transcription workflow ideas, and release
-                    updates for the web and desktop editions.
+                    updates for JERVA Transcriber web and desktop editions.
                 </p>
             </div>
         </section>

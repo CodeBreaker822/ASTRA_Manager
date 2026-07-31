@@ -10,12 +10,16 @@ use App\Models\TranscriptProject;
 use App\Models\User;
 use App\Policies\TranscriptPolicy;
 use App\Policies\TranscriptProjectPolicy;
+use App\Services\PayMongoWalletTopupReconciler;
 use Carbon\CarbonImmutable;
 use GuzzleHttp\Utils as GuzzleUtils;
+use Illuminate\Auth\Events\Login;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use Throwable;
@@ -55,6 +59,7 @@ class AppServiceProvider extends ServiceProvider
         APIManagerGates::register();
         CmsGates::register();
         Gate::define('delete-api_manager', fn (User $user): bool => $user->can('API-manage_api'));
+        $this->registerBillingReconciliation();
 
         DB::prohibitDestructiveCommands(
             app()->isProduction(),
@@ -69,6 +74,24 @@ class AppServiceProvider extends ServiceProvider
                 ->uncompromised()
             : null,
         );
+    }
+
+    protected function registerBillingReconciliation(): void
+    {
+        Event::listen(Login::class, function (Login $event): void {
+            if (! $event->user instanceof User) {
+                return;
+            }
+
+            try {
+                app(PayMongoWalletTopupReconciler::class)->reconcileFor($event->user);
+            } catch (Throwable $exception) {
+                Log::warning('Wallet top-up reconciliation failed during login.', [
+                    'user_id' => $event->user->id,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        });
     }
 
     protected function configureHttpCertificateAuthority(): void

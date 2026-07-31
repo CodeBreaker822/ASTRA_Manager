@@ -13,6 +13,10 @@ class ProviderConnectionService
 {
     private const RUNPOD_API_BASE_URL = 'https://api.runpod.ai/v2';
 
+    private const CONNECT_TIMEOUT_SECONDS = 3;
+
+    private const REQUEST_TIMEOUT_SECONDS = 6;
+
     public function __construct(private readonly AppSettingsService $settings) {}
 
     /**
@@ -56,7 +60,7 @@ class ProviderConnectionService
             }
 
             if ($provider['provider'] === AppSettingsService::PROVIDER_GROQ_TRANSCRIPTION) {
-                $results[$provider['setting_id']] = $this->checkGroqTranscriptionProvider($setting->api_key, $provider['model']);
+                $results[$provider['setting_id']] = $this->checkGroqTranscriptionProvider($setting->api_key, $provider['model'], $provider['metadata'] ?? []);
 
                 continue;
             }
@@ -69,7 +73,7 @@ class ProviderConnectionService
             );
 
             if ($request['url'] === '') {
-                $results[$provider['setting_id']] = $this->result('offline', 'Configuration required', 'This provider requires additional server configuration.');
+                $results[$provider['setting_id']] = $this->result('offline', 'Configuration required', 'This provider requires health-check metadata in API Manager.');
 
                 continue;
             }
@@ -85,8 +89,8 @@ class ProviderConnectionService
             foreach ($requests as $settingId => $request) {
                 $pendingRequest = $pool->as($settingId)
                     ->acceptJson()
-                    ->connectTimeout((int) config('services.provider_health.connect_timeout', 3))
-                    ->timeout((int) config('services.provider_health.timeout', 6));
+                    ->connectTimeout(self::CONNECT_TIMEOUT_SECONDS)
+                    ->timeout(self::REQUEST_TIMEOUT_SECONDS);
 
                 if ($request['token'] !== null) {
                     $pendingRequest = $pendingRequest->withToken($request['token'], $request['token_type']);
@@ -129,51 +133,51 @@ class ProviderConnectionService
 
         return match ($provider) {
             AppSettingsService::PROVIDER_DEEPGRAM => array_merge($request, [
-                'url' => (string) config('services.deepgram.projects_url'),
+                'url' => $this->metadataString($metadata, 'health_url'),
                 'token_type' => 'Token',
             ]),
             AppSettingsService::PROVIDER_ELEVENLABS => array_merge($request, [
-                'url' => (string) config('services.elevenlabs.user_url'),
+                'url' => $this->metadataString($metadata, 'user_url'),
                 'headers' => ['xi-api-key' => trim($apiKey)],
                 'token' => null,
             ]),
             AppSettingsService::PROVIDER_SPEECHMATICS => $request + [
-                'url' => rtrim((string) config('services.speechmatics.base_url'), '/').'/jobs',
+                'url' => $this->metadataBaseEndpoint($metadata, '/jobs'),
             ],
             AppSettingsService::PROVIDER_GLADIA => array_merge($request, [
-                'url' => rtrim((string) config('services.gladia.base_url'), '/').'/pre-recorded',
+                'url' => $this->metadataBaseEndpoint($metadata, '/pre-recorded'),
                 'headers' => ['x-gladia-key' => trim($apiKey)],
                 'token' => null,
             ]),
             AppSettingsService::PROVIDER_ASSEMBLYAI => array_merge($request, [
-                'url' => rtrim((string) config('services.assemblyai.base_url'), '/').'/transcript',
+                'url' => $this->metadataBaseEndpoint($metadata, '/transcript'),
                 'headers' => ['Authorization' => trim($apiKey)],
                 'token' => null,
             ]),
             AppSettingsService::PROVIDER_AZURE_SPEECH => $this->azureHealthRequest($request, $apiKey),
             AppSettingsService::PROVIDER_GEMINI => array_merge($request, [
-                'url' => rtrim((string) config('services.gemini.base_url'), '/').'/models/'.rawurlencode($model),
+                'url' => $this->metadataModelEndpoint($metadata, 'models_url', $model),
                 'query' => ['key' => trim($apiKey)],
                 'token' => null,
             ]),
             AppSettingsService::PROVIDER_GROQ_TRANSCRIPTION,
             AppSettingsService::PROVIDER_GROQ_TEXT_FIXER => $request + [
-                'url' => rtrim((string) config('services.groq.base_url'), '/').'/models',
+                'url' => $this->metadataString($metadata, 'models_url'),
             ],
             AppSettingsService::PROVIDER_DEEPSEEK => $request + [
-                'url' => (string) config('services.deepseek.models_url'),
+                'url' => $this->metadataString($metadata, 'models_url'),
             ],
             AppSettingsService::PROVIDER_CEREBRAS => $request + [
-                'url' => (string) config('services.cerebras.models_url'),
+                'url' => $this->metadataString($metadata, 'models_url'),
             ],
             AppSettingsService::PROVIDER_MISTRAL => $request + [
-                'url' => (string) config('services.mistral.models_url'),
+                'url' => $this->metadataString($metadata, 'models_url'),
             ],
             AppSettingsService::PROVIDER_OPENROUTER => $request + [
-                'url' => (string) config('services.openrouter.models_url'),
+                'url' => $this->metadataString($metadata, 'models_url'),
             ],
             AppSettingsService::PROVIDER_CLOUDFLARE => $request + [
-                'url' => $this->settings->cloudflareModelsUrl($metadata['account_id'] ?? null),
+                'url' => $this->metadataString($metadata, 'models_url'),
             ],
             default => $request + ['url' => ''],
         };
@@ -250,8 +254,8 @@ class ProviderConnectionService
         try {
             $response = Http::withToken(trim($apiKey))
                 ->acceptJson()
-                ->connectTimeout((int) config('services.provider_health.connect_timeout', 3))
-                ->timeout((int) config('services.provider_health.timeout', 6))
+                ->connectTimeout(self::CONNECT_TIMEOUT_SECONDS)
+                ->timeout(self::REQUEST_TIMEOUT_SECONDS)
                 ->get($healthEndpoint);
         } catch (ConnectionException|RequestException) {
             return $this->result('offline', 'Offline', 'The provider could not be reached.');
@@ -272,8 +276,14 @@ class ProviderConnectionService
         return $this->result('online', 'Online', 'The RunPod endpoint is reachable; workers may be scaled to zero while idle.');
     }
 
-    private function checkGroqTranscriptionProvider(string $apiKey, string $model): array
+    private function checkGroqTranscriptionProvider(string $apiKey, string $model, array $metadata): array
     {
+        $endpoint = $this->metadataString($metadata, 'transcription_url');
+
+        if ($endpoint === '') {
+            return $this->result('offline', 'Configuration required', 'Groq transcription URL is not configured in API Manager.');
+        }
+
         $stream = fopen('php://temp', 'w+b');
 
         if ($stream === false) {
@@ -286,10 +296,10 @@ class ProviderConnectionService
 
             $response = Http::withToken(trim($apiKey))
                 ->acceptJson()
-                ->connectTimeout((int) config('services.provider_health.connect_timeout', 3))
-                ->timeout((int) config('services.provider_health.timeout', 6))
+                ->connectTimeout(self::CONNECT_TIMEOUT_SECONDS)
+                ->timeout(self::REQUEST_TIMEOUT_SECONDS)
                 ->attach('file', $stream, 'jerva-health.wav')
-                ->post((string) config('services.groq.transcription_url'), [
+                ->post($endpoint, [
                     'model' => $model,
                     'response_format' => 'json',
                     'temperature' => '0',
@@ -332,6 +342,27 @@ class ProviderConnectionService
         return $endpointId === ''
             ? ''
             : self::RUNPOD_API_BASE_URL.'/'.$endpointId.'/runsync';
+    }
+
+    private function metadataString(array $metadata, string $key): string
+    {
+        $value = $metadata[$key] ?? null;
+
+        return is_string($value) ? trim($value) : '';
+    }
+
+    private function metadataBaseEndpoint(array $metadata, string $path): string
+    {
+        $baseUrl = $this->metadataString($metadata, 'base_url');
+
+        return $baseUrl === '' ? '' : rtrim($baseUrl, '/').$path;
+    }
+
+    private function metadataModelEndpoint(array $metadata, string $key, string $model): string
+    {
+        $url = $this->metadataString($metadata, $key);
+
+        return $url === '' ? '' : rtrim($url, '/').'/'.rawurlencode($model);
     }
 
     private function azureHealthRequest(array $request, string $apiKey): array

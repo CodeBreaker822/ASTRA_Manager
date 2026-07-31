@@ -1,9 +1,17 @@
 <script setup lang="ts">
-import { Link, usePage } from '@inertiajs/vue3';
-import { CreditCard, Palette, ShieldCheck, UserRound, X } from '@lucide/vue';
+import { Link, router, usePage } from '@inertiajs/vue3';
+import {
+    CreditCard,
+    LogOut,
+    Palette,
+    ShieldCheck,
+    UserRound,
+    X,
+} from '@lucide/vue';
 import { computed } from 'vue';
 import { useCurrentUrl } from '@/composables/useCurrentUrl';
 import { toUrl } from '@/lib/utils';
+import { logout } from '@/routes';
 import { edit as editAppearance } from '@/routes/appearance';
 import { edit as editProfile } from '@/routes/profile';
 import { edit as editSecurity } from '@/routes/security';
@@ -11,6 +19,9 @@ import type { NavItem } from '@/types';
 
 const { isCurrentOrParentUrl } = useCurrentUrl();
 const page = usePage();
+const handleLogout = () => {
+    router.flushAll();
+};
 
 const sidebarNavItems = computed<NavItem[]>(() => [
     {
@@ -65,7 +76,7 @@ const sidebarNavItems = computed<NavItem[]>(() => [
 
             <div class="grid min-h-0 flex-1 lg:grid-cols-[14rem_minmax(0,1fr)]">
                 <aside
-                    class="min-h-0 border-b border-blue-200 bg-white p-3 lg:border-r lg:border-b-0"
+                    class="flex min-h-0 flex-col border-b border-blue-200 bg-white p-3 lg:border-r lg:border-b-0"
                 >
                     <nav class="grid gap-1" aria-label="Settings">
                         <Link
@@ -84,6 +95,19 @@ const sidebarNavItems = computed<NavItem[]>(() => [
                             <span>{{ item.title }}</span>
                         </Link>
                     </nav>
+
+                    <div class="mt-3 border-t border-blue-200 pt-3 lg:mt-auto">
+                        <Link
+                            :href="logout()"
+                            as="button"
+                            class="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-red-700 transition hover:bg-red-50 hover:text-red-800"
+                            data-test="settings-logout-button"
+                            @click="handleLogout"
+                        >
+                            <LogOut class="size-4" />
+                            <span>Log out</span>
+                        </Link>
+                    </div>
                 </aside>
 
                 <main

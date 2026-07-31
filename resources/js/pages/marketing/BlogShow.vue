@@ -16,7 +16,10 @@ defineProps<{
 </script>
 
 <template>
-    <Head :title="post.title" />
+    <Head :title="post.title">
+        <meta name="description" :content="post.excerpt" />
+        <meta property="og:image" content="/JervaLogo.png" />
+    </Head>
 
     <main>
         <article class="bg-white py-16 md:py-24">

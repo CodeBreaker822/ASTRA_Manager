@@ -32,7 +32,7 @@ class CmsPositionSeeder extends Seeder
             ['position_code' => $code],
             [
                 'position_name' => $name,
-                'assigned_office' => 'JERVA Web',
+                'assigned_office' => 'JERVA Transcriber',
                 'category' => 'CMS',
                 'description' => $name.' dashboard permissions.',
                 'max_users' => 0,

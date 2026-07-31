@@ -2,12 +2,12 @@
 title: Web vs desktop transcription
 slug: web-vs-desktop
 date: 2026-07-18
-excerpt: The web app is built for online convenience, while the desktop app remains the home for offline local models.
+excerpt: JERVA Transcriber web is built for online convenience, while the desktop app remains the home for offline local models.
 ---
 
 ## Web edition
 
-The web workspace is for account-based, online transcription. It works from the browser and sends audio to the server transcription pipeline.
+The JERVA Transcriber web workspace is for account-based, online transcription. It works from the browser and sends audio to the server transcription pipeline.
 
 Use it when you want a fast setup, shared access, and server-managed provider fallback.
 
@@ -17,6 +17,6 @@ The desktop app is for offline-capable transcription. It can use local Whisper, 
 
 Use it when files need to stay local or when you need offline model control.
 
-## Same JERVA feel
+## Same JERVA Transcriber feel
 
 Both editions share the light workspace theme: white surfaces, slate sidebars, blue primary actions, compact controls, and readable transcript-first layouts.

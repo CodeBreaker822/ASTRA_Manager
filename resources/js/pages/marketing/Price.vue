@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
+import { Link } from '@inertiajs/vue3';
 import { Check } from '@lucide/vue';
 import { computed } from 'vue';
 import { Button } from '@/components/ui/button';
+import SeoHead from '@/components/marketing/SeoHead.vue';
+import type { MarketingSeo } from '@/types/marketing';
 
 type Plan = {
     key: string;
@@ -27,6 +29,7 @@ type Plan = {
 const props = defineProps<{
     plans: Plan[];
     comparison: Record<string, string[]>;
+    seo: MarketingSeo;
     content: {
         hero: {
             eyebrow: string;
@@ -57,7 +60,7 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
 </script>
 
 <template>
-    <Head title="Price" />
+    <SeoHead :seo="seo" />
 
     <main>
         <section class="border-b border-slate-200 bg-white py-16 md:py-24">

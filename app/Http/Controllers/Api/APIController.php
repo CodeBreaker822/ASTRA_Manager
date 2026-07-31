@@ -51,6 +51,7 @@ class APIController extends Controller
             'providers.*.account_id' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_-]+$/'],
             'providers.*.endpoint_id' => ['nullable', 'string', 'max:100', 'regex:/^[A-Za-z0-9_-]+$/'],
             'providers.*.runsync_url' => ['nullable', 'url', 'max:2048'],
+            'providers.*.metadata_json' => ['nullable', 'json'],
         ]);
 
         $providerCatalog = collect($settings->providerCards());
@@ -78,7 +79,7 @@ class APIController extends Controller
             }
 
             if ($provider === AppSettingsService::PROVIDER_CLOUDFLARE
-                && blank($data['account_id'] ?? $existingProvider['metadata']['account_id'] ?? config('services.cloudflare.account_id'))) {
+                && blank($data['account_id'] ?? $existingProvider['metadata']['account_id'] ?? null)) {
                 throw ValidationException::withMessages([
                     "providers.$provider.account_id" => 'A Cloudflare Account ID is required.',
                 ]);

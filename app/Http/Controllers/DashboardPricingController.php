@@ -10,6 +10,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -55,6 +56,13 @@ class DashboardPricingController extends Controller
             'tiers.*.featured' => ['boolean'],
             'tiers.*.features' => ['array'],
             'tiers.*.features.*' => ['nullable', 'string', 'max:160'],
+            'tiers.*.entitlements' => ['required', 'array'],
+            'tiers.*.entitlements.upload' => ['required', 'boolean'],
+            'tiers.*.entitlements.live' => ['required', 'boolean'],
+            'tiers.*.entitlements.polish' => ['required', 'boolean'],
+            'tiers.*.entitlements.summarize' => ['required', 'boolean'],
+            'tiers.*.entitlements.exports' => ['present', 'array'],
+            'tiers.*.entitlements.exports.*' => ['string', Rule::in(['txt', 'docx', 'xlsx'])],
             'comparisonRows' => ['array'],
             'comparisonRows.*.label' => ['required', 'string', 'max:120'],
             'comparisonRows.*.tier_keys' => ['array'],
@@ -66,6 +74,20 @@ class DashboardPricingController extends Controller
             'pricingContent.faq.*.question' => ['required', 'string', 'max:180'],
             'pricingContent.faq.*.answer' => ['required', 'string', 'max:500'],
         ]);
+
+        foreach (array_values($validated['tiers']) as $index => $tier) {
+            if ($tier['key'] !== 'payg') {
+                continue;
+            }
+
+            foreach (['upload_price_per_hour', 'live_price_per_hour', 'polish_price_per_character', 'summary_price_per_character'] as $field) {
+                if ((float) $tier[$field] <= 0) {
+                    throw ValidationException::withMessages([
+                        "tiers.{$index}.{$field}" => 'Pay-as-you-go paid rates must be greater than zero.',
+                    ]);
+                }
+            }
+        }
 
         PlanTier::query()->getConnection()->transaction(function () use ($validated): void {
             foreach (array_values($validated['tiers']) as $index => $tier) {
@@ -89,11 +111,11 @@ class DashboardPricingController extends Controller
                         'featured' => (bool) ($tier['featured'] ?? false),
                         'features' => array_values(array_filter($tier['features'] ?? [], fn (?string $feature): bool => filled($feature))),
                         'entitlements' => [
-                            'upload' => true,
-                            'live' => true,
-                            'polish' => true,
-                            'summarize' => true,
-                            'exports' => ['txt', 'docx', 'xlsx'],
+                            'upload' => (bool) $tier['entitlements']['upload'],
+                            'live' => (bool) $tier['entitlements']['live'],
+                            'polish' => (bool) $tier['entitlements']['polish'],
+                            'summarize' => (bool) $tier['entitlements']['summarize'],
+                            'exports' => array_values($tier['entitlements']['exports']),
                         ],
                         'sort_order' => $index,
                         'is_active' => true,

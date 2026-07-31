@@ -20,7 +20,6 @@ use Laravel\Sanctum\HasApiTokens;
 
 /**
  * @property int $id
- * @property string $name
  * @property string $email
  * @property Carbon|null $email_verified_at
  * @property string $password
@@ -35,7 +34,6 @@ use Laravel\Sanctum\HasApiTokens;
  * @property Carbon|null $updated_at
  */
 #[Fillable([
-    'name',
     'email',
     'password',
     'plan',
@@ -102,5 +100,4 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
     {
         return $this->hasOne(API::class);
     }
-
 }

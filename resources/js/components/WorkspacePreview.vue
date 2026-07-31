@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { FileAudio, FileText, Mic, Sparkles } from '@lucide/vue';
+import { FileAudio, FileText, Sparkles } from '@lucide/vue';
+import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import { Button } from '@/components/ui/button';
 </script>
 
@@ -16,9 +17,9 @@ import { Button } from '@/components/ui/button';
             >
                 <div class="flex items-center gap-3">
                     <span
-                        class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white"
+                        class="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-100"
                     >
-                        <Mic class="size-5" />
+                        <AppLogoIcon class="size-6" />
                     </span>
                     <div>
                         <p class="text-sm font-semibold text-slate-950">

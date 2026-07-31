@@ -73,31 +73,33 @@ type ActiveProject = Project & {
     transcripts: Transcript[];
 };
 
+type Entitlements = {
+    plan: {
+        key: string;
+        name: string;
+        minutes: number;
+        free_polish_uses_per_day: number;
+        free_summary_uses_per_day: number;
+        features: Record<string, unknown>;
+    };
+    usage: {
+        period: string;
+        minutes_used: number;
+        minutes_remaining: number;
+        seconds_transcribed: number;
+        polish_count: number;
+        summary_count: number;
+        free_polish_remaining: number;
+        free_summary_remaining: number;
+        wallet_balance: number;
+        wallet_balance_cents: number;
+    };
+};
+
 const props = defineProps<{
     projects: Project[];
     activeProject: ActiveProject | null;
-    entitlements: {
-        plan: {
-            key: string;
-            name: string;
-            minutes: number;
-            free_polish_uses_per_day: number;
-            free_summary_uses_per_day: number;
-            features: Record<string, unknown>;
-        };
-        usage: {
-            period: string;
-            minutes_used: number;
-            minutes_remaining: number;
-            seconds_transcribed: number;
-            polish_count: number;
-            summary_count: number;
-            free_polish_remaining: number;
-            free_summary_remaining: number;
-            wallet_balance: number;
-            wallet_balance_cents: number;
-        };
-    };
+    entitlements: Entitlements;
 }>();
 
 const page = usePage();
@@ -114,6 +116,7 @@ const polishPreset = ref<
 const polishCustomInstruction = ref('');
 const polishError = ref('');
 const summarySource = ref<'raw' | 'cleaned'>('raw');
+const summaryExportFormat = ref<'txt' | 'docx' | 'xlsx'>('txt');
 const exportOpen = ref(false);
 const exportSource = ref<'raw' | 'cleaned' | 'summary'>('raw');
 const isExporting = ref(false);
@@ -121,17 +124,23 @@ const uploadInput = useTemplateRef<HTMLInputElement>('uploadInput');
 const logTrigger = useTemplateRef<HTMLButtonElement>('logTrigger');
 const logPanel = useTemplateRef<HTMLElement>('logPanel');
 const localProject = ref<ActiveProject | null>(props.activeProject);
+const localEntitlements = ref<Entitlements>(props.entitlements);
 const isActing = ref(false);
 const upgradeBanner = ref('');
 
-const userName = computed(() => {
+const userEmail = computed(() => {
     const user = page.props.auth?.user;
 
-    return user?.name ?? 'JERVA user';
+    return user?.email ?? 'JERVA user';
 });
 
-const totalTranscriptionMinutes = computed(
-    () => props.entitlements.plan.minutes,
+const formattedCreditBalance = computed(() =>
+    new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(localEntitlements.value.usage.wallet_balance_cents / 100),
 );
 
 const projectTitle = computed(() => {
@@ -300,6 +309,20 @@ const summaryStatusLabel = computed(() => {
     return 'Ready';
 });
 
+const summaryText = computed(
+    () => primaryTranscript.value?.summary_text?.trim() ?? '',
+);
+
+const summaryReadyForExport = computed(
+    () =>
+        primaryTranscript.value?.summary_status === 'complete' &&
+        summaryText.value.length > 0,
+);
+
+const summarySourceLabel = computed(() =>
+    summarySource.value === 'cleaned' ? 'Cleaned transcript' : 'Raw transcript',
+);
+
 const pendingTranscripts = computed(
     () =>
         displayProject.value?.transcripts.filter((transcript) =>
@@ -320,13 +343,13 @@ const hasPendingWork = computed(
 
 const canUseUpload = computed(
     () =>
-        Boolean(props.entitlements.plan.features.upload) &&
+        Boolean(localEntitlements.value.plan.features.upload) &&
         Boolean(displayProject.value),
 );
 
 const canUseLive = computed(
     () =>
-        Boolean(props.entitlements.plan.features.live) &&
+        Boolean(localEntitlements.value.plan.features.live) &&
         Boolean(displayProject.value),
 );
 
@@ -365,6 +388,13 @@ watch(
     () => props.activeProject,
     (project) => {
         localProject.value = project;
+    },
+);
+
+watch(
+    () => props.entitlements,
+    (entitlements) => {
+        localEntitlements.value = entitlements;
     },
 );
 
@@ -457,6 +487,83 @@ const csrfToken = () =>
         .querySelector<HTMLMetaElement>('meta[name="csrf-token"]')
         ?.getAttribute('content') ?? '';
 
+const escapeHtml = (value: string) =>
+    value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+
+const renderInlineMarkdown = (value: string) =>
+    escapeHtml(value).replace(
+        /\*\*(.+?)\*\*/g,
+        '<strong class="font-semibold text-slate-950">$1</strong>',
+    );
+
+const renderSummaryMarkdown = (value: string) => {
+    const lines = value.split(/\r?\n/);
+    const html: string[] = [];
+    let listItems: string[] = [];
+
+    const flushList = () => {
+        if (listItems.length === 0) {
+            return;
+        }
+
+        html.push(
+            `<ul class="my-3 space-y-2 pl-5 text-sm leading-6 text-slate-700">${listItems.join('')}</ul>`,
+        );
+        listItems = [];
+    };
+
+    lines.forEach((rawLine) => {
+        const line = rawLine.trim();
+
+        if (line === '') {
+            flushList();
+
+            return;
+        }
+
+        const heading = line.match(/^(#{1,3})\s+(.+)$/);
+
+        if (heading) {
+            flushList();
+            const level = heading[1].length;
+            const classes =
+                level === 1
+                    ? 'mt-1 text-xl font-semibold text-slate-950'
+                    : 'mt-5 text-base font-semibold text-slate-950';
+
+            html.push(
+                `<h${Math.min(level + 1, 4)} class="${classes}">${renderInlineMarkdown(heading[2])}</h${Math.min(level + 1, 4)}>`,
+            );
+
+            return;
+        }
+
+        const bullet = line.match(/^[-*]\s+(.+)$/);
+
+        if (bullet) {
+            listItems.push(
+                `<li class="list-disc">${renderInlineMarkdown(bullet[1])}</li>`,
+            );
+
+            return;
+        }
+
+        flushList();
+        html.push(
+            `<p class="my-3 text-sm leading-6 text-slate-700">${renderInlineMarkdown(line)}</p>`,
+        );
+    });
+
+    flushList();
+
+    return html.join('');
+};
+
 const refreshStatus = async () => {
     if (!displayProject.value) {
         return;
@@ -477,12 +584,16 @@ const refreshStatus = async () => {
 
     const payload = (await response.json()) as {
         project: ActiveProject;
+        entitlements?: Entitlements;
     };
     localProject.value = {
         ...payload.project,
         updated_at: displayProject.value.updated_at,
         transcripts_count: payload.project.transcripts.length,
     };
+    if (payload.entitlements) {
+        localEntitlements.value = payload.entitlements;
+    }
     upload.syncTranscripts(payload.project.transcripts);
 };
 
@@ -704,6 +815,7 @@ const summarizeTranscript = async (source: 'raw' | 'cleaned') => {
 const exportTranscript = async (
     format: 'txt' | 'docx' | 'xlsx',
     source: 'raw' | 'cleaned' | 'summary' = exportSource.value,
+    summarySourceForExport: 'raw' | 'cleaned' = summarySource.value,
 ) => {
     if (!displayProject.value || !primaryTranscript.value) {
         return;
@@ -730,8 +842,17 @@ const exportTranscript = async (
     }
 
     isExporting.value = true;
+    const params = new URLSearchParams({
+        format,
+        source,
+    });
+
+    if (source === 'summary') {
+        params.set('summary_source', summarySourceForExport);
+    }
+
     const response = await fetch(
-        `/workspace/${displayProject.value.id}/transcripts/${primaryTranscript.value.id}/export?format=${format}&source=${source}`,
+        `/workspace/${displayProject.value.id}/transcripts/${primaryTranscript.value.id}/export?${params.toString()}`,
         {
             headers: {
                 Accept: 'application/octet-stream,application/json',
@@ -775,6 +896,14 @@ const exportTranscript = async (
     toast.success(`Export download started: ${filename}`);
 };
 
+const exportSummary = () => {
+    void exportTranscript(
+        summaryExportFormat.value,
+        'summary',
+        summarySource.value,
+    );
+};
+
 const filenameFromDisposition = (header: string | null, fallback: string) => {
     const match = header?.match(/filename="?([^"]+)"?/i);
 
@@ -809,6 +938,8 @@ const closeLog = () => {
 };
 
 onMounted(() => {
+    void refreshStatus();
+
     if (pendingTranscripts.value.length > 0) {
         startPolling();
     }
@@ -825,7 +956,7 @@ onMounted(() => {
             class="flex min-h-dvh flex-col overflow-y-auto lg:h-screen lg:min-h-0 lg:flex-row lg:overflow-hidden"
         >
             <aside
-                class="flex max-h-[48dvh] w-full shrink-0 flex-col border-b border-slate-200 bg-slate-50 lg:min-h-0 lg:max-h-none lg:w-[19rem] lg:border-r lg:border-b-0"
+                class="flex max-h-[48dvh] w-full shrink-0 flex-col border-b border-slate-200 bg-slate-50 lg:max-h-none lg:min-h-0 lg:w-[19rem] lg:border-r lg:border-b-0"
             >
                 <div class="border-b border-slate-200 p-4">
                     <div class="flex h-[72px] items-center gap-3 px-2">
@@ -938,22 +1069,42 @@ onMounted(() => {
                         preserve-scroll
                         preserve-state
                         replace
-                        class="block rounded-lg border border-blue-100 bg-blue-50 p-4 transition-colors hover:border-blue-200 hover:bg-blue-100"
+                        class="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 bg-white text-left transition-colors hover:border-slate-300 hover:bg-slate-50"
+                        aria-label="View free minutes and credit balance"
                     >
-                        <p class="text-sm font-semibold text-blue-950">
-                            Today's allowance
-                        </p>
-                        <p class="mt-1 text-xs text-blue-900">
-                            {{ entitlements.usage.minutes_remaining }} of
-                            {{ totalTranscriptionMinutes }} minutes remaining
-                        </p>
+                        <div class="min-w-0 px-3 py-2.5">
+                            <p class="text-[11px] font-medium text-slate-500">
+                                Free Minutes
+                            </p>
+                            <p class="mt-0.5 truncate text-sm text-slate-950">
+                                <span class="font-semibold">
+                                    {{
+                                        localEntitlements.usage
+                                            .minutes_remaining
+                                    }}
+                                </span>
+                                <span class="text-slate-500"> left</span>
+                            </p>
+                        </div>
+                        <div
+                            class="min-w-0 border-l border-slate-200 px-3 py-2.5"
+                        >
+                            <p class="text-[11px] font-medium text-slate-500">
+                                Credit
+                            </p>
+                            <p
+                                class="mt-0.5 truncate text-sm font-semibold text-slate-950"
+                            >
+                                {{ formattedCreditBalance }}
+                            </p>
+                        </div>
                     </Link>
                     <div class="mt-4 flex items-center justify-between gap-3">
                         <div class="min-w-0">
                             <p
                                 class="truncate text-sm font-semibold text-slate-950"
                             >
-                                {{ userName }}
+                                {{ userEmail }}
                             </p>
                             <p class="text-xs text-slate-600">Signed in</p>
                         </div>
@@ -1007,7 +1158,7 @@ onMounted(() => {
 
                 <div class="min-h-0 flex-1 overflow-hidden">
                     <div
-                        class="h-full w-full overflow-y-auto px-4 pt-6 pb-40 [scrollbar-gutter:stable] lg:px-8 lg:pb-32"
+                        class="h-full w-full [scrollbar-gutter:stable] overflow-y-auto px-4 pt-6 pb-40 lg:px-8 lg:pb-32"
                     >
                         <div
                             v-if="upgradeBanner"
@@ -1457,111 +1608,205 @@ onMounted(() => {
                                         </button>
                                     </DialogTrigger>
                                     <DialogContent
-                                        class="border-slate-200 bg-white shadow-2xl"
+                                        :show-close-button="false"
+                                        class="max-h-[calc(100dvh-2rem)] w-[min(94vw,52rem)] overflow-hidden border-blue-200 bg-white p-0 text-slate-950 shadow-2xl sm:max-w-[52rem]"
                                     >
-                                        <DialogHeader>
-                                            <DialogTitle>
-                                                {{ summaryStatusLabel }}
-                                            </DialogTitle>
-                                            <DialogDescription
-                                                class="text-slate-600"
+                                        <div
+                                            class="flex h-full max-h-[calc(100dvh-2rem)] flex-col"
+                                        >
+                                            <header
+                                                class="flex flex-col gap-3 border-b border-blue-100 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
                                             >
-                                                The summary is being prepared.
-                                                You may close this window and
-                                                return later.
-                                            </DialogDescription>
-                                        </DialogHeader>
-                                        <div class="grid gap-4">
-                                            <div
-                                                v-if="
-                                                    primaryTranscript?.summary_text
-                                                "
-                                                class="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-blue-950"
-                                            >
-                                                {{
-                                                    primaryTranscript.summary_text
-                                                }}
-                                            </div>
-                                            <p
-                                                v-else-if="!isSummarizing"
-                                                class="text-sm text-slate-600"
-                                            >
-                                                No summary has been created for
-                                                this project.
-                                            </p>
-                                            <p
-                                                v-if="
-                                                    primaryTranscript?.summary_text
-                                                "
-                                                class="text-sm text-slate-600"
-                                            >
-                                                Starting again replaces this
-                                                project's existing summary.
-                                            </p>
-                                            <div class="grid gap-2">
-                                                <Label>Source</Label>
+                                                <div class="min-w-0">
+                                                    <p
+                                                        class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
+                                                    >
+                                                        Summary
+                                                    </p>
+                                                    <h2
+                                                        class="truncate text-lg font-semibold text-slate-950"
+                                                    >
+                                                        {{
+                                                            displayProject?.title ??
+                                                            'Project'
+                                                        }}
+                                                    </h2>
+                                                </div>
                                                 <div
-                                                    class="grid grid-cols-2 gap-2"
+                                                    class="flex flex-wrap items-center gap-2"
                                                 >
+                                                    <select
+                                                        v-model="
+                                                            summaryExportFormat
+                                                        "
+                                                        data-summary-export-format
+                                                        class="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                                                    >
+                                                        <option value="txt">
+                                                            TXT
+                                                        </option>
+                                                        <option value="docx">
+                                                            Microsoft Word
+                                                        </option>
+                                                        <option value="xlsx">
+                                                            Excel
+                                                        </option>
+                                                    </select>
                                                     <Button
                                                         type="button"
-                                                        variant="outline"
-                                                        :class="
-                                                            summarySource ===
-                                                            'raw'
-                                                                ? 'border-blue-300 bg-blue-50 text-blue-700'
-                                                                : ''
+                                                        class="h-10"
+                                                        :disabled="
+                                                            !summaryReadyForExport ||
+                                                            isExporting
                                                         "
-                                                        @click="
-                                                            summarySource =
-                                                                'raw'
-                                                        "
+                                                        @click="exportSummary"
                                                     >
-                                                        Raw transcript
+                                                        <Download
+                                                            class="mr-2 size-4"
+                                                        />
+                                                        {{
+                                                            isExporting
+                                                                ? 'Exporting'
+                                                                : 'Export'
+                                                        }}
                                                     </Button>
-                                                    <Button
+                                                    <button
                                                         type="button"
-                                                        variant="outline"
-                                                        :class="
-                                                            summarySource ===
-                                                            'cleaned'
-                                                                ? 'border-blue-300 bg-blue-50 text-blue-700'
-                                                                : ''
-                                                        "
+                                                        class="inline-flex size-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                                                        aria-label="Close summary"
                                                         @click="
-                                                            summarySource =
-                                                                'cleaned'
+                                                            summaryOpen = false
                                                         "
                                                     >
-                                                        Cleaned transcript
-                                                    </Button>
+                                                        <X class="size-4" />
+                                                    </button>
+                                                </div>
+                                            </header>
+
+                                            <div
+                                                class="flex flex-col gap-3 border-b border-blue-100 bg-blue-50/60 px-5 py-3 sm:flex-row sm:items-center sm:justify-between"
+                                            >
+                                                <label
+                                                    class="flex flex-col gap-1 text-sm font-medium text-slate-700 sm:flex-row sm:items-center"
+                                                >
+                                                    <span>Source</span>
+                                                    <select
+                                                        v-model="summarySource"
+                                                        class="h-10 rounded-lg border border-blue-200 bg-white px-3 text-sm font-medium text-slate-800 transition outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                                                    >
+                                                        <option value="raw">
+                                                            Raw transcript
+                                                        </option>
+                                                        <option value="cleaned">
+                                                            Cleaned transcript
+                                                        </option>
+                                                    </select>
+                                                </label>
+                                                <div
+                                                    class="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700"
+                                                >
+                                                    <span
+                                                        class="size-2 rounded-full"
+                                                        :class="
+                                                            isSummarizing
+                                                                ? 'bg-amber-400'
+                                                                : primaryTranscript?.summary_status ===
+                                                                    'failed'
+                                                                  ? 'bg-red-500'
+                                                                  : summaryReadyForExport
+                                                                    ? 'bg-emerald-500'
+                                                                    : 'bg-blue-400'
+                                                        "
+                                                    />
+                                                    {{ summaryStatusLabel }}
                                                 </div>
                                             </div>
+
+                                            <div
+                                                v-if="isSummarizing"
+                                                class="h-1 overflow-hidden bg-blue-100"
+                                            >
+                                                <div
+                                                    class="h-full w-1/2 animate-pulse rounded-r-full bg-blue-600"
+                                                />
+                                            </div>
+
+                                            <div
+                                                class="min-h-[18rem] flex-1 overflow-y-auto px-5 py-5"
+                                            >
+                                                <div
+                                                    v-if="summaryText"
+                                                    class="rounded-lg border border-blue-100 bg-white px-5 py-4 shadow-sm"
+                                                >
+                                                    <div
+                                                        class="space-y-1"
+                                                        v-html="
+                                                            renderSummaryMarkdown(
+                                                                summaryText,
+                                                            )
+                                                        "
+                                                    />
+                                                </div>
+                                                <div
+                                                    v-else-if="isSummarizing"
+                                                    class="flex min-h-56 items-center justify-center rounded-lg border border-blue-100 bg-blue-50 px-5 text-center text-sm leading-6 text-blue-900"
+                                                >
+                                                    The summary is being
+                                                    prepared. You may close this
+                                                    window and return later.
+                                                </div>
+                                                <div
+                                                    v-else
+                                                    class="flex min-h-56 items-center justify-center rounded-lg border border-dashed border-blue-200 bg-blue-50/70 px-5 text-center text-sm leading-6 text-slate-600"
+                                                >
+                                                    No summary has been created
+                                                    for this project.
+                                                </div>
+                                                <p
+                                                    v-if="
+                                                        primaryTranscript?.summary_error_message
+                                                    "
+                                                    class="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                                                >
+                                                    {{
+                                                        primaryTranscript.summary_error_message
+                                                    }}
+                                                </p>
+                                            </div>
+
+                                            <footer
+                                                class="flex flex-col gap-3 border-t border-blue-100 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+                                            >
+                                                <p
+                                                    class="text-sm text-slate-600"
+                                                >
+                                                    Starting again replaces this
+                                                    project's existing summary.
+                                                </p>
+                                                <Button
+                                                    type="button"
+                                                    class="h-11"
+                                                    @click="
+                                                        summarizeTranscript(
+                                                            summarySource,
+                                                        )
+                                                    "
+                                                    :disabled="
+                                                        isActing ||
+                                                        isSummarizing
+                                                    "
+                                                >
+                                                    <Sparkles
+                                                        class="mr-2 size-4"
+                                                    />
+                                                    {{
+                                                        summaryText
+                                                            ? 'Replace summary'
+                                                            : `Summarize ${summarySourceLabel}`
+                                                    }}
+                                                </Button>
+                                            </footer>
                                         </div>
-                                        <DialogFooter>
-                                            <Button
-                                                variant="outline"
-                                                @click="summaryOpen = false"
-                                            >
-                                                Cancel
-                                            </Button>
-                                            <Button
-                                                @click="
-                                                    summarizeTranscript(
-                                                        summarySource,
-                                                    )
-                                                "
-                                                :disabled="
-                                                    isActing || isSummarizing
-                                                "
-                                            >
-                                                {{
-                                                    primaryTranscript?.summary_text
-                                                        ? 'Replace summary'
-                                                        : 'Summarize'
-                                                }}
-                                            </Button>
-                                        </DialogFooter>
                                     </DialogContent>
                                 </Dialog>
                                 <div class="relative">

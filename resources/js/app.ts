@@ -3,7 +3,7 @@ import type { DefineComponent } from 'vue';
 import { initializeTheme } from '@/composables/useAppearance';
 import { initializeFlashToast } from '@/lib/flashToast';
 
-const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
+const appName = import.meta.env.VITE_APP_NAME || 'JERVA Transcriber';
 const pages = import.meta.glob<{ default: DefineComponent }>(
     './pages/**/*.vue',
 );
@@ -88,7 +88,13 @@ createInertiaApp({
 
         return applyDefaultLayout(name, page.default);
     },
-    title: (title) => (title ? `${title} - ${appName}` : appName),
+    title: (title) => {
+        if (!title || title === appName) {
+            return appName;
+        }
+
+        return title.includes('JERVA') ? title : `${title} - ${appName}`;
+    },
     progress: {
         color: '#2563eb',
     },

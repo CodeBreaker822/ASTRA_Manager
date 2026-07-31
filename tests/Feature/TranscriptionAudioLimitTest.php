@@ -69,6 +69,7 @@ it('uses provider priority for every batched clip and wraps fallback attempts', 
         'model' => 'nova-3',
         'is_enabled' => true,
         'sort_order' => 0,
+        'metadata' => audioLimitDeepgramRuntimeMetadata(),
     ]);
     TranscriptionProviderSetting::query()->create([
         'provider' => 'groq_transcription',
@@ -76,6 +77,7 @@ it('uses provider priority for every batched clip and wraps fallback attempts', 
         'model' => GroqSpeechToTextService::MODEL_WHISPER_LARGE_V3_TURBO,
         'is_enabled' => true,
         'sort_order' => 1,
+        'metadata' => audioLimitGroqTranscriptionRuntimeMetadata(),
     ]);
 
     Http::fake([
@@ -134,6 +136,7 @@ it('accepts successful empty transcription text as completed audio with no speec
         'model' => 'nova-3',
         'is_enabled' => true,
         'sort_order' => 0,
+        'metadata' => audioLimitDeepgramRuntimeMetadata(),
     ]);
 
     Http::fake([
@@ -179,6 +182,7 @@ it('sends batched clips to runpod when runpod is the first provider', function (
         'sort_order' => 0,
         'metadata' => [
             'runsync_url' => 'https://runpod.test/v2/endpoint/runsync',
+            'timeout' => 300,
         ],
     ]);
 
@@ -261,6 +265,7 @@ it('accepts twenty one minute audio chunks in a single runpod batch', function (
         'sort_order' => 0,
         'metadata' => [
             'runsync_url' => 'https://runpod.test/v2/endpoint/runsync',
+            'timeout' => 300,
         ],
     ]);
 
@@ -338,6 +343,7 @@ it('keeps an accepted runpod async job pending when status polling is temporaril
         'sort_order' => 0,
         'metadata' => [
             'runsync_url' => 'https://runpod.test/v2/endpoint/runsync',
+            'timeout' => 300,
         ],
     ]);
     TranscriptionProviderSetting::query()->create([
@@ -346,6 +352,7 @@ it('keeps an accepted runpod async job pending when status polling is temporaril
         'model' => GroqSpeechToTextService::MODEL_WHISPER_LARGE_V3_TURBO,
         'is_enabled' => true,
         'sort_order' => 1,
+        'metadata' => audioLimitGroqTranscriptionRuntimeMetadata(),
     ]);
 
     config([
@@ -391,3 +398,25 @@ it('keeps an accepted runpod async job pending when status polling is temporaril
 
     Http::assertNotSent(fn ($request): bool => $request->url() === config('services.groq.transcription_url'));
 });
+
+/**
+ * @return array<string, mixed>
+ */
+function audioLimitDeepgramRuntimeMetadata(): array
+{
+    return [
+        'listen_url' => (string) config('services.deepgram.listen_url'),
+        'timeout' => 120,
+    ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function audioLimitGroqTranscriptionRuntimeMetadata(): array
+{
+    return [
+        'transcription_url' => (string) config('services.groq.transcription_url'),
+        'timeout' => 120,
+    ];
+}

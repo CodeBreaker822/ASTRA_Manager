@@ -93,7 +93,7 @@ class BlogPost extends Model
             'status' => $this->status,
             'published_at' => $this->published_at?->format('Y-m-d\TH:i'),
             'date' => $this->published_at?->format('Y-m-d') ?? '',
-            'author' => $this->author?->name,
+            'author' => $this->author?->email,
             'html' => self::renderMarkdown($this->body_markdown),
         ];
     }

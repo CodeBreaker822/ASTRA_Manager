@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { Link, router, usePage } from '@inertiajs/vue3';
-import { CreditCard, Palette, ShieldCheck, UserRound, X } from '@lucide/vue';
+import {
+    CreditCard,
+    LogOut,
+    Palette,
+    ShieldCheck,
+    UserRound,
+    X,
+} from '@lucide/vue';
 import { computed, defineAsyncComponent } from 'vue';
 import { useSettingsModal } from '@/composables/useSettingsModal';
+import { logout } from '@/routes';
 import type { SettingsTab } from '@/composables/useSettingsModal';
 import type { Passkey } from '@/types/auth';
 
@@ -119,6 +127,10 @@ const close = () => {
         },
     );
 };
+
+const handleLogout = () => {
+    router.flushAll();
+};
 </script>
 
 <template>
@@ -159,7 +171,7 @@ const close = () => {
 
             <div class="grid min-h-0 flex-1 lg:grid-cols-[14rem_minmax(0,1fr)]">
                 <aside
-                    class="min-h-0 border-b border-blue-200 bg-white p-3 lg:border-r lg:border-b-0"
+                    class="flex min-h-0 flex-col border-b border-blue-200 bg-white p-3 lg:border-r lg:border-b-0"
                 >
                     <nav class="grid gap-1" aria-label="Settings">
                         <Link
@@ -181,6 +193,19 @@ const close = () => {
                             <span>{{ item.title }}</span>
                         </Link>
                     </nav>
+
+                    <div class="mt-3 border-t border-blue-200 pt-3 lg:mt-auto">
+                        <Link
+                            :href="logout()"
+                            as="button"
+                            class="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-red-700 transition hover:bg-red-50 hover:text-red-800"
+                            data-test="settings-modal-logout-button"
+                            @click="handleLogout"
+                        >
+                            <LogOut class="size-4" />
+                            <span>Log out</span>
+                        </Link>
+                    </div>
                 </aside>
 
                 <main

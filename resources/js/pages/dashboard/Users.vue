@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { KeyRound, Pencil, Plus, Save, ShieldCheck, Trash2, X } from '@lucide/vue';
+import {
+    KeyRound,
+    Pencil,
+    Plus,
+    Save,
+    ShieldCheck,
+    Trash2,
+    X,
+} from '@lucide/vue';
 import { computed, ref } from 'vue';
 import InputError from '@/components/InputError.vue';
 import { Badge } from '@/components/ui/badge';
@@ -61,7 +69,6 @@ const editingUserId = ref<number | null>(null);
 const editingPositionId = ref<number | null>(null);
 
 const createForm = useForm({
-    name: '',
     email: '',
     password: '',
     position_id: '',
@@ -69,7 +76,6 @@ const createForm = useForm({
 });
 
 const editForm = useForm({
-    name: '',
     email: '',
     password: '',
     position_id: '',
@@ -92,7 +98,6 @@ const startEdit = (user: ManagedUser) => {
     editingUserId.value = user.id;
     editForm.clearErrors();
     editForm.defaults({
-        name: user.name,
         email: user.email,
         password: '',
         position_id: user.position_id ? String(user.position_id) : '',
@@ -178,7 +183,8 @@ const removePosition = (position: Position) => {
                 User Management
             </h1>
             <p class="mt-1 text-sm text-slate-700">
-                Manage users, positions, and gate permissions for JERVA Web.
+                Manage users, positions, and gate permissions for JERVA
+                Transcriber.
             </p>
         </div>
 
@@ -191,19 +197,9 @@ const removePosition = (position: Position) => {
             </CardHeader>
             <CardContent>
                 <form
-                    class="grid gap-4 xl:grid-cols-[1fr_1fr_1fr_180px_140px_auto]"
+                    class="grid gap-4 xl:grid-cols-[1.2fr_1fr_180px_140px_auto]"
                     @submit.prevent="submitCreate"
                 >
-                    <div class="grid gap-2">
-                        <Label for="new-name">Name</Label>
-                        <Input
-                            id="new-name"
-                            v-model="createForm.name"
-                            placeholder="Full name"
-                        />
-                        <InputError :message="createForm.errors.name" />
-                    </div>
-
                     <div class="grid gap-2">
                         <Label for="new-email">Email</Label>
                         <Input
@@ -282,9 +278,8 @@ const removePosition = (position: Position) => {
             <CardContent>
                 <div class="overflow-hidden rounded-md border">
                     <div
-                        class="hidden grid-cols-[1fr_1.1fr_170px_120px_120px] gap-4 border-b bg-muted/50 px-4 py-3 text-sm font-medium text-muted-foreground lg:grid"
+                        class="hidden grid-cols-[1.4fr_170px_120px_120px] gap-4 border-b bg-muted/50 px-4 py-3 text-sm font-medium text-muted-foreground lg:grid"
                     >
-                        <div>Name</div>
                         <div>Email</div>
                         <div>Position</div>
                         <div>Status</div>
@@ -294,11 +289,9 @@ const removePosition = (position: Position) => {
                     <div
                         v-for="user in users"
                         :key="user.id"
-                        class="grid gap-3 border-b px-4 py-4 last:border-b-0 lg:grid-cols-[1fr_1.1fr_170px_120px_120px] lg:items-center lg:gap-4"
+                        class="grid gap-3 border-b px-4 py-4 last:border-b-0 lg:grid-cols-[1.4fr_170px_120px_120px] lg:items-center lg:gap-4"
                     >
                         <template v-if="editingUserId === user.id">
-                            <Input v-model="editForm.name" aria-label="Name" />
-
                             <div class="grid gap-2">
                                 <Input
                                     v-model="editForm.email"
@@ -356,7 +349,7 @@ const removePosition = (position: Position) => {
                             </div>
 
                             <div
-                                class="grid gap-2 rounded-md border bg-muted/30 p-3 lg:col-span-5"
+                                class="grid gap-2 rounded-md border bg-muted/30 p-3 lg:col-span-4"
                             >
                                 <div
                                     class="flex items-center gap-2 text-sm font-medium"
@@ -380,17 +373,8 @@ const removePosition = (position: Position) => {
                         <template v-else>
                             <div class="min-w-0">
                                 <div class="truncate font-medium">
-                                    {{ user.name }}
-                                </div>
-                                <div
-                                    class="text-sm text-muted-foreground lg:hidden"
-                                >
                                     {{ user.email }}
                                 </div>
-                            </div>
-
-                            <div class="hidden truncate text-sm lg:block">
-                                {{ user.email }}
                             </div>
 
                             <div class="text-sm">

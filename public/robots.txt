@@ -1,2 +1,4 @@
 User-agent: *
 Disallow:
+
+Sitemap: https://usejerva.com/sitemap.xml

@@ -15,9 +15,10 @@ class GladiaSpeechToTextService
     public function __construct(
         private readonly string $apiKey,
         private readonly string $modelId = self::MODEL_SOLARIA,
-        private readonly ?string $baseUrl = null,
-        private readonly ?int $pollIntervalMs = null,
-        private readonly ?int $maxWaitSeconds = null,
+        private readonly string $baseUrl,
+        private readonly int $pollIntervalMs,
+        private readonly int $maxWaitSeconds,
+        private readonly int $timeout,
     ) {}
 
     public function transcribe(UploadedFile|string|SplFileInfo $audio, array $options = []): array
@@ -62,7 +63,7 @@ class GladiaSpeechToTextService
 
     private function waitForResult(string $resultUrl): array
     {
-        $deadline = microtime(true) + ($this->maxWaitSeconds ?? (int) config('services.gladia.max_wait_seconds', 300));
+        $deadline = microtime(true) + $this->maxWaitSeconds;
 
         do {
             $response = $this->client()->get($resultUrl);
@@ -77,7 +78,7 @@ class GladiaSpeechToTextService
                 throw new RuntimeException(ServiceUserMessage::transcriptionFailed('Gladia'));
             }
 
-            usleep(($this->pollIntervalMs ?? (int) config('services.gladia.poll_interval_ms', 1000)) * 1000);
+            usleep($this->pollIntervalMs * 1000);
         } while (microtime(true) < $deadline);
 
         throw new RuntimeException(ServiceUserMessage::transcriptionFailed('Gladia'));
@@ -117,7 +118,7 @@ class GladiaSpeechToTextService
         }
 
         return Http::withHeaders(['x-gladia-key' => trim($this->apiKey)])
-            ->acceptJson()->timeout((int) config('services.gladia.timeout', 120));
+            ->acceptJson()->timeout($this->timeout);
     }
 
     private function ensureSuccessful(int $status, string $provider): void
@@ -136,7 +137,7 @@ class GladiaSpeechToTextService
 
     private function url(string $path): string
     {
-        return rtrim($this->baseUrl ?? (string) config('services.gladia.base_url'), '/').$path;
+        return rtrim($this->baseUrl, '/').$path;
     }
 
     private function language(mixed $language): ?string

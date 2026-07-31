@@ -88,6 +88,7 @@ class AppSettingsService
                 ]));
 
                 $cards[] = array_merge($definition, [
+                    'endpoint' => $this->endpointFor($providerId, $metadata),
                     'setting_id' => $setting->id,
                     'integration_key' => 'setting_'.$setting->id,
                     'models' => $selectableModels,
@@ -104,7 +105,10 @@ class AppSettingsService
 
             if ($unusedModels !== []) {
                 $model = $unusedModels[0];
+                $metadata = $this->metadataWithDefaults($providerId);
+
                 $cards[] = array_merge($definition, [
+                    'endpoint' => $this->endpointFor($providerId, $metadata),
                     'setting_id' => null,
                     'integration_key' => 'available_'.$providerId,
                     'models' => $unusedModels,
@@ -114,7 +118,7 @@ class AppSettingsService
                     'configured' => false,
                     'masked_api_key' => $this->maskKey($reusableApiKey),
                     'has_reusable_api_key' => filled($reusableApiKey),
-                    'metadata' => $this->metadataWithDefaults($providerId),
+                    'metadata' => $metadata,
                     'sort_order' => PHP_INT_MAX,
                 ]);
             }
@@ -266,19 +270,31 @@ class AppSettingsService
                 $values['api_key'] = $this->existingApiKey($provider);
             }
 
+            $metadata = is_array($setting->metadata) ? $setting->metadata : [];
+            $metadataJson = trim((string) ($data['metadata_json'] ?? ''));
+
+            if ($metadataJson !== '') {
+                $decodedMetadata = json_decode($metadataJson, true, flags: JSON_THROW_ON_ERROR);
+
+                if (is_array($decodedMetadata)) {
+                    $metadata = array_merge($metadata, $decodedMetadata);
+                }
+            }
+
             if ($provider === self::PROVIDER_CLOUDFLARE) {
-                $values['metadata'] = [
+                $metadata = array_merge($metadata, [
                     'account_id' => trim((string) ($data['account_id'] ?? $setting->metadata['account_id'] ?? '')),
-                ];
+                ]);
             }
 
             if ($provider === self::PROVIDER_RUNPOD) {
-                $values['metadata'] = [
+                $metadata = array_merge($metadata, [
                     'endpoint_id' => trim((string) ($data['endpoint_id'] ?? $setting->metadata['endpoint_id'] ?? '')),
                     'runsync_url' => trim((string) ($data['runsync_url'] ?? $setting->metadata['runsync_url'] ?? '')),
-                ];
+                ]);
             }
 
+            $values['metadata'] = $metadata;
             $setting->fill($values)->save();
         }
     }
@@ -365,12 +381,12 @@ class AppSettingsService
 
     public function geminiTimeout(): int
     {
-        return (int) config('services.gemini.timeout', 120);
+        return $this->providerMetadataInt(self::PROVIDER_GEMINI, 'timeout');
     }
 
     public function geminiMaxRetries(): int
     {
-        return (int) config('services.gemini.max_retries', 3);
+        return $this->providerMetadataInt(self::PROVIDER_GEMINI, 'max_retries');
     }
 
     public function groqTranscriptionApiKey(): ?string
@@ -401,12 +417,12 @@ class AppSettingsService
 
     public function groqTimeout(): int
     {
-        return (int) config('services.groq.timeout', 120);
+        return $this->providerMetadataInt(self::PROVIDER_GROQ_TEXT_FIXER, 'timeout');
     }
 
     public function groqMaxRetries(): int
     {
-        return (int) config('services.groq.max_retries', 3);
+        return $this->providerMetadataInt(self::PROVIDER_GROQ_TEXT_FIXER, 'max_retries');
     }
 
     public function deepSeekApiKey(): ?string
@@ -424,12 +440,12 @@ class AppSettingsService
 
     public function deepSeekTimeout(): int
     {
-        return (int) config('services.deepseek.timeout', 120);
+        return $this->providerMetadataInt(self::PROVIDER_DEEPSEEK, 'timeout');
     }
 
     public function deepSeekMaxRetries(): int
     {
-        return (int) config('services.deepseek.max_retries', 3);
+        return $this->providerMetadataInt(self::PROVIDER_DEEPSEEK, 'max_retries');
     }
 
     public function cerebrasApiKey(): ?string
@@ -444,12 +460,12 @@ class AppSettingsService
 
     public function cerebrasTimeout(): int
     {
-        return (int) config('services.cerebras.timeout', 120);
+        return $this->providerMetadataInt(self::PROVIDER_CEREBRAS, 'timeout');
     }
 
     public function cerebrasMaxRetries(): int
     {
-        return (int) config('services.cerebras.max_retries', 3);
+        return $this->providerMetadataInt(self::PROVIDER_CEREBRAS, 'max_retries');
     }
 
     public function mistralApiKey(): ?string
@@ -464,12 +480,12 @@ class AppSettingsService
 
     public function mistralTimeout(): int
     {
-        return (int) config('services.mistral.timeout', 120);
+        return $this->providerMetadataInt(self::PROVIDER_MISTRAL, 'timeout');
     }
 
     public function mistralMaxRetries(): int
     {
-        return (int) config('services.mistral.max_retries', 3);
+        return $this->providerMetadataInt(self::PROVIDER_MISTRAL, 'max_retries');
     }
 
     public function openRouterApiKey(): ?string
@@ -484,12 +500,12 @@ class AppSettingsService
 
     public function openRouterTimeout(): int
     {
-        return (int) config('services.openrouter.timeout', 120);
+        return $this->providerMetadataInt(self::PROVIDER_OPENROUTER, 'timeout');
     }
 
     public function openRouterMaxRetries(): int
     {
-        return (int) config('services.openrouter.max_retries', 3);
+        return $this->providerMetadataInt(self::PROVIDER_OPENROUTER, 'max_retries');
     }
 
     public function cloudflareApiKey(): ?string
@@ -504,22 +520,22 @@ class AppSettingsService
 
     public function cloudflareTimeout(): int
     {
-        return (int) config('services.cloudflare.timeout', 120);
+        return $this->providerMetadataInt(self::PROVIDER_CLOUDFLARE, 'timeout');
     }
 
     public function cloudflareMaxRetries(): int
     {
-        return (int) config('services.cloudflare.max_retries', 3);
+        return $this->providerMetadataInt(self::PROVIDER_CLOUDFLARE, 'max_retries');
     }
 
     public function cloudflareChatCompletionsUrl(?string $accountId = null): string
     {
-        return $this->cloudflareAccountUrl('ai/v1/chat/completions', $accountId);
+        return $this->providerMetadataString(self::PROVIDER_CLOUDFLARE, 'chat_completions_url');
     }
 
     public function cloudflareModelsUrl(?string $accountId = null): string
     {
-        return $this->cloudflareAccountUrl('ai/models/search', $accountId);
+        return $this->providerMetadataString(self::PROVIDER_CLOUDFLARE, 'models_url');
     }
 
     public function providerModel(string $provider): string
@@ -572,6 +588,49 @@ class AppSettingsService
         return filled($apiKey) ? $apiKey : null;
     }
 
+    private function providerMetadataString(string $provider, string $key): string
+    {
+        $metadata = $this->firstProviderMetadata($provider);
+        $value = $metadata[$key] ?? null;
+
+        if (! is_string($value) || trim($value) === '') {
+            throw new \RuntimeException("Provider [{$provider}] runtime setting [{$key}] is not configured in API Manager.");
+        }
+
+        return trim($value);
+    }
+
+    private function providerMetadataInt(string $provider, string $key): int
+    {
+        $metadata = $this->firstProviderMetadata($provider);
+        $value = $metadata[$key] ?? null;
+
+        if (! is_numeric($value)) {
+            throw new \RuntimeException("Provider [{$provider}] runtime setting [{$key}] is not configured in API Manager.");
+        }
+
+        return (int) $value;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function firstProviderMetadata(string $provider): array
+    {
+        $setting = TranscriptionProviderSetting::query()
+            ->where('provider', $provider)
+            ->where('is_enabled', true)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->first();
+
+        if (! $setting instanceof TranscriptionProviderSetting || ! is_array($setting->metadata)) {
+            throw new \RuntimeException("Provider [{$provider}] is not configured in API Manager.");
+        }
+
+        return $setting->metadata;
+    }
+
     private function safeApiKey(TranscriptionProviderSetting $setting): ?string
     {
         try {
@@ -611,7 +670,7 @@ class AppSettingsService
             self::PROVIDER_DEEPGRAM => [
                 'provider' => self::PROVIDER_DEEPGRAM,
                 'name' => 'Deepgram',
-                'endpoint' => config('services.deepgram.listen_url'),
+                'endpoint' => '',
                 'default_model' => self::DEEPGRAM_MODEL_NOVA_3,
                 'models' => [self::DEEPGRAM_MODEL_NOVA_3],
                 'model_labels' => [
@@ -624,7 +683,7 @@ class AppSettingsService
             self::PROVIDER_ELEVENLABS => [
                 'provider' => self::PROVIDER_ELEVENLABS,
                 'name' => 'ElevenLabs',
-                'endpoint' => config('services.elevenlabs.speech_to_text_url'),
+                'endpoint' => '',
                 'default_model' => self::ELEVENLABS_MODEL_SCRIBE_V2,
                 'models' => [self::ELEVENLABS_MODEL_SCRIBE_V2],
                 'model_labels' => [
@@ -637,9 +696,9 @@ class AppSettingsService
             self::PROVIDER_SPEECHMATICS => [
                 'provider' => self::PROVIDER_SPEECHMATICS,
                 'name' => 'Speechmatics',
-                'endpoint' => rtrim((string) config('services.speechmatics.base_url'), '/').'/jobs',
+                'endpoint' => '',
                 'default_model' => SpeechmaticsSpeechToTextService::MODEL_MELIA_1,
-                'models' => config('services.speechmatics.speech_to_text_models', [SpeechmaticsSpeechToTextService::MODEL_MELIA_1, SpeechmaticsSpeechToTextService::MODEL_ENHANCED]),
+                'models' => [SpeechmaticsSpeechToTextService::MODEL_MELIA_1, SpeechmaticsSpeechToTextService::MODEL_ENHANCED],
                 'model_labels' => [
                     SpeechmaticsSpeechToTextService::MODEL_MELIA_1 => 'melia-1',
                     SpeechmaticsSpeechToTextService::MODEL_ENHANCED => 'enhanced',
@@ -651,7 +710,7 @@ class AppSettingsService
             self::PROVIDER_GROQ_TRANSCRIPTION => [
                 'provider' => self::PROVIDER_GROQ_TRANSCRIPTION,
                 'name' => 'Groq',
-                'endpoint' => config('services.groq.transcription_url'),
+                'endpoint' => '',
                 'default_model' => GroqSpeechToTextService::MODEL_WHISPER_LARGE_V3,
                 'models' => [
                     GroqSpeechToTextService::MODEL_WHISPER_LARGE_V3,
@@ -668,7 +727,7 @@ class AppSettingsService
             self::PROVIDER_GLADIA => [
                 'provider' => self::PROVIDER_GLADIA,
                 'name' => 'Gladia',
-                'endpoint' => rtrim((string) config('services.gladia.base_url'), '/').'/pre-recorded',
+                'endpoint' => '',
                 'default_model' => GladiaSpeechToTextService::MODEL_SOLARIA,
                 'models' => [GladiaSpeechToTextService::MODEL_SOLARIA],
                 'model_labels' => [GladiaSpeechToTextService::MODEL_SOLARIA => 'Solaria'],
@@ -679,7 +738,7 @@ class AppSettingsService
             self::PROVIDER_ASSEMBLYAI => [
                 'provider' => self::PROVIDER_ASSEMBLYAI,
                 'name' => 'AssemblyAI',
-                'endpoint' => rtrim((string) config('services.assemblyai.base_url'), '/').'/transcript',
+                'endpoint' => '',
                 'default_model' => AssemblyAiSpeechToTextService::MODEL_UNIVERSAL_2,
                 'models' => [AssemblyAiSpeechToTextService::MODEL_UNIVERSAL_2, AssemblyAiSpeechToTextService::MODEL_UNIVERSAL_3_PRO],
                 'model_labels' => [
@@ -707,7 +766,7 @@ class AppSettingsService
             self::PROVIDER_GOOGLE_SPEECH => [
                 'provider' => self::PROVIDER_GOOGLE_SPEECH,
                 'name' => 'Google Cloud Speech-to-Text',
-                'endpoint' => config('services.google_speech.base_url'),
+                'endpoint' => '',
                 'default_model' => GoogleCloudSpeechToTextService::MODEL_CHIRP_3,
                 'models' => [GoogleCloudSpeechToTextService::MODEL_CHIRP_3],
                 'model_labels' => [GoogleCloudSpeechToTextService::MODEL_CHIRP_3 => 'Chirp 3'],
@@ -735,7 +794,7 @@ class AppSettingsService
             self::PROVIDER_RUNPOD => [
                 'provider' => self::PROVIDER_RUNPOD,
                 'name' => 'RunPod Cebuano/Bisaya Epoch 1',
-                'endpoint' => $this->runPodEndpointUrl() ?: 'https://api.runpod.ai/v2/{endpoint_id}/runsync',
+                'endpoint' => '',
                 'default_model' => RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR,
                 'models' => [RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR],
                 'model_labels' => [
@@ -752,7 +811,7 @@ class AppSettingsService
             self::PROVIDER_GEMINI => [
                 'provider' => self::PROVIDER_GEMINI,
                 'name' => 'Gemini',
-                'endpoint' => rtrim((string) config('services.gemini.base_url'), '/').'/models',
+                'endpoint' => '',
                 'default_model' => self::GEMINI_MODEL_FLASH_LITE,
                 'models' => [self::GEMINI_MODEL_FLASH_LITE],
                 'model_labels' => [
@@ -765,7 +824,7 @@ class AppSettingsService
             self::PROVIDER_GROQ_TEXT_FIXER => [
                 'provider' => self::PROVIDER_GROQ_TEXT_FIXER,
                 'name' => 'Groq',
-                'endpoint' => config('services.groq.chat_completions_url'),
+                'endpoint' => '',
                 'default_model' => GroqTranscriptCleanerService::MODEL_LLAMA_4_SCOUT,
                 'models' => [
                     GroqTranscriptCleanerService::MODEL_LLAMA_4_SCOUT,
@@ -782,7 +841,7 @@ class AppSettingsService
             self::PROVIDER_DEEPSEEK => [
                 'provider' => self::PROVIDER_DEEPSEEK,
                 'name' => 'DeepSeek',
-                'endpoint' => config('services.deepseek.chat_completions_url'),
+                'endpoint' => '',
                 'default_model' => DeepSeekTranscriptCleanerService::MODEL_V4_FLASH,
                 'models' => [DeepSeekTranscriptCleanerService::MODEL_V4_FLASH],
                 'model_labels' => [
@@ -795,7 +854,7 @@ class AppSettingsService
             self::PROVIDER_CEREBRAS => [
                 'provider' => self::PROVIDER_CEREBRAS,
                 'name' => 'Cerebras',
-                'endpoint' => config('services.cerebras.chat_completions_url'),
+                'endpoint' => '',
                 'default_model' => CerebrasTranscriptCleanerService::MODEL_GPT_OSS_120B,
                 'models' => [CerebrasTranscriptCleanerService::MODEL_GPT_OSS_120B],
                 'model_labels' => [
@@ -808,7 +867,7 @@ class AppSettingsService
             self::PROVIDER_MISTRAL => [
                 'provider' => self::PROVIDER_MISTRAL,
                 'name' => 'Mistral AI',
-                'endpoint' => config('services.mistral.chat_completions_url'),
+                'endpoint' => '',
                 'default_model' => MistralTranscriptCleanerService::MODEL_SMALL_2603,
                 'models' => [MistralTranscriptCleanerService::MODEL_SMALL_2603],
                 'model_labels' => [
@@ -821,7 +880,7 @@ class AppSettingsService
             self::PROVIDER_OPENROUTER => [
                 'provider' => self::PROVIDER_OPENROUTER,
                 'name' => 'OpenRouter',
-                'endpoint' => config('services.openrouter.chat_completions_url'),
+                'endpoint' => '',
                 'default_model' => OpenRouterTranscriptCleanerService::MODEL_GEMMA_3_12B_FREE,
                 'models' => [OpenRouterTranscriptCleanerService::MODEL_GEMMA_3_12B_FREE],
                 'model_labels' => [
@@ -834,7 +893,7 @@ class AppSettingsService
             self::PROVIDER_CLOUDFLARE => [
                 'provider' => self::PROVIDER_CLOUDFLARE,
                 'name' => 'Cloudflare Workers AI',
-                'endpoint' => $this->cloudflareChatCompletionsUrl(),
+                'endpoint' => '',
                 'default_model' => CloudflareTranscriptCleanerService::MODEL_GLM_4_7_FLASH,
                 'models' => [CloudflareTranscriptCleanerService::MODEL_GLM_4_7_FLASH],
                 'model_labels' => [
@@ -856,24 +915,8 @@ class AppSettingsService
         );
     }
 
-    private function cloudflareAccountUrl(string $path, ?string $accountId = null): string
-    {
-        $accountId = trim((string) ($accountId ?: config('services.cloudflare.account_id')));
-
-        if ($accountId === '') {
-            return '';
-        }
-
-        return rtrim((string) config('services.cloudflare.base_url'), '/')
-            .'/'.rawurlencode($accountId).'/'.ltrim($path, '/');
-    }
-
     private function metadataWithDefaults(string $providerId, array $metadata = []): array
     {
-        if ($providerId === self::PROVIDER_CLOUDFLARE && blank($metadata['account_id'] ?? null)) {
-            $metadata['account_id'] = (string) config('services.cloudflare.account_id');
-        }
-
         if ($providerId === self::PROVIDER_RUNPOD) {
             $metadata['endpoint_id'] = trim((string) ($metadata['endpoint_id'] ?? ''));
             $metadata['runsync_url'] = trim((string) ($metadata['runsync_url'] ?? ''));
@@ -884,11 +927,65 @@ class AppSettingsService
 
     private function providerHasRequiredMetadata(string $providerId, array $metadata): bool
     {
-        if ($providerId === self::PROVIDER_RUNPOD) {
-            return filled($metadata['runsync_url'] ?? null) || filled($metadata['endpoint_id'] ?? null);
+        $requiredKeys = match ($providerId) {
+            self::PROVIDER_DEEPGRAM => ['listen_url', 'timeout'],
+            self::PROVIDER_ELEVENLABS => ['speech_to_text_url', 'timeout'],
+            self::PROVIDER_SPEECHMATICS => ['base_url', 'timeout', 'poll_interval_ms', 'max_wait_seconds'],
+            self::PROVIDER_GROQ_TRANSCRIPTION => ['transcription_url', 'timeout'],
+            self::PROVIDER_GLADIA => ['base_url', 'timeout', 'poll_interval_ms', 'max_wait_seconds'],
+            self::PROVIDER_ASSEMBLYAI => ['base_url', 'timeout', 'poll_interval_ms', 'max_wait_seconds'],
+            self::PROVIDER_AZURE_SPEECH => ['fast_transcription_url'],
+            self::PROVIDER_GOOGLE_SPEECH => ['base_url', 'token_url'],
+            self::PROVIDER_AWS_TRANSCRIBE => ['poll_interval_ms', 'max_wait_seconds'],
+            self::PROVIDER_RUNPOD => ['timeout'],
+            self::PROVIDER_GEMINI => ['endpoint_template', 'generate_content_url_template', 'timeout', 'max_retries'],
+            self::PROVIDER_GROQ_TEXT_FIXER,
+            self::PROVIDER_DEEPSEEK,
+            self::PROVIDER_CEREBRAS,
+            self::PROVIDER_MISTRAL,
+            self::PROVIDER_OPENROUTER,
+            self::PROVIDER_CLOUDFLARE => ['chat_completions_url', 'timeout', 'max_retries'],
+            default => [],
+        };
+
+        if ($providerId === self::PROVIDER_RUNPOD
+            && blank($metadata['runsync_url'] ?? null)
+            && blank($metadata['endpoint_id'] ?? null)) {
+            return false;
         }
 
-        return true;
+        return collect($requiredKeys)->every(fn (string $key): bool => filled($metadata[$key] ?? null));
+    }
+
+    private function endpointFor(string $providerId, array $metadata): string
+    {
+        return match ($providerId) {
+            self::PROVIDER_DEEPGRAM => trim((string) ($metadata['listen_url'] ?? '')),
+            self::PROVIDER_ELEVENLABS => trim((string) ($metadata['speech_to_text_url'] ?? '')),
+            self::PROVIDER_SPEECHMATICS => $this->metadataBaseEndpoint($metadata, '/jobs'),
+            self::PROVIDER_GROQ_TRANSCRIPTION => trim((string) ($metadata['transcription_url'] ?? '')),
+            self::PROVIDER_GLADIA => $this->metadataBaseEndpoint($metadata, '/pre-recorded'),
+            self::PROVIDER_ASSEMBLYAI => $this->metadataBaseEndpoint($metadata, '/transcript'),
+            self::PROVIDER_AZURE_SPEECH => trim((string) ($metadata['fast_transcription_url'] ?? '')),
+            self::PROVIDER_GOOGLE_SPEECH => trim((string) ($metadata['base_url'] ?? '')),
+            self::PROVIDER_AWS_TRANSCRIBE => 'AWS Transcribe and S3',
+            self::PROVIDER_RUNPOD => $this->runPodEndpointUrl($metadata),
+            self::PROVIDER_GEMINI => trim((string) ($metadata['generate_content_url_template'] ?? $metadata['endpoint_template'] ?? '')),
+            self::PROVIDER_GROQ_TEXT_FIXER,
+            self::PROVIDER_DEEPSEEK,
+            self::PROVIDER_CEREBRAS,
+            self::PROVIDER_MISTRAL,
+            self::PROVIDER_OPENROUTER,
+            self::PROVIDER_CLOUDFLARE => trim((string) ($metadata['chat_completions_url'] ?? '')),
+            default => '',
+        };
+    }
+
+    private function metadataBaseEndpoint(array $metadata, string $path): string
+    {
+        $baseUrl = trim((string) ($metadata['base_url'] ?? ''));
+
+        return $baseUrl === '' ? '' : rtrim($baseUrl, '/').$path;
     }
 
     private function runPodEndpointUrl(array $metadata = []): string

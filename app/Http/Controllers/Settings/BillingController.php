@@ -10,6 +10,7 @@ use App\Services\PayMongoCheckoutService;
 use App\Services\PayMongoWalletTopupReconciler;
 use App\Services\PlanService;
 use App\Services\WalletTopupService;
+use App\Support\Money;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -48,7 +49,7 @@ class BillingController extends Controller
                 'payment_method_types' => $payMongo->paymentMethodTypes(),
                 'pass_on_fees' => (bool) config('services.paymongo.pass_on_fees', true),
             ],
-            'walletBalance' => (int) round(((float) $user->wallet_balance) * 100),
+            'walletBalance' => Money::decimalDollarsToUsdCents($user->wallet_balance),
         ]);
     }
 
@@ -61,7 +62,7 @@ class BillingController extends Controller
             'amount' => ['required', 'numeric', 'min:1'],
         ]);
 
-        $amountInCents = (int) round(((float) $validated['amount']) * 100);
+        $amountInCents = Money::dollarsToUsdCents($validated['amount']);
 
         $transaction = BillingTransaction::query()->create([
             'user_id' => $user->id,

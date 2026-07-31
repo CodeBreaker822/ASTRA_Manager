@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\BillingTransaction;
+use App\Models\TranscriptProject;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
@@ -353,37 +354,45 @@ test('paymongo webhook rejects invalid signatures', function () {
         ->assertUnauthorized();
 });
 
-test('paymongo webhook rejects paid events without a transaction reference', function () {
-    config(['services.paymongo.webhook_secret' => 'whsec_test']);
+test('paid checkout is credited from workspace status without opening billing page', function () {
+    Http::fake([
+        'https://api.paymongo.com/v1/checkout_sessions/cs_test_workspace_paid' => Http::response(paymongoCheckoutSessionPayload(
+            'cs_test_workspace_paid',
+            'JERVA-1-WORKSPACE',
+            [['id' => 'pay_test_workspace', 'attributes' => ['status' => 'paid']]],
+        )),
+    ]);
+
+    config(['services.paymongo.secret_key' => 'sk_test_123']);
 
     $user = User::factory()->create(['plan' => 'free', 'wallet_balance' => 0]);
-    BillingTransaction::query()->create([
+    $project = TranscriptProject::query()->create([
+        'user_id' => $user->id,
+        'title' => 'Billing reconcile project',
+    ]);
+    $transaction = BillingTransaction::query()->create([
         'user_id' => $user->id,
         'provider' => 'paymongo',
         'plan' => 'wallet_topup',
-        'reference' => 'JERVA-1-FIRST',
-        'checkout_session_id' => 'cs_test_first',
+        'reference' => 'JERVA-1-WORKSPACE',
+        'checkout_session_id' => 'cs_test_workspace_paid',
         'status' => 'checkout_created',
         'amount' => 1000,
         'currency' => 'USD',
     ]);
 
-    paymongoSignedWebhook([
-        'data' => [
-            'attributes' => [
-                'type' => 'checkout_session.payment.paid',
-                'data' => [
-                    'attributes' => [
-                        'payments' => [
-                            ['id' => 'pay_test_missing_reference'],
-                        ],
-                    ],
-                ],
-            ],
-        ],
-    ])->assertUnprocessable();
+    $this->actingAs($user)
+        ->getJson(route('workspace.status', $project))
+        ->assertOk()
+        ->assertJsonPath('entitlements.usage.wallet_balance_cents', 1000);
 
-    expect((float) $user->refresh()->wallet_balance)->toBe(0.0);
+    $this->actingAs($user)
+        ->getJson(route('workspace.status', $project))
+        ->assertOk()
+        ->assertJsonPath('entitlements.usage.wallet_balance_cents', 1000);
+
+    expect((float) $user->refresh()->wallet_balance)->toBe(10.0)
+        ->and($transaction->refresh()->status)->toBe('paid');
 });
 
 function paymongoPaidWebhook(BillingTransaction $transaction, array $metadata): TestResponse

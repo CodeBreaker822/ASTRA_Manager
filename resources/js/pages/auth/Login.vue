@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Form, Head } from '@inertiajs/vue3';
+import { Form, Head, usePage } from '@inertiajs/vue3';
+import { computed } from 'vue';
 import InputError from '@/components/InputError.vue';
 import PasskeyVerify from '@/components/PasskeyVerify.vue';
 import PasswordInput from '@/components/PasswordInput.vue';
@@ -14,15 +15,21 @@ import { request } from '@/routes/password';
 
 defineOptions({
     layout: {
-        title: 'Sign in to JERVA',
-        description: 'Transcription workspace.',
+        title: 'Sign in to JERVA Transcriber',
+        description: 'Use JERVA Transcriber workspace.',
     },
 });
 
 defineProps<{
     status?: string;
     canResetPassword: boolean;
+    googleAuthAvailable: boolean;
 }>();
+
+const page = usePage();
+const googleError = computed(
+    () => (page.props.errors as Record<string, string | undefined>)?.google,
+);
 </script>
 
 <template>
@@ -33,6 +40,31 @@ defineProps<{
         class="mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-center text-sm font-medium text-green-700"
     >
         {{ status }}
+    </div>
+
+    <a
+        v-if="googleAuthAvailable"
+        href="/auth/google/redirect"
+        class="flex h-11 w-full items-center justify-center gap-3 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 transition hover:border-blue-300 hover:bg-blue-50"
+    >
+        <span
+            class="grid size-6 place-items-center rounded-full border border-slate-200 font-bold text-blue-600"
+            aria-hidden="true"
+        >
+            G
+        </span>
+        Continue with Google
+    </a>
+
+    <InputError v-if="googleError" class="mt-3" :message="googleError" />
+
+    <div
+        v-if="googleAuthAvailable"
+        class="my-5 flex items-center gap-3 text-xs text-slate-500"
+    >
+        <span class="h-px flex-1 bg-slate-200"></span>
+        <span>or use a passkey or password</span>
+        <span class="h-px flex-1 bg-slate-200"></span>
     </div>
 
     <PasskeyVerify />

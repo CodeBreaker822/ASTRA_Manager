@@ -89,7 +89,7 @@ const cmsNavItems = computed<NavItem[]>(() => [
         ? [
               {
                   title: 'Page Manager',
-                  href: '/dashboard/pages/features',
+                  href: '/dashboard/pages/home',
                   icon: FileText,
               },
           ]

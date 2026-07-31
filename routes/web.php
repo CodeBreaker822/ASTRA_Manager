@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\BlogController;
 use App\Http\Controllers\DashboardBlogController;
 use App\Http\Controllers\DashboardController;
@@ -8,6 +9,7 @@ use App\Http\Controllers\DashboardPricingController;
 use App\Http\Controllers\DownloadController;
 use App\Http\Controllers\MarketingController;
 use App\Http\Controllers\PayMongoWebhookController;
+use App\Http\Controllers\SitemapController;
 use App\Http\Controllers\UserManagerController;
 use App\Http\Controllers\Web\TranscriptActionController;
 use App\Http\Controllers\Web\TranscriptionController;
@@ -15,6 +17,7 @@ use App\Http\Controllers\Web\WorkspaceController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [MarketingController::class, 'landing'])->name('home');
+Route::get('/sitemap.xml', SitemapController::class)->name('sitemap');
 Route::get('/features', [MarketingController::class, 'features'])->name('features');
 Route::get('/price', [MarketingController::class, 'price'])->name('price');
 Route::get('/blog', [BlogController::class, 'index'])->name('blog.index');
@@ -22,6 +25,12 @@ Route::get('/blog/{slug}', [BlogController::class, 'show'])->name('blog.show');
 Route::get('/download', [DownloadController::class, 'index'])->name('download');
 Route::get('/download/latest', [DownloadController::class, 'latest'])->name('download.latest');
 Route::post('/paymongo/webhook', PayMongoWebhookController::class)->name('paymongo.webhook');
+Route::middleware('guest')->group(function (): void {
+    Route::get('/auth/google/redirect', [GoogleAuthController::class, 'redirect'])
+        ->name('auth.google.redirect');
+    Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback'])
+        ->name('auth.google.callback');
+});
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
@@ -37,6 +46,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     });
     Route::get('dashboard/pricing', [DashboardPricingController::class, 'edit'])->middleware('can:cms.manage-pricing')->name('dashboard.pricing.edit');
     Route::put('dashboard/pricing', [DashboardPricingController::class, 'update'])->middleware('can:cms.manage-pricing')->name('dashboard.pricing.update');
+    Route::get('dashboard/pages/home', [DashboardPageController::class, 'home'])->middleware('can:cms.manage-pages')->name('dashboard.pages.home.edit');
+    Route::put('dashboard/pages/home', [DashboardPageController::class, 'updateHome'])->middleware('can:cms.manage-pages')->name('dashboard.pages.home.update');
     Route::get('dashboard/pages/features', [DashboardPageController::class, 'features'])->middleware('can:cms.manage-pages')->name('dashboard.pages.features.edit');
     Route::put('dashboard/pages/features', [DashboardPageController::class, 'updateFeatures'])->middleware('can:cms.manage-pages')->name('dashboard.pages.features.update');
     Route::get('dashboard/pages/download', [DashboardPageController::class, 'download'])->middleware('can:cms.manage-pages')->name('dashboard.pages.download.edit');

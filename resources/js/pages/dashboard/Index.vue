@@ -26,8 +26,8 @@ const cards = [
     },
     {
         title: 'Pages',
-        body: 'Edit structured Features and Download page content.',
-        href: '/dashboard/pages/features',
+        body: 'Edit structured Home, Features, and Download page content.',
+        href: '/dashboard/pages/home',
         icon: FileText,
         visible: () => page.props.auth.canManagePages,
     },

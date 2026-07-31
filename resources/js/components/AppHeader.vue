@@ -94,9 +94,11 @@ const rightNavItems: NavItem[] = [];
                                 >Navigation menu</SheetTitle
                             >
                             <SheetHeader class="flex justify-start text-left">
-                                <AppLogoIcon
-                                    class="size-6 fill-current text-black dark:text-white"
-                                />
+                                <span
+                                    class="flex size-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-100"
+                                >
+                                    <AppLogoIcon class="size-6" />
+                                </span>
                             </SheetHeader>
                             <div
                                 class="flex h-full flex-1 flex-col justify-between space-y-4 py-6"
@@ -252,12 +254,12 @@ const rightNavItems: NavItem[] = [];
                                     <AvatarImage
                                         v-if="auth.user.avatar"
                                         :src="auth.user.avatar"
-                                        :alt="auth.user.name"
+                                        :alt="auth.user.email"
                                     />
                                     <AvatarFallback
                                         class="rounded-lg bg-neutral-200 font-semibold text-black dark:bg-neutral-700 dark:text-white"
                                     >
-                                        {{ getInitials(auth.user?.name) }}
+                                        {{ getInitials(auth.user?.email) }}
                                     </AvatarFallback>
                                 </Avatar>
                             </Button>

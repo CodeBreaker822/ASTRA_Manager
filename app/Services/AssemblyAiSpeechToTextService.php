@@ -17,9 +17,10 @@ class AssemblyAiSpeechToTextService
     public function __construct(
         private readonly string $apiKey,
         private readonly string $modelId = self::MODEL_UNIVERSAL_2,
-        private readonly ?string $baseUrl = null,
-        private readonly ?int $pollIntervalMs = null,
-        private readonly ?int $maxWaitSeconds = null,
+        private readonly string $baseUrl,
+        private readonly int $pollIntervalMs,
+        private readonly int $maxWaitSeconds,
+        private readonly int $timeout,
     ) {}
 
     public function transcribe(UploadedFile|string|SplFileInfo $audio, array $options = []): array
@@ -66,7 +67,7 @@ class AssemblyAiSpeechToTextService
 
     private function waitForResult(string $id): array
     {
-        $deadline = microtime(true) + ($this->maxWaitSeconds ?? (int) config('services.assemblyai.max_wait_seconds', 300));
+        $deadline = microtime(true) + $this->maxWaitSeconds;
 
         do {
             $response = $this->client()->get($this->url('/transcript/'.rawurlencode($id)));
@@ -81,7 +82,7 @@ class AssemblyAiSpeechToTextService
                 throw new RuntimeException(ServiceUserMessage::transcriptionFailed('AssemblyAI'));
             }
 
-            usleep(($this->pollIntervalMs ?? (int) config('services.assemblyai.poll_interval_ms', 1000)) * 1000);
+            usleep($this->pollIntervalMs * 1000);
         } while (microtime(true) < $deadline);
 
         throw new RuntimeException(ServiceUserMessage::transcriptionFailed('AssemblyAI'));
@@ -110,7 +111,7 @@ class AssemblyAiSpeechToTextService
             throw new RuntimeException(ServiceUserMessage::missingApiKey('AssemblyAI'));
         }
 
-        return Http::withHeaders(['Authorization' => trim($this->apiKey)])->acceptJson()->timeout((int) config('services.assemblyai.timeout', 120));
+        return Http::withHeaders(['Authorization' => trim($this->apiKey)])->acceptJson()->timeout($this->timeout);
     }
 
     private function ensureSuccessful(int $status): void
@@ -128,7 +129,7 @@ class AssemblyAiSpeechToTextService
 
     private function url(string $path): string
     {
-        return rtrim($this->baseUrl ?? (string) config('services.assemblyai.base_url'), '/').$path;
+        return rtrim($this->baseUrl, '/').$path;
     }
 
     private function language(mixed $language): ?string

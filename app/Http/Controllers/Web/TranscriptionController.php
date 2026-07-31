@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Web;
 use App\Http\Controllers\Controller;
 use App\Models\Transcript;
 use App\Models\TranscriptProject;
+use App\Models\User;
 use App\Services\EntitlementService;
+use App\Services\PayMongoWalletTopupReconciler;
 use App\Services\Web\TranscriptionWorkflowService;
 use App\Services\Web\TranscriptPayloadPresenter;
 use App\Services\WebApiTranscriptionClient;
@@ -152,11 +154,17 @@ class TranscriptionController extends Controller
         Request $request,
         TranscriptProject $project,
         EntitlementService $entitlements,
+        PayMongoWalletTopupReconciler $reconciler,
         TranscriptPayloadPresenter $payloads,
         TranscriptionWorkflowService $workflow,
     ): JsonResponse {
         $this->authorizeProject($request, $project);
+        $user = $request->user();
+        abort_unless($user instanceof User, 403);
+
+        $reconciler->reconcileFor($user);
         $workflow->syncApiTranscriptionJobs($request, $project);
+        $user->refresh();
 
         $project->load(['transcripts.sections' => fn ($query) => $query->orderBy('position')]);
 
@@ -170,7 +178,7 @@ class TranscriptionController extends Controller
                     ->map(fn (Transcript $transcript): array => $payloads->present($transcript))
                     ->all(),
             ],
-            'entitlements' => $entitlements->summaryFor($request->user()),
+            'entitlements' => $entitlements->summaryFor($user),
         ]);
     }
 
@@ -200,14 +208,6 @@ class TranscriptionController extends Controller
     {
         abort_unless($transcript->project_id === $project->id, 404);
         $this->authorize('update', $transcript);
-    }
-
-    private function upgradeRequired(string $message): JsonResponse
-    {
-        return response()->json([
-            'message' => $message,
-            'upgrade' => true,
-        ], 402);
     }
 
     /**

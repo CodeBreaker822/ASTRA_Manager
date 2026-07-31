@@ -46,7 +46,7 @@ type ProviderCard = {
     credential_help?: string;
     requires_account_id?: boolean;
     requires_runpod_endpoint?: boolean;
-    metadata?: Record<string, string | null>;
+    metadata: Record<string, string | number | boolean | null>;
 };
 
 type ProviderLog = {
@@ -125,6 +125,7 @@ const providerForm = reactive({
     account_id: '',
     endpoint_id: '',
     runsync_url: '',
+    metadata_json: '',
 });
 
 const logsModalOpen = ref(false);
@@ -372,9 +373,16 @@ function resetProviderForm(provider: ProviderCard, adding: boolean) {
     providerForm.api_key = '';
     providerForm.model = provider.model;
     providerForm.is_enabled = adding ? true : provider.is_enabled;
-    providerForm.account_id = provider.metadata?.account_id ?? '';
-    providerForm.endpoint_id = provider.metadata?.endpoint_id ?? '';
-    providerForm.runsync_url = provider.metadata?.runsync_url ?? '';
+    providerForm.account_id = metadataText(provider, 'account_id');
+    providerForm.endpoint_id = metadataText(provider, 'endpoint_id');
+    providerForm.runsync_url = metadataText(provider, 'runsync_url');
+    providerForm.metadata_json = JSON.stringify(provider.metadata, null, 2);
+}
+
+function metadataText(provider: ProviderCard, key: string): string {
+    const value = provider.metadata[key];
+
+    return typeof value === 'string' ? value : '';
 }
 
 function selectProvider(key: string) {
@@ -395,6 +403,7 @@ async function saveProvider() {
         const row: Record<string, string | number> = {
             api_key: providerForm.api_key,
             model: providerForm.model,
+            metadata_json: providerForm.metadata_json,
         };
 
         if (providerForm.is_enabled) {
@@ -1643,6 +1652,29 @@ function exceptionMessage(error: unknown): string {
                                     URL from the RunPod serverless endpoint.
                                 </p>
                             </div>
+                        </div>
+
+                        <div v-if="selectedProvider">
+                            <label
+                                for="providerMetadata"
+                                class="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                            >
+                                Runtime configuration JSON
+                            </label>
+                            <textarea
+                                id="providerMetadata"
+                                v-model="providerForm.metadata_json"
+                                rows="8"
+                                spellcheck="false"
+                                class="mt-1 block w-full rounded-md border-gray-300 font-mono text-xs shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                            />
+                            <p
+                                class="mt-1 text-xs text-gray-500 dark:text-gray-400"
+                            >
+                                Store provider runtime values here, such as
+                                endpoint URLs, timeout, retry, polling, and
+                                language settings.
+                            </p>
                         </div>
 
                         <label
