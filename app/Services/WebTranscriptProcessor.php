@@ -7,10 +7,15 @@ use App\Models\TranscriptSection;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class WebTranscriptProcessor
 {
+    private const SUMMARY_INSTRUCTIONS = <<<'TEXT'
+Create a concise, professional report from this transcript. Organize the report by topic rather than by transcript chunk or timestamp. Start with a short overall summary, then give each distinct topic a clear heading and summarize the important discussion beneath it. Under each topic, include decisions, action items, responsible people or offices, deadlines, dates, numbers, and unresolved issues when they are present. Use readable paragraphs and bullet lists where appropriate, omit empty sections, avoid repetition, and preserve the original meaning and factual details. Format headings as Markdown headings using ## or ###, and format lists as Markdown bullets using -.
+TEXT;
+
     public function __construct(
         private readonly AppSettingsService $settings,
         private readonly WebApiTranscriptionClient $transcriptionClient,
@@ -39,9 +44,12 @@ class WebTranscriptProcessor
                 $user,
                 $clips,
                 is_string($options['language_code'] ?? null) ? $options['language_code'] : null,
+                $transcript->source === 'live' ? 'live' : 'upload',
             );
 
-            $this->finalizeTranscriptionOnce($transcript, $result);
+            if ($this->finalizeTranscriptionOnce($transcript, $result)) {
+                $this->cleanupTranscriptAudio($transcript->fresh() ?? $transcript);
+            }
         } catch (Throwable $exception) {
             Log::error('Web transcription through API pipeline failed.', [
                 'transcript_id' => $transcript->id,
@@ -59,7 +67,9 @@ class WebTranscriptProcessor
     public function completeTranscription(Transcript $transcript, array $result): void
     {
         try {
-            $this->finalizeTranscriptionOnce($transcript, $result);
+            if ($this->finalizeTranscriptionOnce($transcript, $result)) {
+                $this->cleanupTranscriptAudio($transcript->fresh() ?? $transcript);
+            }
         } catch (Throwable $exception) {
             Log::error('Web async transcription finalization failed.', [
                 'transcript_id' => $transcript->id,
@@ -74,6 +84,31 @@ class WebTranscriptProcessor
     public function failTranscription(Transcript $transcript): void
     {
         $this->fail($transcript, 'Audio upload could not be processed.');
+    }
+
+    public function cleanupTranscriptAudio(Transcript $transcript): void
+    {
+        $paths = [];
+
+        if (is_string($transcript->audio_path) && $transcript->audio_path !== '') {
+            $paths[] = $transcript->audio_path;
+        }
+
+        foreach ($this->clipPayloads($transcript) as $clip) {
+            foreach (['path', 'audio_path'] as $key) {
+                $path = $clip[$key] ?? null;
+
+                if (is_string($path) && $path !== '') {
+                    $paths[] = $path;
+                }
+            }
+        }
+
+        $paths = array_values(array_unique($paths));
+
+        if ($paths !== []) {
+            Storage::disk('local')->delete($paths);
+        }
     }
 
     public function polish(Transcript $transcript, string $instruction): string
@@ -161,7 +196,7 @@ class WebTranscriptProcessor
 
         $result = $this->cleanText(
             $text,
-            'Summarize this transcript. Preserve important names, facts, numbers, decisions, and action items.',
+            self::SUMMARY_INSTRUCTIONS,
             'summarize',
         );
         $summary = trim((string) ($result['text'] ?? ''));
@@ -217,6 +252,7 @@ class WebTranscriptProcessor
     private function fail(Transcript $transcript, string $message, array $context = []): void
     {
         $this->appendLog($transcript, 'failed', $message, $context);
+        $this->cleanupTranscriptAudio($transcript->fresh() ?? $transcript);
     }
 
     /**
@@ -236,7 +272,6 @@ class WebTranscriptProcessor
 
             $this->appendLog($lockedTranscript, 'processing', 'Finalizing');
             $this->persistTranscriptionResult($lockedTranscript, $result);
-            $this->recordUsage($lockedTranscript);
             $this->appendLog($lockedTranscript, 'completed', 'Complete');
 
             return true;
@@ -270,6 +305,31 @@ class WebTranscriptProcessor
             'clip_end_ms' => $options['clip_end_ms'] ?? max(0, (int) $transcript->duration_seconds * 1000),
             'language_code' => $options['language_code'] ?? null,
         ]];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function clipPayloads(Transcript $transcript): array
+    {
+        $clips = [];
+
+        foreach (array_values($transcript->processing_log ?? []) as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            $context = is_array($entry['context'] ?? null) ? $entry['context'] : [];
+            $entryClips = is_array($context['clips'] ?? null) ? $context['clips'] : [];
+
+            foreach ($entryClips as $clip) {
+                if (is_array($clip)) {
+                    $clips[] = $clip;
+                }
+            }
+        }
+
+        return $clips;
     }
 
     /**
@@ -486,22 +546,5 @@ class WebTranscriptProcessor
             ?: $transcript->raw_text
             ?: $transcript->sections()->orderBy('position')->pluck('text')->implode("\n\n")
         ));
-    }
-
-    private function recordUsage(Transcript $transcript): void
-    {
-        $seconds = max(0, (int) $transcript->duration_seconds);
-
-        if ($seconds === 0) {
-            return;
-        }
-
-        $user = $transcript->project()->first()?->user()->first();
-
-        if (! $user instanceof User) {
-            throw new \RuntimeException('Transcript owner could not be resolved.');
-        }
-
-        app(EntitlementService::class)->charge($user, $transcript->source === 'live' ? 'live' : 'upload', $seconds);
     }
 }

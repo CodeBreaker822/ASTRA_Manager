@@ -77,6 +77,8 @@ type HttpMethod = 'post' | 'get' | 'put' | 'patch' | 'delete';
 type ProviderCategory = 'transcriber' | 'text_fixer';
 type NoticeType = 'success' | 'error' | 'info';
 
+const UPLOAD_CHUNK_BYTES = 20 * 1024 * 1024;
+
 const props = defineProps<{
     apis: ApiKey[];
     transcriptionProviders: ProviderCard[];
@@ -248,23 +250,20 @@ async function saveApi() {
             data: ApiKey;
             message: string;
             plain_token: string;
-        }>(
-            '/api/settings/store',
-            {
-                method: 'POST',
-                body: JSON.stringify({
-                    app_name: apiForm.app_name,
-                    app_token: apiForm.app_token,
-                    can_post: apiForm.can_post,
-                    can_get: apiForm.can_get,
-                    can_put: apiForm.can_put,
-                    can_patch: apiForm.can_patch,
-                    can_delete: apiForm.can_delete,
-                    blacklisted_ips: listJson(apiForm.blacklisted_ips),
-                    blacklisted_routes: listJson(apiForm.blacklisted_routes),
-                }),
-            },
-        );
+        }>('/api/settings/store', {
+            method: 'POST',
+            body: JSON.stringify({
+                app_name: apiForm.app_name,
+                app_token: apiForm.app_token,
+                can_post: apiForm.can_post,
+                can_get: apiForm.can_get,
+                can_put: apiForm.can_put,
+                can_patch: apiForm.can_patch,
+                can_delete: apiForm.can_delete,
+                blacklisted_ips: listJson(apiForm.blacklisted_ips),
+                blacklisted_routes: listJson(apiForm.blacklisted_routes),
+            }),
+        });
 
         apis.value.push(payload.data);
         apiModalOpen.value = false;
@@ -615,11 +614,10 @@ async function uploadPackage() {
     packageProgressText.value = 'Uploading package...';
 
     try {
-        const formData = new FormData();
-        formData.append('version', transcriberPackage.version);
-        formData.append('package', packageFile.value, packageFile.value.name);
-
-        const payload = await uploadPackageRequest(formData);
+        const payload = await uploadPackageRequest(
+            packageFile.value,
+            transcriberPackage.version,
+        );
         packageProgress.value = 100;
         packageProgressText.value = 'Upload complete';
         transcriberPackage.version = payload.version;
@@ -636,12 +634,64 @@ async function uploadPackage() {
     }
 }
 
-function uploadPackageRequest(
+async function uploadPackageRequest(
+    file: File,
+    version: string,
+): Promise<{ version: string; zipfile: string; message: string }> {
+    const uploadId = makeUploadId();
+    const totalChunks = Math.max(1, Math.ceil(file.size / UPLOAD_CHUNK_BYTES));
+    let uploadedBytes = 0;
+
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+        const start = chunkIndex * UPLOAD_CHUNK_BYTES;
+        const end = Math.min(file.size, start + UPLOAD_CHUNK_BYTES);
+        const chunk = file.slice(start, end);
+        const formData = new FormData();
+
+        formData.append('upload_id', uploadId);
+        formData.append('chunk_index', String(chunkIndex));
+        formData.append('total_chunks', String(totalChunks));
+        formData.append('total_size', String(file.size));
+        formData.append('filename', file.name);
+        formData.append('mime_type', file.type || 'application/zip');
+        formData.append('chunk_hash', await sha256Hex(chunk));
+        formData.append('chunk', chunk, `${file.name}.part${chunkIndex}`);
+
+        await uploadPackageChunkRequest(
+            '/dashboard/api/transcriber-package/chunk',
+            formData,
+            (loaded) => {
+                packageProgress.value = Math.min(
+                    99,
+                    Math.round(((uploadedBytes + loaded) / file.size) * 100),
+                );
+                packageProgressText.value = `Uploading package chunk ${chunkIndex + 1} of ${totalChunks}...`;
+            },
+        );
+        uploadedBytes += chunk.size;
+    }
+
+    packageProgress.value = 99;
+    packageProgressText.value = 'Processing package...';
+
+    const completeForm = new FormData();
+    completeForm.append('upload_id', uploadId);
+    completeForm.append('version', version);
+
+    return uploadPackageChunkRequest(
+        '/dashboard/api/transcriber-package/complete',
+        completeForm,
+    );
+}
+
+function uploadPackageChunkRequest(
+    url: string,
     formData: FormData,
+    onProgress?: (loaded: number, total: number) => void,
 ): Promise<{ version: string; zipfile: string; message: string }> {
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/dashboard/api/transcriber-package');
+        xhr.open('POST', url);
         xhr.setRequestHeader('Accept', 'application/json');
         xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
 
@@ -654,14 +704,7 @@ function uploadPackageRequest(
                 return;
             }
 
-            packageProgress.value = Math.min(
-                100,
-                Math.round((event.loaded / event.total) * 100),
-            );
-
-            if (packageProgress.value === 100) {
-                packageProgressText.value = 'Processing package...';
-            }
+            onProgress?.(event.loaded, event.total);
         });
 
         xhr.onload = () => {
@@ -681,6 +724,25 @@ function uploadPackageRequest(
             );
         xhr.send(formData);
     });
+}
+
+function makeUploadId(): string {
+    if (crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+
+    return `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function sha256Hex(blob: Blob): Promise<string> {
+    const digest = await crypto.subtle.digest(
+        'SHA-256',
+        await blob.arrayBuffer(),
+    );
+
+    return [...new Uint8Array(digest)]
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
 }
 
 function methodEnabled(api: ApiKey, method: HttpMethod): boolean {
@@ -771,8 +833,7 @@ function uploadErrorMessage(
             502: 'The gateway lost contact with the application while uploading the package.',
             503: 'The upload service is temporarily unavailable.',
             504: 'The gateway timed out while waiting for the package upload to finish.',
-        }[xhr.status] ??
-        'Package upload failed. Please try again later.'
+        }[xhr.status] ?? 'Package upload failed. Please try again later.'
     );
 }
 
@@ -865,9 +926,7 @@ function exceptionMessage(error: unknown): string {
                                 </td>
                                 <td class="px-6 py-4">
                                     <div class="flex items-center space-x-2">
-                                        <div
-                                            class="hidden"
-                                        >
+                                        <div class="hidden">
                                             ••••••••••••••••••••••••••••••••
                                         </div>
                                         <div

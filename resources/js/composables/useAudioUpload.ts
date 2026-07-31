@@ -25,6 +25,8 @@ type UploadResponse = {
 };
 
 const MAX_BATCH_CLIPS = 20;
+const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+const UPLOAD_CHUNK_BYTES = 20 * 1024 * 1024;
 
 export const useAudioUpload = (options: {
     csrfToken: () => string;
@@ -126,6 +128,13 @@ export const useAudioUpload = (options: {
 
     const selectFile = async (file: File) => {
         resetSession();
+
+        if (file.size > MAX_UPLOAD_BYTES) {
+            options.onError('Audio upload must not exceed 500 MB.');
+
+            return;
+        }
+
         selectedFile.value = file;
         fileName.value = file.name;
         metaLine.value = `${formatBytes(file.size)} selected`;
@@ -360,61 +369,113 @@ export const useAudioUpload = (options: {
         }
     };
 
-    const postBatch = (projectId: number) =>
-        new Promise<UploadResponse>((resolve, reject) => {
+    const postBatch = async (projectId: number): Promise<UploadResponse> => {
+        const file = selectedFile.value;
+
+        if (!file) {
+            throw new Error('Select an audio file first.');
+        }
+
+        const uploadId = makeUploadId();
+        const totalChunks = Math.max(
+            1,
+            Math.ceil(file.size / UPLOAD_CHUNK_BYTES),
+        );
+        let uploadedBytes = 0;
+
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+            if (pauseRequested.value) {
+                throw new Error('Audio upload could not be processed.');
+            }
+
+            const start = chunkIndex * UPLOAD_CHUNK_BYTES;
+            const end = Math.min(file.size, start + UPLOAD_CHUNK_BYTES);
+            const chunk = file.slice(end > start ? start : 0, end || file.size);
             const form = new FormData();
-            const file = selectedFile.value;
 
-            if (!file) {
-                reject(new Error('Select an audio file first.'));
+            form.append('upload_id', uploadId);
+            form.append('chunk_index', String(chunkIndex));
+            form.append('total_chunks', String(totalChunks));
+            form.append('total_size', String(file.size));
+            form.append('filename', file.name);
+            form.append('mime_type', file.type || 'application/octet-stream');
+            form.append('chunk_hash', await sha256Hex(chunk));
+            form.append('chunk', chunk, `${file.name}.part${chunkIndex}`);
 
-                return;
-            }
+            await xhrJson<UploadResponse>(
+                `/workspace/${projectId}/upload/chunk`,
+                form,
+                (loaded) => {
+                    uploadPercent.value = Math.min(
+                        99,
+                        Math.round(
+                            ((uploadedBytes + loaded) / file.size) * 100,
+                        ),
+                    );
+                    status.value = 'Uploading source';
+                },
+            );
+            uploadedBytes += chunk.size;
+        }
 
-            form.append('audio', file);
-            form.append('server_chunk', '1');
+        const completeForm = new FormData();
+        completeForm.append('upload_id', uploadId);
 
-            if (selectedDurationMs.value > 0) {
-                form.append(
-                    'duration_seconds',
-                    String(Math.ceil(selectedDurationMs.value / 1000)),
-                );
-            }
+        if (selectedDurationMs.value > 0) {
+            completeForm.append(
+                'duration_seconds',
+                String(Math.ceil(selectedDurationMs.value / 1000)),
+            );
+        }
 
+        uploadPercent.value = 99;
+        status.value = 'Uploading source';
+
+        return xhrJson<UploadResponse>(
+            `/workspace/${projectId}/upload/complete`,
+            completeForm,
+        );
+    };
+
+    const xhrJson = <T>(
+        url: string,
+        form: FormData,
+        onProgress?: (loaded: number, total: number) => void,
+    ) =>
+        new Promise<T>((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             currentXhr.value = xhr;
-            xhr.open('POST', `/workspace/${projectId}/upload`);
+            xhr.open('POST', url);
             xhr.setRequestHeader('Accept', 'application/json');
             xhr.setRequestHeader('X-CSRF-TOKEN', options.csrfToken());
 
             xhr.upload.onprogress = (event) => {
-                if (!event.lengthComputable) {
-                    return;
+                if (event.lengthComputable) {
+                    onProgress?.(event.loaded, event.total);
                 }
-
-                uploadPercent.value = Math.min(
-                    99,
-                    Math.round((event.loaded / event.total) * 100),
-                );
-                status.value = 'Uploading source';
             };
             xhr.onload = () => {
                 currentXhr.value = null;
                 const payload = parseJson(xhr.responseText);
 
                 if (xhr.status >= 200 && xhr.status < 300) {
-                    resolve(payload);
+                    resolve(payload as T);
 
                     return;
                 }
 
                 if (payload.upgrade) {
-                    resolve(payload);
+                    resolve(payload as T);
 
                     return;
                 }
 
-                reject(new Error('Audio upload could not be processed.'));
+                reject(
+                    new Error(
+                        payload.message ??
+                            'Audio upload could not be processed.',
+                    ),
+                );
             };
             xhr.onerror = () =>
                 reject(new Error('Audio upload could not be processed.'));
@@ -544,6 +605,25 @@ const parseJson = (value: string): UploadResponse => {
     } catch {
         return {};
     }
+};
+
+const makeUploadId = () => {
+    if (crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+
+    return `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+};
+
+const sha256Hex = async (blob: Blob) => {
+    const digest = await crypto.subtle.digest(
+        'SHA-256',
+        await blob.arrayBuffer(),
+    );
+
+    return [...new Uint8Array(digest)]
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
 };
 
 const formatBytes = (bytes: number) => {

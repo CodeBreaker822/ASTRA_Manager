@@ -81,3 +81,67 @@ test('transcriber package upload rejects mismatched embedded version', function 
     Storage::disk('local')->assertMissing('transcriber/version.json');
     Storage::disk('local')->assertMissing('transcriber/standalone-transcriber-5.0.1.zip');
 });
+
+test('chunked transcriber package upload publishes matching embedded version', function () {
+    Storage::fake('local');
+
+    $zipPath = transcriberPackageZip('5.0.2');
+    $contents = file_get_contents($zipPath);
+    $first = substr($contents, 0, 10);
+    $second = substr($contents, 10);
+    $firstPath = tempnam(sys_get_temp_dir(), 'transcriber-package-part-a-');
+    $secondPath = tempnam(sys_get_temp_dir(), 'transcriber-package-part-b-');
+    file_put_contents($firstPath, $first);
+    file_put_contents($secondPath, $second);
+    $uploadId = 'package-upload-'.bin2hex(random_bytes(4));
+    $user = transcriberPackageUser();
+
+    try {
+        $this
+            ->actingAs($user)
+            ->postJson(route('api.transcriber-package.chunk'), [
+                'upload_id' => $uploadId,
+                'chunk_index' => 0,
+                'total_chunks' => 2,
+                'total_size' => strlen($contents),
+                'filename' => 'package.zip',
+                'mime_type' => 'application/zip',
+                'chunk_hash' => hash_file('sha256', $firstPath),
+                'chunk' => new UploadedFile($firstPath, 'package.part0', 'application/octet-stream', null, true),
+            ])
+            ->assertOk()
+            ->assertJsonPath('received_chunks', 1);
+
+        $this
+            ->actingAs($user)
+            ->postJson(route('api.transcriber-package.chunk'), [
+                'upload_id' => $uploadId,
+                'chunk_index' => 1,
+                'total_chunks' => 2,
+                'total_size' => strlen($contents),
+                'filename' => 'package.zip',
+                'mime_type' => 'application/zip',
+                'chunk_hash' => hash_file('sha256', $secondPath),
+                'chunk' => new UploadedFile($secondPath, 'package.part1', 'application/octet-stream', null, true),
+            ])
+            ->assertOk()
+            ->assertJsonPath('complete', true);
+
+        $this
+            ->actingAs($user)
+            ->postJson(route('api.transcriber-package.complete'), [
+                'upload_id' => $uploadId,
+                'version' => '5.0.2',
+            ])
+            ->assertOk()
+            ->assertJsonPath('version', '5.0.2')
+            ->assertJsonPath('zipfile', 'standalone-transcriber-5.0.2.zip');
+    } finally {
+        @unlink($zipPath);
+        @unlink($firstPath);
+        @unlink($secondPath);
+    }
+
+    Storage::disk('local')->assertExists('transcriber/version.json');
+    Storage::disk('local')->assertExists('transcriber/standalone-transcriber-5.0.2.zip');
+});

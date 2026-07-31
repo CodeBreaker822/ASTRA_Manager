@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Transcript;
 use App\Models\TranscriptProject;
 use App\Models\User;
+use App\Services\ChunkedUploadService;
 use App\Services\EntitlementService;
 use App\Services\PayMongoWalletTopupReconciler;
 use App\Services\Web\TranscriptionWorkflowService;
@@ -150,6 +151,120 @@ class TranscriptionController extends Controller
         ], 202);
     }
 
+    public function uploadChunk(
+        Request $request,
+        TranscriptProject $project,
+        ChunkedUploadService $chunks,
+    ): JsonResponse {
+        $this->authorizeProject($request, $project);
+
+        $validated = $request->validate([
+            'upload_id' => ['required', 'string', 'min:8', 'max:80'],
+            'chunk' => ['required', 'file', 'max:51200'],
+            'chunk_index' => ['required', 'integer', 'min:0'],
+            'total_chunks' => ['required', 'integer', 'min:1', 'max:200'],
+            'total_size' => ['required', 'integer', 'min:1', 'max:'.ChunkedUploadService::MAX_TOTAL_BYTES],
+            'filename' => ['required', 'string', 'max:180'],
+            'mime_type' => ['nullable', 'string', 'max:120'],
+            'chunk_hash' => ['nullable', 'string', 'size:64'],
+        ]);
+
+        try {
+            $payload = $chunks->storeChunk(
+                'workspace-audio',
+                $this->chunkOwnerKey($request, $project),
+                (string) $validated['upload_id'],
+                $request->file('chunk'),
+                (int) $validated['chunk_index'],
+                (int) $validated['total_chunks'],
+                (int) $validated['total_size'],
+                (string) $validated['filename'],
+                isset($validated['mime_type']) ? (string) $validated['mime_type'] : null,
+                isset($validated['chunk_hash']) ? (string) $validated['chunk_hash'] : null,
+            );
+        } catch (RuntimeException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json($payload);
+    }
+
+    public function completeUpload(
+        Request $request,
+        TranscriptProject $project,
+        ChunkedUploadService $chunks,
+        EntitlementService $entitlements,
+        TranscriptPayloadPresenter $payloads,
+        TranscriptionWorkflowService $workflow,
+    ): JsonResponse {
+        $this->authorizeProject($request, $project);
+
+        $validated = $request->validate([
+            'upload_id' => ['required', 'string', 'min:8', 'max:80'],
+            'duration_seconds' => ['nullable', 'integer', 'min:0'],
+            'language_code' => ['nullable', 'string', 'max:20'],
+        ]);
+
+        $uploadId = (string) $validated['upload_id'];
+        $cleanup = null;
+
+        try {
+            $assembled = $chunks->assemble('workspace-audio', $this->chunkOwnerKey($request, $project), $uploadId);
+            $file = new UploadedFile(
+                $assembled['path'],
+                $assembled['filename'],
+                $assembled['mime_type'],
+                null,
+                true,
+            );
+            $prepared = $workflow->prepareUploadFile($file, [
+                ...$validated,
+                'server_chunk' => true,
+            ]);
+            $clips = $prepared['clips'];
+            $cleanup = $prepared['cleanup'];
+
+            if ($workflow->batchIsTooLarge($clips)) {
+                return response()->json(['message' => 'Audio is too big.'], 422);
+            }
+
+            $durationSeconds = $workflow->durationSeconds($clips, (int) ($validated['duration_seconds'] ?? 0));
+
+            if (! $entitlements->allows($request->user(), 'upload')) {
+                return $this->upgradeRequired('Upload transcription is not available for this account.');
+            }
+
+            if (! $entitlements->canAfford($request->user(), 'upload', $durationSeconds)) {
+                return $this->upgradeRequired('Insufficient balance for transcription. Please add funds to continue.');
+            }
+
+            $transcript = $workflow->queueTranscript($request, $project, 'upload', $clips, $durationSeconds);
+            $workflow->startApiTranscription(
+                $request,
+                $transcript,
+                is_string($validated['language_code'] ?? null) ? $validated['language_code'] : null,
+            );
+
+            return response()->json([
+                'message' => 'Upload queued for transcription.',
+                'transcript' => $payloads->present($transcript->fresh()),
+            ], 202);
+        } catch (RuntimeException $exception) {
+            Log::error('Chunked web audio upload processing failed.', [
+                'user_id' => $request->user()?->id,
+                'project_id' => $project->id,
+                'upload_id' => $uploadId,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
+            return response()->json(['message' => $exception->getMessage()], 422);
+        } finally {
+            $workflow->cleanupPreparedUpload($cleanup);
+            $chunks->cleanup('workspace-audio', $this->chunkOwnerKey($request, $project), $uploadId);
+        }
+    }
+
     public function status(
         Request $request,
         TranscriptProject $project,
@@ -191,7 +306,9 @@ class TranscriptionController extends Controller
         $this->authorizeProject($request, $project);
         $this->authorizeTranscript($project, $transcript);
 
-        app(WebTranscriptProcessor::class)->appendLog($transcript, 'cancelled', 'Cancelled');
+        $processor = app(WebTranscriptProcessor::class);
+        $processor->appendLog($transcript, 'cancelled', 'Cancelled');
+        $processor->cleanupTranscriptAudio($transcript->fresh() ?? $transcript);
 
         return response()->json([
             'message' => 'Cancelled',
@@ -208,6 +325,11 @@ class TranscriptionController extends Controller
     {
         abort_unless($transcript->project_id === $project->id, 404);
         $this->authorize('update', $transcript);
+    }
+
+    private function chunkOwnerKey(Request $request, TranscriptProject $project): string
+    {
+        return 'user-'.$request->user()?->id.'-project-'.$project->id;
     }
 
     /**

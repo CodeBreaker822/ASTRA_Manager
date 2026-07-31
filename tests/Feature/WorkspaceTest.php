@@ -10,6 +10,7 @@ use App\Services\WebAudioChunkerService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use Symfony\Component\Process\Process;
 
@@ -135,6 +136,216 @@ test('web upload queues the local async transcribe api job and finalizes from st
     Http::assertSent(fn ($request): bool => str_starts_with($request->url(), config('services.deepgram.listen_url')));
 });
 
+test('chunked web upload rebuilds audio and removes stored audio after completion', function () {
+    $preparedClipPath = tempnam(sys_get_temp_dir(), 'workspace-prepared-clip-');
+    file_put_contents($preparedClipPath, 'prepared clip bytes');
+
+    $this->mock(WebAudioChunkerService::class, function ($mock) use ($preparedClipPath): void {
+        $mock->shouldReceive('clipsFromUpload')->once()->andReturn([
+            'clips' => [[
+                'audio' => new UploadedFile($preparedClipPath, 'prepared.wav', 'audio/wav', null, true),
+                'clip_index' => 0,
+                'clip_start_ms' => 0,
+                'clip_end_ms' => 2000,
+                'language_code' => null,
+            ]],
+            'cleanup' => null,
+        ]);
+        $mock->shouldReceive('cleanup')->zeroOrMoreTimes();
+    });
+
+    $user = User::factory()->create(['plan' => 'payg']);
+    $project = TranscriptProject::query()->create([
+        'user_id' => $user->id,
+        'title' => 'Chunked upload transcript',
+    ]);
+    $contents = 'rebuilt source bytes';
+    $first = substr($contents, 0, 8);
+    $second = substr($contents, 8);
+    $firstPath = tempnam(sys_get_temp_dir(), 'workspace-audio-part-a-');
+    $secondPath = tempnam(sys_get_temp_dir(), 'workspace-audio-part-b-');
+    file_put_contents($firstPath, $first);
+    file_put_contents($secondPath, $second);
+    $uploadId = 'workspace-upload-'.bin2hex(random_bytes(4));
+
+    TranscriptionProviderSetting::query()->create([
+        'provider' => 'deepgram',
+        'api_key' => 'deepgram-key',
+        'model' => 'nova-3',
+        'is_enabled' => true,
+        'sort_order' => 0,
+        'metadata' => deepgramRuntimeMetadata(),
+    ]);
+
+    Http::fake([
+        config('services.deepgram.listen_url').'*' => Http::response([
+            'results' => [
+                'channels' => [[
+                    'alternatives' => [[
+                        'transcript' => 'Chunked upload transcript.',
+                        'words' => [],
+                    ]],
+                ]],
+            ],
+        ]),
+    ]);
+
+    try {
+        $this->actingAs($user)
+            ->postJson(route('workspace.upload.chunk', $project), [
+                'upload_id' => $uploadId,
+                'chunk_index' => 0,
+                'total_chunks' => 2,
+                'total_size' => strlen($contents),
+                'filename' => 'chunked.wav',
+                'mime_type' => 'audio/wav',
+                'chunk_hash' => hash_file('sha256', $firstPath),
+                'chunk' => new UploadedFile($firstPath, 'chunked.part0', 'application/octet-stream', null, true),
+            ])
+            ->assertOk()
+            ->assertJsonPath('received_chunks', 1);
+
+        $this->actingAs($user)
+            ->postJson(route('workspace.upload.chunk', $project), [
+                'upload_id' => $uploadId,
+                'chunk_index' => 1,
+                'total_chunks' => 2,
+                'total_size' => strlen($contents),
+                'filename' => 'chunked.wav',
+                'mime_type' => 'audio/wav',
+                'chunk_hash' => hash_file('sha256', $secondPath),
+                'chunk' => new UploadedFile($secondPath, 'chunked.part1', 'application/octet-stream', null, true),
+            ])
+            ->assertOk()
+            ->assertJsonPath('complete', true);
+
+        $upload = $this->actingAs($user)
+            ->postJson(route('workspace.upload.complete', $project), [
+                'upload_id' => $uploadId,
+            ])
+            ->assertAccepted()
+            ->assertJsonPath('transcript.status', 'queued');
+    } finally {
+        @unlink($firstPath);
+        @unlink($secondPath);
+        @unlink($preparedClipPath);
+    }
+
+    expect(is_dir(storage_path('app/private/chunked-uploads/workspace-audio/user-'.$user->id.'-project-'.$project->id.'/'.$uploadId)))->toBeFalse();
+
+    $transcript = Transcript::query()->findOrFail($upload->json('transcript.id'));
+    $storedAudioPath = (string) $transcript->audio_path;
+    Storage::disk('local')->assertExists($storedAudioPath);
+
+    $this->actingAs($user)
+        ->getJson(route('workspace.status', $project))
+        ->assertOk()
+        ->assertJsonPath('project.transcripts.0.status', 'completed')
+        ->assertJsonPath('project.transcripts.0.raw_text', 'Chunked upload transcript.');
+
+    Storage::disk('local')->assertMissing($storedAudioPath);
+});
+
+test('chunked web upload processes real audio with ffmpeg when available', function () {
+    $ffmpeg = availableFfmpegBinary();
+
+    if ($ffmpeg === null) {
+        $this->markTestSkipped('FFmpeg is not installed on this machine.');
+    }
+
+    config(['services.ffmpeg.binary' => $ffmpeg]);
+
+    $user = User::factory()->create(['plan' => 'payg']);
+    $project = TranscriptProject::query()->create([
+        'user_id' => $user->id,
+        'title' => 'Chunked upload transcript',
+    ]);
+    $contents = wavContent(2);
+    $first = substr($contents, 0, 128);
+    $second = substr($contents, 128);
+    $firstPath = tempnam(sys_get_temp_dir(), 'workspace-audio-part-a-');
+    $secondPath = tempnam(sys_get_temp_dir(), 'workspace-audio-part-b-');
+    file_put_contents($firstPath, $first);
+    file_put_contents($secondPath, $second);
+    $uploadId = 'workspace-upload-'.bin2hex(random_bytes(4));
+
+    TranscriptionProviderSetting::query()->create([
+        'provider' => 'deepgram',
+        'api_key' => 'deepgram-key',
+        'model' => 'nova-3',
+        'is_enabled' => true,
+        'sort_order' => 0,
+        'metadata' => deepgramRuntimeMetadata(),
+    ]);
+
+    Http::fake([
+        config('services.deepgram.listen_url').'*' => Http::response([
+            'results' => [
+                'channels' => [[
+                    'alternatives' => [[
+                        'transcript' => 'Chunked upload transcript.',
+                        'words' => [],
+                    ]],
+                ]],
+            ],
+        ]),
+    ]);
+
+    try {
+        $this->actingAs($user)
+            ->postJson(route('workspace.upload.chunk', $project), [
+                'upload_id' => $uploadId,
+                'chunk_index' => 0,
+                'total_chunks' => 2,
+                'total_size' => strlen($contents),
+                'filename' => 'chunked.wav',
+                'mime_type' => 'audio/wav',
+                'chunk_hash' => hash_file('sha256', $firstPath),
+                'chunk' => new UploadedFile($firstPath, 'chunked.part0', 'application/octet-stream', null, true),
+            ])
+            ->assertOk()
+            ->assertJsonPath('received_chunks', 1);
+
+        $this->actingAs($user)
+            ->postJson(route('workspace.upload.chunk', $project), [
+                'upload_id' => $uploadId,
+                'chunk_index' => 1,
+                'total_chunks' => 2,
+                'total_size' => strlen($contents),
+                'filename' => 'chunked.wav',
+                'mime_type' => 'audio/wav',
+                'chunk_hash' => hash_file('sha256', $secondPath),
+                'chunk' => new UploadedFile($secondPath, 'chunked.part1', 'application/octet-stream', null, true),
+            ])
+            ->assertOk()
+            ->assertJsonPath('complete', true);
+
+        $upload = $this->actingAs($user)
+            ->postJson(route('workspace.upload.complete', $project), [
+                'upload_id' => $uploadId,
+            ])
+            ->assertAccepted()
+            ->assertJsonPath('transcript.status', 'queued');
+    } finally {
+        @unlink($firstPath);
+        @unlink($secondPath);
+    }
+
+    expect(is_dir(storage_path('app/private/chunked-uploads/workspace-audio/user-'.$user->id.'-project-'.$project->id.'/'.$uploadId)))->toBeFalse();
+
+    $transcript = Transcript::query()->findOrFail($upload->json('transcript.id'));
+    $storedAudioPath = (string) $transcript->audio_path;
+    Storage::disk('local')->assertExists($storedAudioPath);
+
+    $this->actingAs($user)
+        ->getJson(route('workspace.status', $project))
+        ->assertOk()
+        ->assertJsonPath('project.transcripts.0.status', 'completed')
+        ->assertJsonPath('project.transcripts.0.raw_text', 'Chunked upload transcript.');
+
+    Storage::disk('local')->assertMissing($storedAudioPath);
+});
+
 test('server chunking does not create a tiny trailing audio clip', function () {
     $ffmpeg = availableFfmpegBinary();
 
@@ -226,7 +437,16 @@ test('workspace summary modal follows the jerva summary design surface', functio
         ->toContain('Starting again replaces this')
         ->toContain('No summary has been created')
         ->toContain('for this project.')
+        ->toContain('overlay-class="bg-blue-950/30"')
         ->toContain('mx-auto max-w-3xl text-sm leading-7 break-words text-black')
+        ->toContain('inline-flex min-h-10 items-center rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-800')
+        ->toContain('min-h-10 shrink-0 cursor-pointer rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-900')
+        ->toContain('h-full w-full animate-pulse bg-blue-600')
+        ->not->toContain('rounded-full')
+        ->not->toContain('Download')
+        ->not->toContain('FileText')
+        ->not->toContain('Sparkles')
+        ->not->toContain("{{ isExporting ? 'Exporting' : 'Export' }}")
         ->not->toContain('summary_source')
         ->not->toContain('Raw transcript')
         ->not->toContain('Cleaned transcript');
@@ -237,7 +457,8 @@ test('workspace summary modal follows the jerva summary design surface', functio
         ->toContain('font-semibold text-black')
         ->toContain('mt-5 first:mt-0 text-sm font-semibold uppercase text-blue-700')
         ->toContain('my-3 ml-5 list-disc space-y-2')
-        ->toContain('my-3 first:mt-0 last:mb-0');
+        ->toContain('my-3 first:mt-0 last:mb-0')
+        ->toContain('text-blue-900');
 });
 
 test('transcript exports follow the jerva desktop document layout', function () {

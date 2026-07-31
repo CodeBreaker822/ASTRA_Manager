@@ -30,16 +30,25 @@ class TranscriptionWorkflowService
         $clips = $this->normalizeClips($request, $validated);
 
         if (($validated['server_chunk'] ?? false) && $request->file('audio') instanceof UploadedFile) {
-            return $this->chunker->clipsFromUpload(
-                $request->file('audio'),
-                (int) ($validated['duration_seconds'] ?? 0),
-            );
+            return $this->prepareUploadFile($request->file('audio'), $validated);
         }
 
         return [
             'clips' => $clips,
             'cleanup' => null,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array{clips: array<int, array<string, mixed>>, cleanup: string|null}
+     */
+    public function prepareUploadFile(UploadedFile $file, array $validated): array
+    {
+        return $this->chunker->clipsFromUpload(
+            $file,
+            (int) ($validated['duration_seconds'] ?? 0),
+        );
     }
 
     public function cleanupPreparedUpload(?string $directory): void
@@ -130,6 +139,7 @@ class TranscriptionWorkflowService
                 $request->user(),
                 $this->storedClipPayloads($transcript),
                 $languageCode,
+                $transcript->source === 'live' ? 'live' : 'upload',
             );
         } catch (Throwable $exception) {
             Log::error('Web audio async transcription job could not be started.', [

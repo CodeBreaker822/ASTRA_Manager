@@ -60,6 +60,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::delete('workspace/{project}', [WorkspaceController::class, 'destroy'])->name('workspace.destroy');
     Route::get('workspace/{project}/status', [TranscriptionController::class, 'status'])->name('workspace.status');
     Route::post('workspace/{project}/upload', [TranscriptionController::class, 'upload'])->middleware('can.transcribe')->name('workspace.upload');
+    Route::post('workspace/{project}/upload/chunk', [TranscriptionController::class, 'uploadChunk'])->middleware('can.transcribe')->name('workspace.upload.chunk');
+    Route::post('workspace/{project}/upload/complete', [TranscriptionController::class, 'completeUpload'])->middleware('can.transcribe')->name('workspace.upload.complete');
     Route::post('workspace/{project}/chunk', [TranscriptionController::class, 'chunk'])->middleware('can.transcribe')->name('workspace.chunk');
     Route::post('workspace/{project}/transcripts/{transcript}/cancel', [TranscriptionController::class, 'cancel'])->name('workspace.transcripts.cancel');
     Route::post('workspace/{project}/transcripts/{transcript}/polish', [TranscriptActionController::class, 'polish'])->name('workspace.transcripts.polish');

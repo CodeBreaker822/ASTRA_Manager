@@ -3,7 +3,11 @@
 use App\Models\API;
 use App\Models\ApiTranscriptionJob;
 use App\Models\TranscriptionProviderSetting;
+use App\Models\User;
 use App\Services\GroqSpeechToTextService;
+use App\Services\LicenseKeyService;
+use Database\Seeders\PlanTierSeeder;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
@@ -55,13 +59,7 @@ it('rejects transcribe audio over the twenty minute batch limit', function () {
 });
 
 it('uses provider priority for every batched clip and wraps fallback attempts', function () {
-    $license = API::query()->create([
-        'app_name' => 'Audio Queue Test '.uniqid(),
-        'app_token' => 'audio-queue-license-'.uniqid(),
-        'can_post' => true,
-        'can_get' => true,
-        'is_active' => true,
-    ]);
+    $license = audioLimitAccountLicense();
 
     TranscriptionProviderSetting::query()->create([
         'provider' => 'deepgram',
@@ -121,13 +119,7 @@ it('uses provider priority for every batched clip and wraps fallback attempts', 
 });
 
 it('accepts successful empty transcription text as completed audio with no speech', function () {
-    $license = API::query()->create([
-        'app_name' => 'Empty Audio Test '.uniqid(),
-        'app_token' => 'empty-audio-license-'.uniqid(),
-        'can_post' => true,
-        'can_get' => true,
-        'is_active' => true,
-    ]);
+    $license = audioLimitAccountLicense();
 
     TranscriptionProviderSetting::query()->create([
         'provider' => 'deepgram',
@@ -164,14 +156,250 @@ it('accepts successful empty transcription text as completed audio with no speec
         ->assertJsonPath('clips.0.fallback.used', false);
 });
 
-it('sends batched clips to runpod when runpod is the first provider', function () {
+it('charges a user license when api transcription succeeds', function () {
+    $this->seed(PlanTierSeeder::class);
+
+    $user = User::factory()->create([
+        'plan' => 'free',
+        'wallet_balance' => 0,
+    ]);
+    $license = app(LicenseKeyService::class)->provisionForUser($user);
+
+    TranscriptionProviderSetting::query()->create([
+        'provider' => 'deepgram',
+        'api_key' => 'deepgram-key',
+        'model' => 'nova-3',
+        'is_enabled' => true,
+        'sort_order' => 0,
+        'metadata' => audioLimitDeepgramRuntimeMetadata(),
+    ]);
+
+    Http::fake([
+        config('services.deepgram.listen_url').'*' => Http::response([
+            'results' => [
+                'channels' => [[
+                    'alternatives' => [[
+                        'transcript' => 'Bill this account transcript.',
+                        'words' => [],
+                    ]],
+                ]],
+            ],
+        ]),
+    ]);
+
+    $this->withToken($license->app_token)
+        ->post('/api/transcribe', [
+            'audio' => UploadedFile::fake()->createWithContent('billable.wav', 'fake billable audio'),
+            'clip_index' => 0,
+            'clip_start_ms' => 0,
+            'clip_end_ms' => 120000,
+            'billing_feature' => 'upload',
+        ], ['Accept' => 'application/json'])
+        ->assertOk()
+        ->assertJsonPath('text', 'Bill this account transcript.')
+        ->assertJsonPath('duration_ms', 120000);
+
+    expect((int) $user->usageRecords()->where('period', now()->toDateString())->first()?->seconds_transcribed)->toBe(120)
+        ->and((float) $user->refresh()->wallet_balance)->toBe(0.0);
+});
+
+it('rejects user license transcription when duration cannot be billed', function () {
+    $this->seed(PlanTierSeeder::class);
+
+    $user = User::factory()->create([
+        'plan' => 'free',
+        'wallet_balance' => 0,
+    ]);
+    $license = app(LicenseKeyService::class)->provisionForUser($user);
+
+    Http::fake();
+
+    $this->withToken($license->app_token)
+        ->post('/api/transcribe', [
+            'audio' => UploadedFile::fake()->createWithContent('unknown-duration.wav', 'fake audio'),
+            'clip_index' => 0,
+            'billing_feature' => 'upload',
+        ], ['Accept' => 'application/json'])
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'Transcription duration is required for account billing.');
+
+    expect($user->usageRecords()->where('period', now()->toDateString())->exists())->toBeFalse();
+
+    Http::assertNothingSent();
+});
+
+it('rejects global transcription licenses because they cannot be charged to account credits', function () {
     $license = API::query()->create([
-        'app_name' => 'RunPod Batch Test '.uniqid(),
-        'app_token' => 'runpod-batch-license-'.uniqid(),
+        'app_name' => 'Global Billing Guard Test '.uniqid(),
+        'app_token' => 'global-billing-guard-license-'.uniqid(),
         'can_post' => true,
         'can_get' => true,
         'is_active' => true,
     ]);
+
+    Http::fake();
+
+    $this->withToken($license->app_token)
+        ->post('/api/transcribe', [
+            'audio' => UploadedFile::fake()->createWithContent('global.wav', 'fake global audio'),
+            'clip_index' => 0,
+            'clip_start_ms' => 0,
+            'clip_end_ms' => 60000,
+            'billing_feature' => 'upload',
+        ], ['Accept' => 'application/json'])
+        ->assertStatus(403)
+        ->assertJsonPath('message', 'Transcription requires an account license for billing.');
+
+    Http::assertNothingSent();
+});
+
+it('blocks user license transcription overage when credits are insufficient', function () {
+    $this->seed(PlanTierSeeder::class);
+
+    $user = User::factory()->create([
+        'plan' => 'free',
+        'wallet_balance' => 0,
+    ]);
+    $user->usageRecords()->create([
+        'period' => now()->toDateString(),
+        'seconds_transcribed' => 60 * 60,
+    ]);
+    $license = app(LicenseKeyService::class)->provisionForUser($user);
+
+    Http::fake();
+
+    $this->withToken($license->app_token)
+        ->post('/api/transcribe', [
+            'audio' => UploadedFile::fake()->createWithContent('overage.wav', 'fake audio'),
+            'clip_index' => 0,
+            'clip_start_ms' => 0,
+            'clip_end_ms' => 60000,
+            'billing_feature' => 'upload',
+        ], ['Accept' => 'application/json'])
+        ->assertStatus(402)
+        ->assertJsonPath('message', 'Insufficient balance for transcription. Please add funds to continue.');
+
+    expect((int) $user->usageRecords()->where('period', now()->toDateString())->first()?->seconds_transcribed)->toBe(60 * 60);
+
+    Http::assertNothingSent();
+});
+
+it('charges at least one cent for paid user license transcription overage', function () {
+    $this->seed(PlanTierSeeder::class);
+
+    $user = User::factory()->create([
+        'plan' => 'free',
+        'wallet_balance' => 0.01,
+    ]);
+    $user->usageRecords()->create([
+        'period' => now()->toDateString(),
+        'seconds_transcribed' => 60 * 60,
+    ]);
+    $license = app(LicenseKeyService::class)->provisionForUser($user);
+
+    TranscriptionProviderSetting::query()->create([
+        'provider' => 'deepgram',
+        'api_key' => 'deepgram-key',
+        'model' => 'nova-3',
+        'is_enabled' => true,
+        'sort_order' => 0,
+        'metadata' => audioLimitDeepgramRuntimeMetadata(),
+    ]);
+
+    Http::fake([
+        config('services.deepgram.listen_url').'*' => Http::response([
+            'results' => [
+                'channels' => [[
+                    'alternatives' => [[
+                        'transcript' => 'Paid overage transcript.',
+                        'words' => [],
+                    ]],
+                ]],
+            ],
+        ]),
+    ]);
+
+    $this->withToken($license->app_token)
+        ->post('/api/transcribe', [
+            'audio' => UploadedFile::fake()->createWithContent('paid-overage.wav', 'fake paid overage audio'),
+            'clip_index' => 0,
+            'clip_start_ms' => 0,
+            'clip_end_ms' => 60000,
+            'billing_feature' => 'upload',
+        ], ['Accept' => 'application/json'])
+        ->assertOk()
+        ->assertJsonPath('text', 'Paid overage transcript.');
+
+    expect((int) $user->usageRecords()->where('period', now()->toDateString())->first()?->seconds_transcribed)->toBe((60 * 60) + 60)
+        ->and((float) $user->refresh()->wallet_balance)->toBe(0.0);
+});
+
+it('charges an async user license transcription job only once when it completes', function () {
+    $this->seed(PlanTierSeeder::class);
+
+    $user = User::factory()->create([
+        'plan' => 'free',
+        'wallet_balance' => 0,
+    ]);
+    $license = app(LicenseKeyService::class)->provisionForUser($user);
+
+    TranscriptionProviderSetting::query()->create([
+        'provider' => 'deepgram',
+        'api_key' => 'deepgram-key',
+        'model' => 'nova-3',
+        'is_enabled' => true,
+        'sort_order' => 0,
+        'metadata' => audioLimitDeepgramRuntimeMetadata(),
+    ]);
+
+    Http::fake([
+        config('services.deepgram.listen_url').'*' => Http::response([
+            'results' => [
+                'channels' => [[
+                    'alternatives' => [[
+                        'transcript' => 'Async billable transcript.',
+                        'words' => [],
+                    ]],
+                ]],
+            ],
+        ]),
+    ]);
+
+    $created = $this->withToken($license->app_token)
+        ->post('/api/transcribe', [
+            'audio' => UploadedFile::fake()->createWithContent('async-billable.wav', 'fake async audio'),
+            'clip_index' => 0,
+            'clip_start_ms' => 0,
+            'clip_end_ms' => 120000,
+            'billing_feature' => 'upload',
+            'response_mode' => 'async',
+        ], ['Accept' => 'application/json'])
+        ->assertAccepted()
+        ->assertJsonPath('status', 'queued');
+
+    $jobId = (string) $created->json('job_id');
+
+    $this->withToken($license->app_token)
+        ->getJson('/api/transcribe/jobs/'.$jobId)
+        ->assertOk()
+        ->assertJsonPath('status', 'completed')
+        ->assertJsonPath('result.text', 'Async billable transcript.');
+
+    $this->withToken($license->app_token)
+        ->getJson('/api/transcribe/jobs/'.$jobId)
+        ->assertOk()
+        ->assertJsonPath('status', 'completed');
+
+    $job = ApiTranscriptionJob::query()->find($jobId);
+
+    expect((int) $user->usageRecords()->where('period', now()->toDateString())->first()?->seconds_transcribed)->toBe(120)
+        ->and($job?->billing_feature)->toBe('upload')
+        ->and($job?->billing_seconds)->toBe(120)
+        ->and($job?->billed_at)->not->toBeNull();
+});
+
+it('sends batched clips to runpod when runpod is the first provider', function () {
+    $license = audioLimitAccountLicense();
 
     TranscriptionProviderSetting::query()->create([
         'provider' => 'runpod',
@@ -248,13 +476,7 @@ it('sends batched clips to runpod when runpod is the first provider', function (
 });
 
 it('accepts twenty one minute audio chunks in a single runpod batch', function () {
-    $license = API::query()->create([
-        'app_name' => 'RunPod Twenty One Minute Batch Test '.uniqid(),
-        'app_token' => 'runpod-twenty-one-minute-license-'.uniqid(),
-        'can_post' => true,
-        'can_get' => true,
-        'is_active' => true,
-    ]);
+    $license = audioLimitAccountLicense();
 
     TranscriptionProviderSetting::query()->create([
         'provider' => 'runpod',
@@ -326,13 +548,7 @@ it('accepts twenty one minute audio chunks in a single runpod batch', function (
 });
 
 it('keeps an accepted runpod async job pending when status polling is temporarily unavailable', function () {
-    $license = API::query()->create([
-        'app_name' => 'RunPod Pending Test '.uniqid(),
-        'app_token' => 'runpod-pending-license-'.uniqid(),
-        'can_post' => true,
-        'can_get' => true,
-        'is_active' => true,
-    ]);
+    $license = audioLimitAccountLicense();
 
     TranscriptionProviderSetting::query()->create([
         'provider' => 'runpod',
@@ -418,4 +634,23 @@ function audioLimitGroqTranscriptionRuntimeMetadata(): array
         'transcription_url' => (string) config('services.groq.transcription_url'),
         'timeout' => 120,
     ];
+}
+
+function audioLimitAccountLicense(float $walletBalance = 0.0, int $usedSeconds = 0): API
+{
+    app(Kernel::class)->call('db:seed', ['--class' => PlanTierSeeder::class]);
+
+    $user = User::factory()->create([
+        'plan' => 'free',
+        'wallet_balance' => $walletBalance,
+    ]);
+
+    if ($usedSeconds > 0) {
+        $user->usageRecords()->create([
+            'period' => now()->toDateString(),
+            'seconds_transcribed' => $usedSeconds,
+        ]);
+    }
+
+    return app(LicenseKeyService::class)->provisionForUser($user);
 }

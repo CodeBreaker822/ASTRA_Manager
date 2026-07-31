@@ -83,5 +83,8 @@ export const renderSummaryMarkdown = (value: string) => {
 
     closeList();
 
-    return html.join('');
+    return (
+        html.join('') ||
+        '<p class="text-blue-900">No summary has been created for this project.</p>'
+    );
 };

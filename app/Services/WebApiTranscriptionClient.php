@@ -25,12 +25,12 @@ class WebApiTranscriptionClient
      * @param  array<int, array<string, mixed>>  $clips
      * @return array<string, mixed>
      */
-    public function transcribe(User $user, array $clips, ?string $languageCode = null): array
+    public function transcribe(User $user, array $clips, ?string $languageCode = null, string $billingFeature = 'upload'): array
     {
         $license = $this->licenses->provisionForUser($user);
 
         $response = $this->api->transcribe(
-            $this->transcribeRequest($clips, $license->app_token, $languageCode, 'sync'),
+            $this->transcribeRequest($clips, $license->app_token, $languageCode, 'sync', $billingFeature),
             app(AppSettingsService::class),
         );
         $payload = $this->payload($response);
@@ -52,12 +52,12 @@ class WebApiTranscriptionClient
      * @param  array<int, array<string, mixed>>  $clips
      * @return array<string, mixed>
      */
-    public function queue(User $user, array $clips, ?string $languageCode = null): array
+    public function queue(User $user, array $clips, ?string $languageCode = null, string $billingFeature = 'upload'): array
     {
         $license = $this->licenses->provisionForUser($user);
 
         $response = $this->api->transcribe(
-            $this->transcribeRequest($clips, $license->app_token, $languageCode, 'async'),
+            $this->transcribeRequest($clips, $license->app_token, $languageCode, 'async', $billingFeature),
             app(AppSettingsService::class),
         );
         $payload = $this->payload($response);
@@ -160,7 +160,7 @@ class WebApiTranscriptionClient
     /**
      * @param  array<int, array<string, mixed>>  $clips
      */
-    private function transcribeRequest(array $clips, string $licenseKey, ?string $languageCode, string $responseMode): Request
+    private function transcribeRequest(array $clips, string $licenseKey, ?string $languageCode, string $responseMode, string $billingFeature): Request
     {
         $files = [];
         $clipIndex = [];
@@ -198,6 +198,7 @@ class WebApiTranscriptionClient
 
         return Request::create('/api/transcribe', 'POST', [
             'response_mode' => $responseMode,
+            'billing_feature' => $billingFeature === 'live' ? 'live' : 'upload',
             'clip_index' => $clipIndex,
             'clip_start_ms' => $clipStartMs,
             'clip_end_ms' => $clipEndMs,

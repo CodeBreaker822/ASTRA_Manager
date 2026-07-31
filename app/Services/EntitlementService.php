@@ -191,7 +191,7 @@ class EntitlementService
             ? ($paidUnits / 3600) * $rate
             : $paidUnits * $rate;
 
-        return Money::dollarsToUsdCents($cost);
+        return max(1, (int) ceil($cost * 100));
     }
 
     private function recordUsage(UsageRecord $usage, string $feature, float $units): void

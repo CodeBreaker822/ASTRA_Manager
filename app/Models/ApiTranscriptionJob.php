@@ -11,6 +11,9 @@ use Illuminate\Support\Carbon;
  * @property string $status
  * @property array<string, mixed>|null $request_payload
  * @property array<string, mixed>|null $result_payload
+ * @property string|null $billing_feature
+ * @property int $billing_seconds
+ * @property Carbon|null $billed_at
  * @property string|null $error_message
  * @property int|null $status_code
  * @property Carbon|null $started_at
@@ -30,6 +33,9 @@ class ApiTranscriptionJob extends Model
         'status',
         'request_payload',
         'result_payload',
+        'billing_feature',
+        'billing_seconds',
+        'billed_at',
         'error_message',
         'status_code',
         'started_at',
@@ -41,6 +47,8 @@ class ApiTranscriptionJob extends Model
         return [
             'request_payload' => 'array',
             'result_payload' => 'array',
+            'billing_seconds' => 'integer',
+            'billed_at' => 'datetime',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
         ];

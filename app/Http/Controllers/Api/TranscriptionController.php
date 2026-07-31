@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\InsufficientWalletBalanceException;
 use App\Http\Controllers\Controller;
 use App\Models\API;
 use App\Models\ApiTranscriptionJob;
@@ -14,8 +15,8 @@ use App\Services\CerebrasTranscriptCleanerService;
 use App\Services\CloudflareTranscriptCleanerService;
 use App\Services\DeepgramSpeechToTextService;
 use App\Services\DeepSeekTranscriptCleanerService;
-use App\Services\EntitlementService;
 use App\Services\ElevenLabsSpeechToTextService;
+use App\Services\EntitlementService;
 use App\Services\GeminiTranscriptCleanerService;
 use App\Services\GladiaSpeechToTextService;
 use App\Services\GoogleCloudSpeechToTextService;
@@ -31,6 +32,7 @@ use App\Services\SpeechmaticsSpeechToTextService;
 use App\Services\TranscriptionApiRequestLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
@@ -48,6 +50,12 @@ class TranscriptionController extends Controller
     private const MAX_TRANSCRIBE_BATCH_DURATION_MS = 20 * 60 * 1000;
 
     private const MAX_TRANSCRIBE_BATCH_CLIPS = 20;
+
+    private const SUMMARY_SECTION_INSTRUCTIONS = 'Summarize only this transcript section. Preserve important names, facts, numbers, decisions, and action items for the final summary. Keep topic labels clear so the final summary can be organized with Markdown headings.';
+
+    private const SUMMARY_CONDENSE_INSTRUCTIONS = 'Condense these section summaries while preserving all important facts, decisions, action items, topic labels, and Markdown-style structure.';
+
+    private const SUMMARY_FINAL_INSTRUCTIONS = 'Create one complete final summary from these section summaries. Do not mention the sectioning process. Organize the final result by topic. Use Markdown headings with ## or ###, readable paragraphs, and Markdown bullets using - where lists are appropriate.';
 
     public function transcribe(Request $request, AppSettingsService $settings): JsonResponse
     {
@@ -95,12 +103,15 @@ class TranscriptionController extends Controller
                 'clips.*.clip_start_ms' => ['nullable', 'integer', 'min:0'],
                 'clips.*.clip_end_ms' => ['nullable', 'integer', 'min:0'],
                 'response_mode' => ['nullable', 'string', 'in:sync,async'],
+                'billing_feature' => ['nullable', 'string', 'in:upload,live'],
             ]));
         } catch (ValidationException $exception) {
             return $this->logAndReturn($request, 'transcribe', $license, $this->validationError($exception), $startedAt);
         }
 
         $queuedClips = $this->normalizeTranscribeClips($request, $validated);
+        $billingFeature = $this->billingFeature($validated['billing_feature'] ?? null);
+        $billingSeconds = $this->billableDurationSeconds($queuedClips);
 
         if ($this->transcribeBatchDurationTooLarge($queuedClips)) {
             return $this->logAndReturn($request, 'transcribe', $license, response()->json([
@@ -111,8 +122,19 @@ class TranscriptionController extends Controller
             ]);
         }
 
+        $billingError = $this->transcriptionBillingPreflight($license, $billingFeature, $billingSeconds);
+
+        if ($billingError instanceof JsonResponse) {
+            return $this->logAndReturn($request, 'transcribe', $license, $billingError, $startedAt, [
+                'status' => 'billing_denied',
+                'severity' => 'high',
+                'billing_feature' => $billingFeature,
+                'billing_seconds' => $billingSeconds,
+            ]);
+        }
+
         if (($validated['response_mode'] ?? null) === 'async') {
-            return $this->createAsyncTranscriptionJob($request, $license, $queuedClips, $startedAt);
+            return $this->createAsyncTranscriptionJob($request, $license, $queuedClips, $startedAt, $billingFeature, $billingSeconds);
         }
 
         $providers = $settings->orderedConnectedProviders('transcriber');
@@ -186,9 +208,22 @@ class TranscriptionController extends Controller
             'fallback' => $fallback,
         ]);
 
+        $billingError = $this->chargeTranscriptionUsage($license, $billingFeature, $billingSeconds);
+
+        if ($billingError instanceof JsonResponse) {
+            return $this->logAndReturn($request, 'transcribe', $license, $billingError, $startedAt, [
+                'status' => 'billing_failed',
+                'severity' => 'high',
+                'billing_feature' => $billingFeature,
+                'billing_seconds' => $billingSeconds,
+            ]);
+        }
+
         return $this->logAndReturn($request, 'transcribe', $license, $response, $startedAt, [
             'provider' => implode(',', array_values(array_unique($usedProviders))),
             'attempted_providers' => $attemptedProviders,
+            'billing_feature' => $billingFeature,
+            'billing_seconds' => $billingSeconds,
         ]);
     }
 
@@ -600,6 +635,185 @@ class TranscriptionController extends Controller
         return $response;
     }
 
+    private function billingFeature(mixed $value): string
+    {
+        return $value === 'live' ? 'live' : 'upload';
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $clips
+     */
+    private function billableDurationSeconds(array $clips): int
+    {
+        $durationMs = 0;
+
+        foreach ($clips as $clip) {
+            $clipDurationMs = $this->clipDurationMs($clip);
+
+            if ($clipDurationMs !== null && $clipDurationMs > 0) {
+                $durationMs += $clipDurationMs;
+            }
+        }
+
+        return $durationMs > 0 ? (int) ceil($durationMs / 1000) : 0;
+    }
+
+    private function billingUser(API $license): ?User
+    {
+        if (! $license->user_id) {
+            return null;
+        }
+
+        if ($license->relationLoaded('user')) {
+            return $license->user instanceof User ? $license->user : null;
+        }
+
+        return $license->user()->first();
+    }
+
+    private function transcriptionBillingPreflight(API $license, string $feature, int $seconds): ?JsonResponse
+    {
+        $user = $this->billingUser($license);
+
+        if (! $user instanceof User) {
+            return response()->json([
+                'message' => 'Transcription requires an account license for billing.',
+            ], 403);
+        }
+
+        if ($seconds <= 0) {
+            return response()->json([
+                'message' => 'Transcription duration is required for account billing.',
+            ], 422);
+        }
+
+        $entitlements = app(EntitlementService::class);
+
+        try {
+            if (! $entitlements->allows($user, $feature)) {
+                return response()->json([
+                    'message' => ucfirst($feature).' transcription is not available for this account.',
+                ], 403);
+            }
+
+            if (! $entitlements->canAfford($user, $feature, $seconds)) {
+                return response()->json([
+                    'message' => 'Insufficient balance for transcription. Please add funds to continue.',
+                ], 402);
+            }
+        } catch (Throwable $exception) {
+            Log::error('Transcription billing preflight failed.', [
+                'license_id' => $license->id,
+                'user_id' => $user->id,
+                'feature' => $feature,
+                'seconds' => $seconds,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
+            report($exception);
+
+            return response()->json([
+                'message' => 'Billing could not be verified. Please try again.',
+            ], 500);
+        }
+
+        return null;
+    }
+
+    private function chargeTranscriptionUsage(API $license, string $feature, int $seconds): ?JsonResponse
+    {
+        $user = $this->billingUser($license);
+
+        if (! $user instanceof User) {
+            return response()->json([
+                'message' => 'Transcription requires an account license for billing.',
+            ], 403);
+        }
+
+        if ($seconds <= 0) {
+            return response()->json([
+                'message' => 'Transcription duration is required for account billing.',
+            ], 422);
+        }
+
+        try {
+            app(EntitlementService::class)->charge($user, $feature, $seconds);
+        } catch (InsufficientWalletBalanceException) {
+            return response()->json([
+                'message' => 'Insufficient balance for transcription. Please add funds to continue.',
+            ], 402);
+        } catch (Throwable $exception) {
+            Log::error('Transcription billing charge failed.', [
+                'license_id' => $license->id,
+                'user_id' => $user->id,
+                'feature' => $feature,
+                'seconds' => $seconds,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
+            report($exception);
+
+            return response()->json([
+                'message' => 'Billing could not be completed. Please try again.',
+            ], 500);
+        }
+
+        return null;
+    }
+
+    private function billCompletedAsyncTranscriptionJob(ApiTranscriptionJob $job, API $license): bool
+    {
+        return DB::transaction(function () use ($job, $license): bool {
+            $lockedJob = ApiTranscriptionJob::query()
+                ->whereKey($job->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($lockedJob->billed_at !== null) {
+                return true;
+            }
+
+            $payload = is_array($lockedJob->request_payload) ? $lockedJob->request_payload : [];
+            $feature = $this->billingFeature($lockedJob->billing_feature ?? $payload['billing_feature'] ?? null);
+            $seconds = (int) ($lockedJob->billing_seconds ?: ($payload['billing_seconds'] ?? 0));
+
+            if ($seconds <= 0) {
+                $seconds = $this->billableDurationSeconds(array_values(array_filter($payload['clips'] ?? [], 'is_array')));
+            }
+
+            $billingError = $this->chargeTranscriptionUsage($license, $feature, $seconds);
+
+            if ($billingError instanceof JsonResponse) {
+                $errorPayload = json_decode((string) $billingError->getContent(), true);
+                $message = is_array($errorPayload) && is_string($errorPayload['message'] ?? null)
+                    ? $errorPayload['message']
+                    : 'Billing could not be completed.';
+
+                $lockedJob->forceFill([
+                    'status' => 'failed',
+                    'result_payload' => null,
+                    'error_message' => $message,
+                    'status_code' => $billingError->getStatusCode(),
+                    'billing_feature' => $feature,
+                    'billing_seconds' => $seconds,
+                    'finished_at' => now(),
+                ])->save();
+
+                return false;
+            }
+
+            $lockedJob->forceFill([
+                'billing_feature' => $feature,
+                'billing_seconds' => $seconds,
+                'billed_at' => now(),
+            ])->save();
+
+            return true;
+        });
+    }
+
     /**
      * @param  array<int, array<string, mixed>>  $queuedClips
      */
@@ -608,6 +822,8 @@ class TranscriptionController extends Controller
         API $license,
         array $queuedClips,
         float $startedAt,
+        string $billingFeature,
+        int $billingSeconds,
     ): JsonResponse {
         try {
             $jobId = (string) Str::uuid();
@@ -671,6 +887,8 @@ class TranscriptionController extends Controller
             $requestPayload = [
                 'clips' => $storedClips,
                 'mode' => 'queue',
+                'billing_feature' => $billingFeature,
+                'billing_seconds' => $billingSeconds,
             ];
             $status = 'queued';
 
@@ -702,6 +920,8 @@ class TranscriptionController extends Controller
                 'api_id' => $license->id,
                 'status' => $status,
                 'request_payload' => $requestPayload,
+                'billing_feature' => $billingFeature,
+                'billing_seconds' => $billingSeconds,
                 'started_at' => $status === 'processing' ? now() : null,
             ]);
 
@@ -715,6 +935,8 @@ class TranscriptionController extends Controller
                 'status' => 'queued',
                 'async' => true,
                 'clip_count' => count($storedClips),
+                'billing_feature' => $billingFeature,
+                'billing_seconds' => $billingSeconds,
             ]);
         } catch (Throwable $exception) {
             Log::error('Async transcription job creation failed.', [
@@ -778,6 +1000,12 @@ class TranscriptionController extends Controller
         $responsePayload = json_decode((string) $response->getContent(), true);
         $responsePayload = is_array($responsePayload) ? $responsePayload : [];
         $statusCode = $response->getStatusCode();
+
+        if ($statusCode < 400 && ! $this->billCompletedAsyncTranscriptionJob($job, $license)) {
+            $this->deleteAsyncTranscriptionAudio($payload);
+
+            return;
+        }
 
         $job->forceFill([
             'status' => $statusCode >= 400 ? 'failed' : 'completed',
@@ -930,14 +1158,21 @@ class TranscriptionController extends Controller
 
                 return $this->clipTranscript($clip, $result, [AppSettingsService::PROVIDER_RUNPOD]);
             }, $clips, array_keys($clips));
+            $responsePayload = $this->transcriptionPayloadFromClips(
+                $clipTranscripts,
+                [AppSettingsService::PROVIDER_RUNPOD],
+                [AppSettingsService::PROVIDER_RUNPOD],
+            );
+
+            if (! $this->billCompletedAsyncTranscriptionJob($job, $license)) {
+                $this->deleteAsyncTranscriptionAudio($payload);
+
+                return;
+            }
 
             $job->forceFill([
                 'status' => 'completed',
-                'result_payload' => $this->transcriptionPayloadFromClips(
-                    $clipTranscripts,
-                    [AppSettingsService::PROVIDER_RUNPOD],
-                    [AppSettingsService::PROVIDER_RUNPOD],
-                ),
+                'result_payload' => $responsePayload,
                 'error_message' => null,
                 'status_code' => 200,
                 'finished_at' => now(),
@@ -987,6 +1222,10 @@ class TranscriptionController extends Controller
             $statusCode = $response->getStatusCode();
 
             if ($statusCode < 400) {
+                if (! $this->billCompletedAsyncTranscriptionJob($job, $license)) {
+                    return;
+                }
+
                 $attempted = array_values(array_unique([
                     AppSettingsService::PROVIDER_RUNPOD,
                     ...array_values(array_filter($responsePayload['attempted_providers'] ?? [], 'is_string')),
@@ -1454,8 +1693,7 @@ class TranscriptionController extends Controller
         $parts = $this->splitTranscript($text, $sectionCharacters);
         $attemptedProviders = [];
         $fallbackUsed = false;
-        $sectionInstruction = trim(($instruction ? $instruction.' ' : '')
-            .'Summarize only this transcript section. Preserve important names, facts, numbers, decisions, and action items for the final summary.');
+        $sectionInstruction = $this->summaryInstruction($instruction, self::SUMMARY_SECTION_INSTRUCTIONS);
         $sectionSummaries = [];
 
         foreach ($parts as $index => $part) {
@@ -1483,7 +1721,7 @@ class TranscriptionController extends Controller
                     $providers,
                     $index % $providerCount,
                     $part,
-                    'Condense these section summaries while preserving all important facts, decisions, and action items.',
+                    $this->summaryInstruction($instruction, self::SUMMARY_CONDENSE_INSTRUCTIONS),
                     $request,
                     $license,
                     $attemptedProviders,
@@ -1496,8 +1734,7 @@ class TranscriptionController extends Controller
             $condenseRounds++;
         }
 
-        $finalInstruction = trim(($instruction ? $instruction.' ' : '')
-            .'Create one complete final summary from these section summaries. Do not mention the sectioning process.');
+        $finalInstruction = $this->summaryInstruction($instruction, self::SUMMARY_FINAL_INSTRUCTIONS);
         $final = $this->cleanTextAcrossProviders(
             $providers,
             0,
@@ -1609,8 +1846,7 @@ class TranscriptionController extends Controller
         }
 
         if ($this->isSummaryTask($task, $instruction)) {
-            $sectionInstruction = trim(($instruction ? $instruction.' ' : '')
-                .'Summarize only this transcript section. Preserve important names, facts, numbers, decisions, and action items for the final summary.');
+            $sectionInstruction = $this->summaryInstruction($instruction, self::SUMMARY_SECTION_INSTRUCTIONS);
             $sectionSummaries = [];
 
             foreach ($parts as $part) {
@@ -1630,7 +1866,7 @@ class TranscriptionController extends Controller
                 foreach ($this->splitTranscript($combined) as $part) {
                     $condensed[] = $this->retryCleanerResponse(
                         fn (): array => $cleaner->clean($part, [], [
-                            'instructions' => 'Condense these section summaries while preserving all important facts, decisions, and action items.',
+                            'instructions' => $this->summaryInstruction($instruction, self::SUMMARY_CONDENSE_INSTRUCTIONS),
                         ]),
                         $provider,
                         false,
@@ -1641,8 +1877,7 @@ class TranscriptionController extends Controller
                 $condenseRounds++;
             }
 
-            $finalInstruction = trim(($instruction ? $instruction.' ' : '')
-                .'Create one complete final summary from these section summaries. Do not mention the sectioning process.');
+            $finalInstruction = $this->summaryInstruction($instruction, self::SUMMARY_FINAL_INSTRUCTIONS);
 
             return $this->retryCleanerResponse(
                 fn (): array => $cleaner->clean($combined, [], ['instructions' => $finalInstruction]),
@@ -1790,6 +2025,14 @@ class TranscriptionController extends Controller
         }
 
         return preg_match('/\b(summary|summarize|summarise|summarized|summarised|summarization|summarisation)\b/i', (string) $instruction) === 1;
+    }
+
+    private function summaryInstruction(?string $baseInstruction, string $additionalInstruction): string
+    {
+        return trim(implode(' ', array_filter([
+            is_string($baseInstruction) ? trim($baseInstruction) : '',
+            $additionalInstruction,
+        ])));
     }
 
     private function splitTranscript(string $text, ?int $maximumCharacters = null): array
