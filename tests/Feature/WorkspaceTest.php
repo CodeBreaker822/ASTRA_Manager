@@ -217,17 +217,27 @@ test('web upload completes when transcription provider returns no speech text', 
 test('workspace summary modal follows the jerva summary design surface', function () {
     $summaryDialog = File::get(resource_path('js/components/workspace/SummaryDialog.vue'));
     $exportMenu = File::get(resource_path('js/components/workspace/TranscriptExportMenu.vue'));
+    $workspaceHelpers = File::get(resource_path('js/lib/workspace.ts'));
 
     expect($summaryDialog)
         ->toContain('renderSummaryMarkdown')
         ->toContain('v-html')
         ->toContain('data-summary-export-format')
-        ->toContain('summary_source')
         ->toContain('Starting again replaces this')
         ->toContain('No summary has been created')
-        ->toContain('for this project.');
+        ->toContain('for this project.')
+        ->toContain('mx-auto max-w-3xl text-sm leading-7 break-words text-black')
+        ->not->toContain('summary_source')
+        ->not->toContain('Raw transcript')
+        ->not->toContain('Cleaned transcript');
 
-    expect($exportMenu)->toContain('summary_source');
+    expect($exportMenu)->not->toContain('summary_source');
+
+    expect($workspaceHelpers)
+        ->toContain('font-semibold text-black')
+        ->toContain('mt-5 first:mt-0 text-sm font-semibold uppercase text-blue-700')
+        ->toContain('my-3 ml-5 list-disc space-y-2')
+        ->toContain('my-3 first:mt-0 last:mb-0');
 });
 
 test('transcript exports follow the jerva desktop document layout', function () {
@@ -304,7 +314,7 @@ test('transcript exports follow the jerva desktop document layout', function () 
     }
 });
 
-test('summary exports include jerva project source and summary structure', function () {
+test('summary exports use the current transcript and jerva summary layout', function () {
     $user = User::factory()->create();
     $project = TranscriptProject::query()->create([
         'user_id' => $user->id,
@@ -322,39 +332,60 @@ test('summary exports include jerva project source and summary structure', funct
     ]);
 
     $exports = app(TranscriptExportService::class);
-    $txt = $exports->export($transcript, 'txt', 'summary', 'cleaned');
+    $files = [];
 
-    expect(File::get($txt['path']))
-        ->toContain('Council meeting - Summary')
-        ->toContain('Project: Council meeting')
-        ->toContain('Source: Cleaned transcript')
-        ->toContain('- Approved the request')
-        ->toContain('Next step confirmed.');
+    try {
+        $txt = $exports->export($transcript, 'txt', 'summary');
+        $files[] = $txt['path'];
 
-    File::delete($txt['path']);
+        expect(File::get($txt['path']))
+            ->toContain('Council meeting - Summary')
+            ->toContain('Project: Council meeting')
+            ->toContain('Source: Current transcript')
+            ->toContain('- Approved the request')
+            ->toContain('Next step confirmed.');
 
-    expect(File::get(app_path('Services/TranscriptExportService.php')))
-        ->toContain('PhpOffice\\PhpSpreadsheet\\Spreadsheet')
-        ->toContain('new Xlsx($spreadsheet)');
+        if (class_exists(ZipArchive::class)) {
+            $docx = $exports->export($transcript, 'docx', 'summary');
+            $files[] = $docx['path'];
+            $archive = new ZipArchive;
+            $archive->open($docx['path']);
+            $documentXml = $archive->getFromName('word/document.xml');
+            $archive->close();
 
-    if (! class_exists(ZipArchive::class)) {
-        return;
+            expect($documentXml)
+                ->toContain('Council meeting - Summary')
+                ->toContain('SOURCE: Current transcript')
+                ->toContain('Outcome')
+                ->toContain('Approved')
+                ->toContain('w:val="312E81"')
+                ->toContain('w:color="DDD6FE"')
+                ->toContain('•');
+        }
+
+        if (extension_loaded('zip') && extension_loaded('gd')) {
+            $xlsx = $exports->export($transcript, 'xlsx', 'summary');
+            $files[] = $xlsx['path'];
+            $workbook = IOFactory::load($xlsx['path']);
+            $sheet = $workbook->getActiveSheet();
+            $summaryValue = $sheet->getCell('B5')->getValue();
+
+            expect($sheet->getCell('A1')->getValue())->toBe('Council meeting - Summary')
+                ->and($sheet->getCell('A3')->getValue())->toBe('Project')
+                ->and($sheet->getCell('B3')->getValue())->toBe('Council meeting')
+                ->and($sheet->getCell('A4')->getValue())->toBe('Source')
+                ->and($sheet->getCell('B4')->getValue())->toBe('Current transcript')
+                ->and($sheet->getCell('A5')->getValue())->toBe('Summary')
+                ->and($summaryValue->getPlainText())->toContain('• Approved the request')
+                ->and($sheet->getStyle('A1')->getFont()->getColor()->getRGB())->toBe('7C3AED')
+                ->and($sheet->getStyle('A3')->getFill()->getStartColor()->getRGB())->toBe('312E81')
+                ->and($sheet->getStyle('B4')->getFill()->getStartColor()->getRGB())->toBe('F8FAFC');
+
+            $workbook->disconnectWorksheets();
+        }
+    } finally {
+        File::delete($files);
     }
-
-    $xlsx = $exports->export($transcript, 'xlsx', 'summary', 'cleaned');
-    $workbook = IOFactory::load($xlsx['path']);
-    $sheet = $workbook->getActiveSheet();
-
-    expect($sheet->getCell('A1')->getValue())->toBe('Council meeting - Summary')
-        ->and($sheet->getCell('A3')->getValue())->toBe('Project')
-        ->and($sheet->getCell('B3')->getValue())->toBe('Council meeting')
-        ->and($sheet->getCell('A4')->getValue())->toBe('Source')
-        ->and($sheet->getCell('B4')->getValue())->toBe('Cleaned transcript')
-        ->and($sheet->getCell('A6')->getValue())->toBe('Summary')
-        ->and($sheet->getCell('B6')->getValue())->toContain('- Approved the request');
-
-    $workbook->disconnectWorksheets();
-    File::delete($xlsx['path']);
 });
 
 test('excel exports report missing php spreadsheet extensions clearly', function () {

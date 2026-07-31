@@ -63,6 +63,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('workspace/{project}/chunk', [TranscriptionController::class, 'chunk'])->middleware('can.transcribe')->name('workspace.chunk');
     Route::post('workspace/{project}/transcripts/{transcript}/cancel', [TranscriptionController::class, 'cancel'])->name('workspace.transcripts.cancel');
     Route::post('workspace/{project}/transcripts/{transcript}/polish', [TranscriptActionController::class, 'polish'])->name('workspace.transcripts.polish');
+    Route::post('workspace/{project}/transcripts/{transcript}/polish/undo', [TranscriptActionController::class, 'undoPolish'])->name('workspace.transcripts.polish.undo');
     Route::post('workspace/{project}/transcripts/{transcript}/summarize', [TranscriptActionController::class, 'summarize'])->name('workspace.transcripts.summarize');
     Route::get('workspace/{project}/transcripts/{transcript}/export', [TranscriptActionController::class, 'export'])->name('workspace.transcripts.export');
 

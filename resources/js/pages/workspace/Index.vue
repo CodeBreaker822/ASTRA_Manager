@@ -74,6 +74,17 @@ const transcriptDisplayItems = computed(
 
 const transcriptRows = computed<TranscriptRow[]>(() =>
     transcriptDisplayItems.value.flatMap((transcript) => {
+        if (transcript.cleaned_text?.trim()) {
+            return [
+                {
+                    id: `${transcript.id}-polished`,
+                    range: transcriptRangeLabel(transcript),
+                    text: transcript.cleaned_text,
+                    transcript,
+                },
+            ];
+        }
+
         if (transcript.sections.length > 0) {
             return transcript.sections.map((section) => ({
                 id: `${transcript.id}-${section.id}`,
@@ -329,6 +340,20 @@ const sectionRangeLabel = (section: TranscriptSection) => {
     }
 
     return `${formatTranscriptTime(section.started_at_ms)}-${formatTranscriptTime(section.ended_at_ms)}`;
+};
+
+const transcriptRangeLabel = (transcript: Transcript) => {
+    const first = transcript.sections[0];
+    const last = transcript.sections.at(-1);
+
+    if (!first || !last) {
+        return '';
+    }
+
+    return sectionRangeLabel({
+        ...first,
+        ended_at_ms: last.ended_at_ms,
+    });
 };
 
 watch(

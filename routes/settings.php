@@ -31,10 +31,3 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('settings/billing/success', [BillingController::class, 'success'])->name('billing.success');
     Route::get('settings/billing/cancel', [BillingController::class, 'cancel'])->name('billing.cancel');
 });
-
-Route::get('.well-known/passkey-endpoints', function () {
-    return response()->json([
-        'enroll' => route('security.edit'),
-        'manage' => route('security.edit'),
-    ]);
-})->name('well-known.passkeys');

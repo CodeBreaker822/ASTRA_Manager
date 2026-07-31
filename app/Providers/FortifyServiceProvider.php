@@ -2,8 +2,10 @@
 
 namespace App\Providers;
 
+use App\Actions\Fortify\AuthenticateUser;
 use App\Actions\Fortify\CreateNewUser;
 use App\Actions\Fortify\ResetUserPassword;
+use App\Models\User;
 use App\Services\DashboardAccessService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -53,6 +55,19 @@ class FortifyServiceProvider extends ServiceProvider
      */
     private function configureActions(): void
     {
+        Fortify::authenticateUsing(function (Request $request): ?User {
+            $user = app(AuthenticateUser::class)->authenticate(
+                (string) $request->input(Fortify::username()),
+                (string) $request->input('password'),
+            );
+
+            if ($user && in_array($user->user_status, ['banned', 'deactivated'], true)) {
+                return null;
+            }
+
+            return $user;
+        });
+
         Fortify::resetUserPasswordsUsing(ResetUserPassword::class);
         Fortify::createUsersUsing(CreateNewUser::class);
     }
@@ -137,12 +152,6 @@ class FortifyServiceProvider extends ServiceProvider
             return Limit::perMinute(6)->by((string) $identifier);
         });
 
-        RateLimiter::for('passkeys', function (Request $request) {
-            return Limit::perMinute(10)->by(
-                ($request->input('credential.id') ?: $request->session()->getId())
-                .'|'.$request->ip()
-            );
-        });
     }
 
     private function googleAuthAvailable(): bool

@@ -9,10 +9,9 @@ import {
     X,
 } from '@lucide/vue';
 import { computed, defineAsyncComponent } from 'vue';
+import type { SettingsTab } from '@/composables/useSettingsModal';
 import { useSettingsModal } from '@/composables/useSettingsModal';
 import { logout } from '@/routes';
-import type { SettingsTab } from '@/composables/useSettingsModal';
-import type { Passkey } from '@/types/auth';
 
 const Appearance = defineAsyncComponent(
     () => import('@/pages/settings/Appearance.vue'),
@@ -76,8 +75,6 @@ type SettingsModalProps = {
     };
     security?: {
         canManageTwoFactor?: boolean;
-        canManagePasskeys?: boolean;
-        passkeys?: Passkey[];
         passwordRules: string;
         twoFactorEnabled?: boolean;
         requiresConfirmation?: boolean;

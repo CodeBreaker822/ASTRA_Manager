@@ -1,6 +1,5 @@
 export type WorkspaceMode = 'choose' | 'live' | 'upload';
 export type TranscriptContentSource = 'raw' | 'cleaned' | 'summary';
-export type SummarySource = 'raw' | 'cleaned';
 export type ExportFormat = 'txt' | 'docx' | 'xlsx';
 
 export type Project = {
@@ -33,6 +32,7 @@ export type Transcript = {
     duration_seconds: number;
     raw_text: string | null;
     cleaned_text: string | null;
+    can_undo_polish: boolean;
     summary_text: string | null;
     polish_status: 'idle' | 'processing' | 'complete' | 'failed';
     polish_error_message: string | null;

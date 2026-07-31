@@ -9,19 +9,30 @@ use App\Services\LicenseKeyService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Laravel\Socialite\Facades\Socialite;
+use Laravel\Socialite\Two\InvalidStateException;
 use Symfony\Component\HttpFoundation\RedirectResponse as SymfonyRedirectResponse;
 use Throwable;
 
 class GoogleAuthController extends Controller
 {
-    public function redirect(): RedirectResponse|SymfonyRedirectResponse
+    public function redirect(Request $request): RedirectResponse|SymfonyRedirectResponse
     {
         if (! $this->isConfigured()) {
             return redirect()
                 ->route('login')
                 ->withErrors(['google' => 'Google sign-in is not configured yet.']);
+        }
+
+        $canonicalOrigin = $this->canonicalOrigin();
+
+        if (
+            $canonicalOrigin !== null
+            && strcasecmp($request->getHttpHost(), (string) parse_url($canonicalOrigin, PHP_URL_HOST).$this->canonicalPort($canonicalOrigin)) !== 0
+        ) {
+            return redirect()->away($canonicalOrigin.'/auth/google/redirect');
         }
 
         return Socialite::driver('google')
@@ -42,7 +53,26 @@ class GoogleAuthController extends Controller
 
         try {
             $googleUser = Socialite::driver('google')->user();
-        } catch (Throwable) {
+        } catch (InvalidStateException $exception) {
+            Log::warning('Google OAuth callback state validation failed.', [
+                'exception' => $exception::class,
+                'callback_host' => $request->getHttpHost(),
+                'configured_redirect_host' => parse_url((string) config('services.google.redirect'), PHP_URL_HOST),
+                'session_has_oauth_state' => $request->session()->has('state'),
+            ]);
+
+            return redirect()
+                ->route('login')
+                ->withErrors([
+                    'google' => 'Your Google sign-in session could not be verified. Please start again from the same JERVA address.',
+                ]);
+        } catch (Throwable $exception) {
+            Log::warning('Google OAuth callback could not be completed.', [
+                'exception' => $exception::class,
+                'callback_host' => $request->getHttpHost(),
+                'configured_redirect_host' => parse_url((string) config('services.google.redirect'), PHP_URL_HOST),
+            ]);
+
             return redirect()
                 ->route('login')
                 ->withErrors(['google' => 'Google sign-in could not be completed. Please try again.']);
@@ -68,7 +98,7 @@ class GoogleAuthController extends Controller
 
         $user = User::query()->getConnection()->transaction(function () use ($email, $licenses): User {
             $user = User::query()
-                ->where('email', $email)
+                ->whereRaw('LOWER(email) = ?', [$email])
                 ->lockForUpdate()
                 ->first();
 
@@ -111,5 +141,25 @@ class GoogleAuthController extends Controller
         return filled(config('services.google.client_id'))
             && filled(config('services.google.client_secret'))
             && filled(config('services.google.redirect'));
+    }
+
+    private function canonicalOrigin(): ?string
+    {
+        $redirect = (string) config('services.google.redirect');
+        $scheme = parse_url($redirect, PHP_URL_SCHEME);
+        $host = parse_url($redirect, PHP_URL_HOST);
+
+        if (! is_string($scheme) || ! is_string($host) || $scheme === '' || $host === '') {
+            return null;
+        }
+
+        return $scheme.'://'.$host.$this->canonicalPort($redirect);
+    }
+
+    private function canonicalPort(string $url): string
+    {
+        $port = parse_url($url, PHP_URL_PORT);
+
+        return is_int($port) ? ':'.$port : '';
     }
 }

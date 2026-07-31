@@ -225,8 +225,8 @@ watch(open, (isOpen) => {
                         v-if="transcript?.cleaned_text"
                         class="text-sm text-slate-600"
                     >
-                        Polishing again replaces the current polished
-                        transcript.
+                        Polishing again starts from the version now displayed.
+                        You can undo it afterward.
                     </p>
                 </div>
             </div>

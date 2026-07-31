@@ -9,11 +9,7 @@ import {
     filenameFromDisposition,
     renderSummaryMarkdown,
 } from '@/lib/workspace';
-import type {
-    ExportFormat,
-    SummarySource,
-    Transcript,
-} from '@/types/workspace';
+import type { ExportFormat, Transcript } from '@/types/workspace';
 
 const props = defineProps<{
     projectId: number;
@@ -21,7 +17,6 @@ const props = defineProps<{
     transcript: Transcript | null;
     globallyDisabled: boolean;
     globallyExporting: boolean;
-    summarySource: SummarySource;
 }>();
 
 const emit = defineEmits<{
@@ -30,7 +25,6 @@ const emit = defineEmits<{
     queued: [];
     transcriptUpdated: [transcript: Transcript];
     upgrade: [message: string];
-    'update:summarySource': [source: SummarySource];
 }>();
 
 const toast = useWorkspaceToast();
@@ -38,10 +32,6 @@ const open = ref(false);
 const exportFormat = ref<ExportFormat>('txt');
 const isSubmitting = ref(false);
 const isExporting = ref(false);
-const source = computed({
-    get: () => props.summarySource,
-    set: (value: SummarySource) => emit('update:summarySource', value),
-});
 
 const isSummarizing = computed(
     () => props.transcript?.summary_status === 'processing',
@@ -61,10 +51,6 @@ const summaryReadyForExport = computed(
     () =>
         props.transcript?.summary_status === 'complete' &&
         summaryText.value.length > 0,
-);
-
-const sourceLabel = computed(() =>
-    source.value === 'cleaned' ? 'Cleaned transcript' : 'Raw transcript',
 );
 
 const statusLabel = computed(() => {
@@ -112,7 +98,7 @@ const summarize = async () => {
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': csrfToken(),
                 },
-                body: JSON.stringify({ source: source.value }),
+                body: JSON.stringify({}),
             },
         );
         const payload = (await response.json()) as {
@@ -160,7 +146,6 @@ const exportSummary = async () => {
         const params = new URLSearchParams({
             format: exportFormat.value,
             source: 'summary',
-            summary_source: source.value,
         });
         const response = await fetch(
             `/workspace/${props.projectId}/transcripts/${props.transcript.id}/export?${params.toString()}`,
@@ -281,20 +266,8 @@ const exportSummary = async () => {
                 </header>
 
                 <div
-                    class="flex flex-col gap-3 border-b border-blue-100 bg-blue-50/60 px-5 py-3 sm:flex-row sm:items-center sm:justify-between"
+                    class="flex justify-end border-b border-blue-100 bg-white px-5 py-3"
                 >
-                    <label
-                        class="flex flex-col gap-1 text-sm font-medium text-slate-700 sm:flex-row sm:items-center"
-                    >
-                        <span>Source</span>
-                        <select
-                            v-model="source"
-                            class="h-10 rounded-lg border border-blue-200 bg-white px-3 text-sm font-medium text-slate-800 transition outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                        >
-                            <option value="raw">Raw transcript</option>
-                            <option value="cleaned">Cleaned transcript</option>
-                        </select>
-                    </label>
                     <div
                         class="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700"
                     >
@@ -323,16 +296,12 @@ const exportSummary = async () => {
                     />
                 </div>
 
-                <div class="min-h-[18rem] flex-1 overflow-y-auto px-5 py-5">
+                <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
                     <div
                         v-if="summaryText"
-                        class="rounded-lg border border-blue-100 bg-white px-5 py-4 shadow-sm"
-                    >
-                        <div
-                            class="space-y-1"
-                            v-html="renderSummaryMarkdown(summaryText)"
-                        />
-                    </div>
+                        class="mx-auto max-w-3xl text-sm leading-7 break-words text-black"
+                        v-html="renderSummaryMarkdown(summaryText)"
+                    />
                     <div
                         v-else-if="isSummarizing"
                         class="flex min-h-56 items-center justify-center rounded-lg border border-blue-100 bg-blue-50 px-5 text-center text-sm leading-6 text-blue-900"
@@ -369,11 +338,7 @@ const exportSummary = async () => {
                         @click="summarize"
                     >
                         <Sparkles class="mr-2 size-4" />
-                        {{
-                            summaryText
-                                ? 'Replace summary'
-                                : `Summarize ${sourceLabel}`
-                        }}
+                        {{ summaryText ? 'Replace summary' : 'Summarize' }}
                     </Button>
                 </footer>
             </div>

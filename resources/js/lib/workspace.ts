@@ -23,68 +23,65 @@ const escapeHtml = (value: string) =>
 const renderInlineMarkdown = (value: string) =>
     escapeHtml(value).replace(
         /\*\*(.+?)\*\*/g,
-        '<strong class="font-semibold text-slate-950">$1</strong>',
+        '<strong class="font-semibold text-black">$1</strong>',
     );
 
 export const renderSummaryMarkdown = (value: string) => {
-    const lines = value.split(/\r?\n/);
     const html: string[] = [];
-    let listItems: string[] = [];
+    let listOpen = false;
 
-    const flushList = () => {
-        if (listItems.length === 0) {
-            return;
+    const closeList = () => {
+        if (listOpen) {
+            html.push('</ul>');
+            listOpen = false;
         }
-
-        html.push(
-            `<ul class="my-3 space-y-2 pl-5 text-sm leading-6 text-slate-700">${listItems.join('')}</ul>`,
-        );
-        listItems = [];
     };
 
-    lines.forEach((rawLine) => {
-        const line = rawLine.trim();
+    value
+        .replace(/\r\n?/g, '\n')
+        .split('\n')
+        .forEach((rawLine) => {
+            const line = rawLine.trim();
 
-        if (line === '') {
-            flushList();
+            if (line === '') {
+                closeList();
 
-            return;
-        }
+                return;
+            }
 
-        const heading = line.match(/^(#{1,3})\s+(.+)$/);
+            const heading = line.match(/^(#{1,6})\s+(.+)$/);
 
-        if (heading) {
-            flushList();
-            const level = heading[1].length;
-            const classes =
-                level === 1
-                    ? 'mt-1 text-xl font-semibold text-slate-950'
-                    : 'mt-5 text-base font-semibold text-slate-950';
+            if (heading) {
+                closeList();
+                const level = Math.min(4, Math.max(3, heading[1].length));
 
+                html.push(
+                    `<h${level} class="mt-5 first:mt-0 text-sm font-semibold uppercase text-blue-700">${renderInlineMarkdown(heading[2])}</h${level}>`,
+                );
+
+                return;
+            }
+
+            const bullet = line.match(/^[-*]\s+(.+)$/);
+
+            if (bullet) {
+                if (!listOpen) {
+                    html.push('<ul class="my-3 ml-5 list-disc space-y-2">');
+                    listOpen = true;
+                }
+
+                html.push(`<li>${renderInlineMarkdown(bullet[1])}</li>`);
+
+                return;
+            }
+
+            closeList();
             html.push(
-                `<h${Math.min(level + 1, 4)} class="${classes}">${renderInlineMarkdown(heading[2])}</h${Math.min(level + 1, 4)}>`,
+                `<p class="my-3 first:mt-0 last:mb-0">${renderInlineMarkdown(line)}</p>`,
             );
+        });
 
-            return;
-        }
-
-        const bullet = line.match(/^[-*]\s+(.+)$/);
-
-        if (bullet) {
-            listItems.push(
-                `<li class="list-disc">${renderInlineMarkdown(bullet[1])}</li>`,
-            );
-
-            return;
-        }
-
-        flushList();
-        html.push(
-            `<p class="my-3 text-sm leading-6 text-slate-700">${renderInlineMarkdown(line)}</p>`,
-        );
-    });
-
-    flushList();
+    closeList();
 
     return html.join('');
 };

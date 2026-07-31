@@ -7,6 +7,7 @@ use App\Models\TranscriptSection;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\RichText\RichText;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
@@ -24,10 +25,10 @@ class TranscriptExportService
     /**
      * @return array{path: string, name: string, mime: string}
      */
-    public function export(Transcript $transcript, string $format, string $source, string $summarySource = 'raw'): array
+    public function export(Transcript $transcript, string $format, string $source): array
     {
         if ($source === 'summary') {
-            return $this->summaryExport($transcript, $format, $summarySource);
+            return $this->summaryExport($transcript, $format);
         }
 
         $rows = $this->transcriptRows($transcript, $source);
@@ -412,16 +413,16 @@ class TranscriptExportService
     /**
      * @return array{path: string, name: string, mime: string}
      */
-    private function summaryExport(Transcript $transcript, string $format, string $summarySource): array
+    private function summaryExport(Transcript $transcript, string $format): array
     {
         $text = $this->textFor($transcript, 'summary');
         $baseName = $this->slugify($this->projectTitle($transcript)).'-summary';
         $directory = $this->exportDirectory();
 
         return match ($format) {
-            'txt' => $this->txt($directory, $baseName, $this->summaryTextDocument($transcript, $text, $summarySource)),
-            'docx' => $this->plainDocx($directory, $baseName, $this->summaryTextDocument($transcript, $text, $summarySource)),
-            'xlsx' => $this->summaryXlsx($directory, $baseName, $transcript, $text, $summarySource),
+            'txt' => $this->txt($directory, $baseName, $this->summaryTextDocument($transcript, $text)),
+            'docx' => $this->summaryDocx($directory, $baseName, $transcript, $text),
+            'xlsx' => $this->summaryXlsx($directory, $baseName, $transcript, $text),
             default => throw new \InvalidArgumentException('Unsupported export format.'),
         };
     }
@@ -470,21 +471,30 @@ class TranscriptExportService
     /**
      * @return array{path: string, name: string, mime: string}
      */
-    private function plainDocx(string $directory, string $baseName, string $text): array
-    {
+    private function summaryDocx(
+        string $directory,
+        string $baseName,
+        Transcript $transcript,
+        string $summary,
+    ): array {
         $path = $directory.DIRECTORY_SEPARATOR.$baseName.'.docx';
         $zip = $this->openZip($path);
-        $paragraphs = collect(preg_split("/\R{2,}/", trim($text)) ?: [$text])
-            ->map(fn (string $paragraph): string => $this->wordParagraph(
-                $paragraph,
-                '<w:pPr><w:spacing w:after="160"/></w:pPr>',
-                '<w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:color w:val="111827"/><w:sz w:val="22"/></w:rPr>',
-            ))
-            ->implode('');
+        $projectTitle = $this->projectTitle($transcript);
+        $body = $this->wordParagraph(
+            $projectTitle.' - Summary',
+            '<w:pPr><w:spacing w:after="80"/></w:pPr>',
+            '<w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/><w:color w:val="312E81"/><w:sz w:val="52"/></w:rPr>',
+        );
+        $body .= $this->wordParagraph(
+            'PROJECT: '.$projectTitle.' | SOURCE: Current transcript',
+            '<w:pPr><w:spacing w:after="360"/></w:pPr>',
+            '<w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:color w:val="64748B"/><w:sz w:val="24"/><w:spacing w:val="32"/></w:rPr>',
+        );
+        $body .= $this->summaryWordBody($summary);
 
         $zip->addFromString('[Content_Types].xml', $this->wordContentTypes());
         $zip->addFromString('_rels/.rels', $this->wordPackageRelationships());
-        $zip->addFromString('word/document.xml', $this->wordDocument($paragraphs));
+        $zip->addFromString('word/document.xml', $this->wordDocument($body));
         $zip->close();
 
         return [
@@ -494,7 +504,7 @@ class TranscriptExportService
         ];
     }
 
-    private function summaryTextDocument(Transcript $transcript, string $summary, string $summarySource): string
+    private function summaryTextDocument(Transcript $transcript, string $summary): string
     {
         $projectTitle = $this->projectTitle($transcript);
         $plainSummary = $this->markdownToPlainText($summary);
@@ -502,7 +512,7 @@ class TranscriptExportService
         return trim(implode("\n", [
             $projectTitle.' - Summary',
             'Project: '.$projectTitle,
-            'Source: '.$this->summarySourceLabel($summarySource),
+            'Source: Current transcript',
             '',
             $plainSummary,
         ]));
@@ -511,8 +521,12 @@ class TranscriptExportService
     /**
      * @return array{path: string, name: string, mime: string}
      */
-    private function summaryXlsx(string $directory, string $baseName, Transcript $transcript, string $summary, string $summarySource): array
-    {
+    private function summaryXlsx(
+        string $directory,
+        string $baseName,
+        Transcript $transcript,
+        string $summary,
+    ): array {
         $path = $directory.DIRECTORY_SEPARATOR.$baseName.'.xlsx';
         $projectTitle = $this->projectTitle($transcript);
         $spreadsheet = new Spreadsheet;
@@ -524,17 +538,21 @@ class TranscriptExportService
         $this->setString($sheet, 'A3', 'Project');
         $this->setString($sheet, 'B3', $projectTitle);
         $this->setString($sheet, 'A4', 'Source');
-        $this->setString($sheet, 'B4', $this->summarySourceLabel($summarySource));
-        $this->setString($sheet, 'A6', 'Summary');
-        $this->setString($sheet, 'B6', $this->markdownToPlainText($summary));
+        $this->setString($sheet, 'B4', 'Current transcript');
+        $this->setString($sheet, 'A5', 'Summary');
+        $sheet->setCellValue('B5', $this->summaryRichText($summary));
 
-        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
-        $sheet->getStyle('A3:A6')->getFont()->setBold(true);
-        $sheet->getStyle('A1:B6')->getAlignment()->setVertical(Alignment::VERTICAL_TOP);
-        $sheet->getStyle('B6')->getAlignment()->setWrapText(true);
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(16)->getColor()->setRGB('7C3AED');
+        $sheet->getStyle('A3:A5')->getFont()->setBold(true)->getColor()->setRGB('FFFFFF');
+        $sheet->getStyle('A3:A5')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('312E81');
+        $sheet->getStyle('A3:B5')->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('CBD5E1');
+        $sheet->getStyle('A3:B5')->getAlignment()->setVertical(Alignment::VERTICAL_TOP);
+        $sheet->getStyle('B4')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F8FAFC');
+        $sheet->getStyle('B5')->getAlignment()->setWrapText(true);
         $sheet->getColumnDimension('A')->setWidth(18);
         $sheet->getColumnDimension('B')->setWidth(90);
-        $sheet->getRowDimension(6)->setRowHeight(120);
+        $sheet->getRowDimension(1)->setRowHeight(30);
+        $sheet->getRowDimension(5)->setRowHeight(max(120, min(360, substr_count($summary, "\n") * 18 + 60)));
 
         $this->saveSpreadsheet($spreadsheet, $path);
 
@@ -565,9 +583,205 @@ class TranscriptExportService
         return trim((string) config('app.name', 'JERVA Transcriber')) ?: 'JERVA Transcriber';
     }
 
-    private function summarySourceLabel(string $summarySource): string
+    private function summaryWordBody(string $summary): string
     {
-        return $summarySource === 'cleaned' ? 'Cleaned transcript' : 'Raw transcript';
+        $lines = preg_split("/\R/", trim($summary)) ?: [];
+
+        if ($lines === []) {
+            $lines = ['No summary has been created for this project.'];
+        }
+
+        $body = '';
+        $firstBlock = true;
+
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+
+            if ($trimmed === '') {
+                continue;
+            }
+
+            $topBorder = $firstBlock
+                ? '<w:top w:val="single" w:sz="16" w:space="14" w:color="DDD6FE"/>'
+                : '';
+            $firstBlock = false;
+
+            if (preg_match('/^(#{1,6})\s+(.+)$/u', $trimmed, $matches) === 1) {
+                $mainHeading = strlen($matches[1]) <= 3;
+                $properties = '<w:pPr>'
+                    .($mainHeading
+                        ? '<w:pBdr>'.$topBorder.'<w:bottom w:val="single" w:sz="4" w:space="4" w:color="DDD6FE"/></w:pBdr><w:spacing w:before="320" w:after="160"/>'
+                        : ($topBorder !== '' ? '<w:pBdr>'.$topBorder.'</w:pBdr>' : '').'<w:spacing w:before="240" w:after="120"/>')
+                    .'</w:pPr>';
+
+                $body .= $this->summaryWordParagraph(
+                    $matches[2],
+                    $properties,
+                    $mainHeading ? '36' : '30',
+                    $mainHeading ? '312E81' : '4338CA',
+                    true,
+                );
+
+                continue;
+            }
+
+            if (preg_match('/^[-*]\s+(.+)$/u', $trimmed, $matches) === 1) {
+                $body .= $this->summaryWordParagraph(
+                    '• '.$matches[1],
+                    '<w:pPr>'.($topBorder !== '' ? '<w:pBdr>'.$topBorder.'</w:pBdr>' : '').'<w:ind w:left="480" w:hanging="240"/><w:spacing w:after="100" w:line="372" w:lineRule="auto"/></w:pPr>',
+                    '22',
+                    '111827',
+                );
+
+                continue;
+            }
+
+            $body .= $this->summaryWordParagraph(
+                $trimmed,
+                '<w:pPr>'.($topBorder !== '' ? '<w:pBdr>'.$topBorder.'</w:pBdr>' : '').'<w:spacing w:after="180" w:line="372" w:lineRule="auto"/></w:pPr>',
+                '22',
+                '111827',
+            );
+        }
+
+        return $body;
+    }
+
+    private function summaryWordParagraph(
+        string $text,
+        string $paragraphProperties,
+        string $size,
+        string $color,
+        bool $bold = false,
+    ): string {
+        $baseProperties = '<w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>'
+            .($bold ? '<w:b/>' : '')
+            .'<w:color w:val="'.$color.'"/><w:sz w:val="'.$size.'"/></w:rPr>';
+        $boldProperties = '<w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:b/>'
+            .'<w:color w:val="'.$color.'"/><w:sz w:val="'.$size.'"/></w:rPr>';
+
+        return '<w:p>'.$paragraphProperties
+            .$this->summaryWordRuns($text, $baseProperties, $boldProperties)
+            .'</w:p>';
+    }
+
+    private function summaryWordRuns(string $text, string $baseProperties, string $boldProperties): string
+    {
+        $runs = '';
+        $offset = 0;
+
+        while (preg_match('/\*\*(.+?)\*\*/us', $text, $match, PREG_OFFSET_CAPTURE, $offset) === 1) {
+            $matchStart = $match[0][1];
+            $before = substr($text, $offset, $matchStart - $offset);
+
+            if ($before !== '') {
+                $runs .= '<w:r>'.$baseProperties.$this->wordText($before).'</w:r>';
+            }
+
+            $runs .= '<w:r>'.$boldProperties.$this->wordText($match[1][0]).'</w:r>';
+            $offset = $matchStart + strlen($match[0][0]);
+        }
+
+        $after = substr($text, $offset);
+
+        if ($after !== '' || $runs === '') {
+            $runs .= '<w:r>'.$baseProperties.$this->wordText($after).'</w:r>';
+        }
+
+        return $runs;
+    }
+
+    private function summaryRichText(string $summary): RichText
+    {
+        $richText = new RichText;
+        $lines = preg_split("/\R/", trim($summary)) ?: [];
+
+        if ($lines === []) {
+            $lines = ['No summary has been created for this project.'];
+        }
+
+        $written = false;
+
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+
+            if ($trimmed === '') {
+                continue;
+            }
+
+            if ($written) {
+                $richText->createText("\n");
+            }
+            $written = true;
+
+            if (preg_match('/^(#{1,6})\s+(.+)$/u', $trimmed, $matches) === 1) {
+                $mainHeading = strlen($matches[1]) <= 3;
+                $this->appendSummaryRichText(
+                    $richText,
+                    $matches[2],
+                    true,
+                    $mainHeading ? 16 : 13,
+                    $mainHeading ? '312E81' : '4338CA',
+                );
+
+                continue;
+            }
+
+            if (preg_match('/^[-*]\s+(.+)$/u', $trimmed, $matches) === 1) {
+                $richText->createText('• ');
+                $this->appendSummaryRichText($richText, $matches[1]);
+
+                continue;
+            }
+
+            $this->appendSummaryRichText($richText, $trimmed);
+        }
+
+        return $richText;
+    }
+
+    private function appendSummaryRichText(
+        RichText $richText,
+        string $text,
+        bool $bold = false,
+        int $size = 11,
+        string $color = '111827',
+    ): void {
+        $offset = 0;
+
+        while (preg_match('/\*\*(.+?)\*\*/us', $text, $match, PREG_OFFSET_CAPTURE, $offset) === 1) {
+            $matchStart = $match[0][1];
+            $before = substr($text, $offset, $matchStart - $offset);
+
+            if ($before !== '') {
+                $this->appendSummaryRichTextRun($richText, $before, $bold, $size, $color);
+            }
+
+            $this->appendSummaryRichTextRun($richText, $match[1][0], true, $size, $color);
+            $offset = $matchStart + strlen($match[0][0]);
+        }
+
+        $after = substr($text, $offset);
+
+        if ($after !== '' || $offset === 0) {
+            $this->appendSummaryRichTextRun($richText, $after, $bold, $size, $color);
+        }
+    }
+
+    private function appendSummaryRichTextRun(
+        RichText $richText,
+        string $text,
+        bool $bold,
+        int $size,
+        string $color,
+    ): void {
+        $run = $richText->createTextRun($text);
+        $run->getFont()
+            ->setName('Calibri')
+            ->setSize($size)
+            ->setBold($bold)
+            ->getColor()
+            ->setRGB($color);
     }
 
     private function markdownToPlainText(string $value): string

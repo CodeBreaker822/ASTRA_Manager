@@ -177,3 +177,7 @@ users**, or publish the app when production configuration is complete.
 Confirm that the login and callback use the same hostname. Do not start at
 `localhost` and return to `127.0.0.1`, or start at HTTP and return to HTTPS.
 Also verify the production session cookie and proxy HTTPS settings.
+
+JERVA redirects the start of Google sign-in to the hostname configured in
+`GOOGLE_REDIRECT_URI`. Keep `APP_URL`, `GOOGLE_REDIRECT_URI`, and the Google
+Cloud authorized redirect URI on that same hostname. 

@@ -102,8 +102,12 @@ class WebTranscriptProcessor
                 return;
             }
 
+            $history = array_values($lockedTranscript->polish_history ?? []);
+            $history[] = $lockedTranscript->cleaned_text;
+
             $lockedTranscript->forceFill([
                 'cleaned_text' => $cleaned,
+                'polish_history' => $history,
                 'polish_status' => 'complete',
                 'polish_error_message' => null,
             ])->save();
@@ -115,11 +119,40 @@ class WebTranscriptProcessor
         return $cleaned;
     }
 
-    public function summarize(Transcript $transcript, string $source): string
+    public function undoPolish(Transcript $transcript): Transcript
     {
-        $text = $source === 'cleaned'
-            ? trim((string) ($transcript->cleaned_text ?? $transcript->raw_text))
-            : trim((string) $transcript->raw_text);
+        return DB::transaction(function () use ($transcript): Transcript {
+            $lockedTranscript = Transcript::query()
+                ->whereKey($transcript->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($lockedTranscript->polish_status === 'processing') {
+                throw new \RuntimeException('Wait for polishing to finish before undoing it.');
+            }
+
+            if (! filled($lockedTranscript->cleaned_text)) {
+                throw new \RuntimeException('There is no polished transcript to undo.');
+            }
+
+            $history = array_values($lockedTranscript->polish_history ?? []);
+            $previous = $history === [] ? null : array_pop($history);
+
+            $lockedTranscript->forceFill([
+                'cleaned_text' => filled($previous) ? (string) $previous : null,
+                'polish_history' => $history,
+                'polish_status' => filled($previous) ? 'complete' : 'idle',
+                'polish_error_message' => null,
+            ])->save();
+            $this->appendLog($lockedTranscript, 'polish_undone', 'Polish undone.');
+
+            return $lockedTranscript->fresh();
+        });
+    }
+
+    public function summarize(Transcript $transcript): string
+    {
+        $text = $this->sourceText($transcript);
         $user = $transcript->project()->first()?->user()->first();
 
         if (! $user instanceof User) {
@@ -448,7 +481,11 @@ class WebTranscriptProcessor
 
     private function sourceText(Transcript $transcript): string
     {
-        return trim((string) ($transcript->raw_text ?: $transcript->sections()->orderBy('position')->pluck('text')->implode("\n\n")));
+        return trim((string) (
+            $transcript->cleaned_text
+            ?: $transcript->raw_text
+            ?: $transcript->sections()->orderBy('position')->pluck('text')->implode("\n\n")
+        ));
     }
 
     private function recordUsage(Transcript $transcript): void

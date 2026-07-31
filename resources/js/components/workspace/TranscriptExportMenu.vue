@@ -6,7 +6,6 @@ import { useWorkspaceToast } from '@/composables/useWorkspaceToast';
 import { filenameFromDisposition } from '@/lib/workspace';
 import type {
     ExportFormat,
-    SummarySource,
     Transcript,
     TranscriptContentSource,
 } from '@/types/workspace';
@@ -14,7 +13,6 @@ import type {
 const props = defineProps<{
     projectId: number;
     transcript: Transcript | null;
-    summarySource: SummarySource;
     globallyExporting: boolean;
 }>();
 
@@ -67,10 +65,6 @@ const exportTranscript = async (format: ExportFormat) => {
             format,
             source: source.value,
         });
-
-        if (source.value === 'summary') {
-            params.set('summary_source', props.summarySource);
-        }
 
         const response = await fetch(
             `/workspace/${props.projectId}/transcripts/${props.transcript.id}/export?${params.toString()}`,

@@ -17,6 +17,7 @@ use Illuminate\Support\Carbon;
  * @property int $duration_seconds
  * @property string|null $raw_text
  * @property string|null $cleaned_text
+ * @property array<int, string|null>|null $polish_history
  * @property string|null $summary_text
  * @property string|null $audio_path
  * @property array<int, array<string, mixed>>|null $processing_log
@@ -35,6 +36,7 @@ use Illuminate\Support\Carbon;
     'duration_seconds',
     'raw_text',
     'cleaned_text',
+    'polish_history',
     'summary_text',
     'audio_path',
     'processing_log',
@@ -50,6 +52,7 @@ class Transcript extends Model
         return [
             'duration_seconds' => 'integer',
             'processing_log' => 'array',
+            'polish_history' => 'array',
         ];
     }
 

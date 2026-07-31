@@ -4,11 +4,8 @@ import PolishTranscriptDialog from '@/components/workspace/PolishTranscriptDialo
 import ProcessingLogDrawer from '@/components/workspace/ProcessingLogDrawer.vue';
 import SummaryDialog from '@/components/workspace/SummaryDialog.vue';
 import TranscriptExportMenu from '@/components/workspace/TranscriptExportMenu.vue';
-import type {
-    ActiveProject,
-    SummarySource,
-    Transcript,
-} from '@/types/workspace';
+import UndoPolishButton from '@/components/workspace/UndoPolishButton.vue';
+import type { ActiveProject, Transcript } from '@/types/workspace';
 
 defineProps<{
     project: ActiveProject;
@@ -24,7 +21,6 @@ const emit = defineEmits<{
 
 const isActing = ref(false);
 const isExporting = ref(false);
-const summarySource = ref<SummarySource>('raw');
 </script>
 
 <template>
@@ -40,24 +36,29 @@ const summarySource = ref<SummarySource>('raw');
             @transcript-updated="emit('transcriptUpdated', $event)"
             @upgrade="emit('upgrade', $event)"
         />
+        <UndoPolishButton
+            v-if="transcript?.can_undo_polish"
+            :project-id="project.id"
+            :transcript="transcript"
+            :globally-disabled="isActing"
+            @acting="isActing = $event"
+            @transcript-updated="emit('transcriptUpdated', $event)"
+        />
         <SummaryDialog
             :project-id="project.id"
             :project-title="project.title"
             :transcript="transcript"
             :globally-disabled="isActing"
             :globally-exporting="isExporting"
-            :summary-source="summarySource"
             @acting="isActing = $event"
             @exporting="isExporting = $event"
             @queued="emit('queued')"
             @transcript-updated="emit('transcriptUpdated', $event)"
-            @update:summary-source="summarySource = $event"
             @upgrade="emit('upgrade', $event)"
         />
         <TranscriptExportMenu
             :project-id="project.id"
             :transcript="transcript"
-            :summary-source="summarySource"
             :globally-exporting="isExporting"
             @exporting="isExporting = $event"
             @upgrade="emit('upgrade', $event)"

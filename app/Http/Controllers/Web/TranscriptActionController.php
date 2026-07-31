@@ -35,6 +35,10 @@ class TranscriptActionController extends Controller
             return response()->json(['message' => 'No raw transcript is ready to polish yet.'], 422);
         }
 
+        if ($transcript->polish_status === 'processing') {
+            return response()->json(['message' => 'This transcript is already being polished.'], 409);
+        }
+
         $validated = $request->validate([
             'instruction' => ['nullable', 'string', 'max:4000'],
             'preset' => ['nullable', 'string', 'in:english,filipino,grammar,translate_fix,custom'],
@@ -66,6 +70,27 @@ class TranscriptActionController extends Controller
         ], 202);
     }
 
+    public function undoPolish(
+        Request $request,
+        TranscriptProject $project,
+        Transcript $transcript,
+        WebTranscriptProcessor $processor,
+        TranscriptPayloadPresenter $payloads,
+    ): JsonResponse {
+        $this->authorizeTranscript($request, $project, $transcript);
+
+        try {
+            $transcript = $processor->undoPolish($transcript);
+        } catch (\RuntimeException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => 'Polish undone.',
+            'transcript' => $payloads->present($transcript),
+        ]);
+    }
+
     public function summarize(
         Request $request,
         TranscriptProject $project,
@@ -84,12 +109,7 @@ class TranscriptActionController extends Controller
             return response()->json(['message' => 'The transcript could not be summarized.'], 422);
         }
 
-        $validated = $request->validate([
-            'source' => ['nullable', 'string', 'in:raw,cleaned'],
-        ]);
-        $source = (string) ($validated['source'] ?? 'raw');
-
-        if (! $entitlements->canAfford($request->user(), 'summarize', mb_strlen($this->summarySourceText($transcript, $source)))) {
+        if (! $entitlements->canAfford($request->user(), 'summarize', mb_strlen($this->sourceText($transcript)))) {
             return $this->upgradeRequired('Insufficient balance for summarizing. Please add funds to continue.');
         }
 
@@ -98,7 +118,7 @@ class TranscriptActionController extends Controller
             'summary_error_message' => null,
         ])->save();
         $processor->appendLog($transcript, 'summarizing', 'Processing');
-        ProcessWebSummarizeJob::dispatchAfterResponse($transcript->id, (string) ($validated['source'] ?? 'raw'));
+        ProcessWebSummarizeJob::dispatchAfterResponse($transcript->id);
 
         return response()->json([
             'message' => 'Summarizing...',
@@ -118,7 +138,6 @@ class TranscriptActionController extends Controller
         $validated = $request->validate([
             'format' => ['required', 'string', 'in:txt,docx,xlsx'],
             'source' => ['nullable', 'string', 'in:raw,cleaned,summary'],
-            'summary_source' => ['nullable', 'string', 'in:raw,cleaned'],
         ]);
         $format = (string) $validated['format'];
         $source = (string) ($validated['source'] ?? 'raw');
@@ -128,7 +147,7 @@ class TranscriptActionController extends Controller
         }
 
         try {
-            $file = $exports->export($transcript, $format, $source, (string) ($validated['summary_source'] ?? 'raw'));
+            $file = $exports->export($transcript, $format, $source);
         } catch (\RuntimeException $exception) {
             return response()->json(['message' => $exception->getMessage()], 422);
         }
@@ -155,14 +174,11 @@ class TranscriptActionController extends Controller
 
     private function sourceText(Transcript $transcript): string
     {
-        return trim((string) ($transcript->raw_text ?: $transcript->sections()->orderBy('position')->pluck('text')->implode("\n\n")));
-    }
-
-    private function summarySourceText(Transcript $transcript, string $source): string
-    {
-        return $source === 'cleaned'
-            ? trim((string) ($transcript->cleaned_text ?? $transcript->raw_text))
-            : trim((string) $transcript->raw_text);
+        return trim((string) (
+            $transcript->cleaned_text
+            ?: $transcript->raw_text
+            ?: $transcript->sections()->orderBy('position')->pluck('text')->implode("\n\n")
+        ));
     }
 
     private function polishInstruction(string $preset, string $custom): string

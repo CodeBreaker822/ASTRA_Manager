@@ -20,10 +20,7 @@ class ProcessWebSummarizeJob implements ShouldQueue
 
     public int $timeout = 0;
 
-    public function __construct(
-        public int $transcriptId,
-        public string $source,
-    ) {}
+    public function __construct(public int $transcriptId) {}
 
     public function handle(WebTranscriptProcessor $processor): void
     {
@@ -33,7 +30,7 @@ class ProcessWebSummarizeJob implements ShouldQueue
             return;
         }
 
-        $processor->summarize($transcript, $this->source);
+        $processor->summarize($transcript);
     }
 
     public function failed(): void

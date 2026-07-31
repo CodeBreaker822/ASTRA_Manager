@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Actions\Fortify\AuthenticateUser;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\EntitlementService;
@@ -9,14 +10,17 @@ use App\Services\LicenseKeyService;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    public function login(Request $request, LicenseKeyService $licenses, EntitlementService $entitlements): JsonResponse
-    {
+    public function login(
+        Request $request,
+        AuthenticateUser $authenticate,
+        LicenseKeyService $licenses,
+        EntitlementService $entitlements,
+    ): JsonResponse {
         $validated = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
@@ -24,9 +28,9 @@ class AuthController extends Controller
         ]);
 
         $email = Str::lower((string) $validated['email']);
-        $user = User::query()->where('email', $email)->first();
+        $user = $authenticate->authenticate($email, (string) $validated['password']);
 
-        if (! $user || ! Hash::check((string) $validated['password'], (string) $user->password)) {
+        if (! $user) {
             throw ValidationException::withMessages([
                 'email' => 'These login details do not match our records.',
             ]);

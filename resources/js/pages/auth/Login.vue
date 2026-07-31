@@ -2,7 +2,6 @@
 import { Form, Head, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import InputError from '@/components/InputError.vue';
-import PasskeyVerify from '@/components/PasskeyVerify.vue';
 import PasswordInput from '@/components/PasswordInput.vue';
 import TextLink from '@/components/TextLink.vue';
 import { Button } from '@/components/ui/button';
@@ -63,11 +62,9 @@ const googleError = computed(
         class="my-5 flex items-center gap-3 text-xs text-slate-500"
     >
         <span class="h-px flex-1 bg-slate-200"></span>
-        <span>or use a passkey or password</span>
+        <span>or use your password</span>
         <span class="h-px flex-1 bg-slate-200"></span>
     </div>
-
-    <PasskeyVerify />
 
     <Form
         v-bind="store.form()"
