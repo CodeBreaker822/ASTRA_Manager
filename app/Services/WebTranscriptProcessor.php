@@ -282,7 +282,30 @@ class WebTranscriptProcessor
             'ended_at_ms' => is_numeric($payload['clip_end_ms'] ?? null)
                 ? (int) $payload['clip_end_ms']
                 : null,
+            'speaker_timestamps' => $this->speakerTimestamps($payload),
         ]);
+    }
+
+    /**
+     * Keep only the timestamp fields needed to reproduce the desktop
+     * speaker-turn export instead of storing complete provider payloads.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<int, array{speaker_id: string, text: string}>|null
+     */
+    private function speakerTimestamps(array $payload): ?array
+    {
+        $timestamps = collect(is_array($payload['timestamps'] ?? null) ? $payload['timestamps'] : [])
+            ->filter(fn (mixed $entry): bool => is_array($entry))
+            ->map(fn (array $entry): array => [
+                'speaker_id' => trim((string) ($entry['speaker_id'] ?? $entry['speakerId'] ?? '')),
+                'text' => trim((string) ($entry['text'] ?? '')),
+            ])
+            ->filter(fn (array $entry): bool => $entry['speaker_id'] !== '' && $entry['text'] !== '')
+            ->values()
+            ->all();
+
+        return $timestamps !== [] ? $timestamps : null;
     }
 
     /**

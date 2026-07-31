@@ -1,32 +1,5 @@
 import { computed, onUnmounted, ref } from 'vue';
-
-type Transcript = {
-    id: number;
-    source: string;
-    status: string;
-    duration_seconds: number;
-    raw_text: string | null;
-    cleaned_text: string | null;
-    summary_text: string | null;
-    polish_status: 'idle' | 'processing' | 'complete' | 'failed';
-    polish_error_message: string | null;
-    summary_status: 'idle' | 'processing' | 'complete' | 'failed';
-    summary_error_message: string | null;
-    processing_log: Array<{
-        status: string;
-        message: string;
-        created_at: string;
-        context?: Record<string, unknown>;
-    }>;
-    sections: Array<{
-        id: number;
-        position: number;
-        text: string;
-        cleaned_text: string | null;
-        started_at_ms: number | null;
-        ended_at_ms: number | null;
-    }>;
-};
+import type { Transcript } from '@/types/workspace';
 
 type LiveClip = {
     index: number;
@@ -374,6 +347,8 @@ export const useLiveRecorder = (options: {
         toggle,
     };
 };
+
+export type LiveRecorderController = ReturnType<typeof useLiveRecorder>;
 
 const formatDuration = (ms: number, forceHours = false) => {
     const totalSeconds = Math.max(0, Math.floor(ms / 1000));

@@ -1,32 +1,5 @@
 import { computed, ref } from 'vue';
-
-type Transcript = {
-    id: number;
-    source: string;
-    status: string;
-    duration_seconds: number;
-    raw_text: string | null;
-    cleaned_text: string | null;
-    summary_text: string | null;
-    polish_status: 'idle' | 'processing' | 'complete' | 'failed';
-    polish_error_message: string | null;
-    summary_status: 'idle' | 'processing' | 'complete' | 'failed';
-    summary_error_message: string | null;
-    processing_log: Array<{
-        status: string;
-        message: string;
-        created_at: string;
-        context?: Record<string, unknown>;
-    }>;
-    sections: Array<{
-        id: number;
-        position: number;
-        text: string;
-        cleaned_text: string | null;
-        started_at_ms: number | null;
-        ended_at_ms: number | null;
-    }>;
-};
+import type { Transcript } from '@/types/workspace';
 
 type UploadClip = {
     index: number;
@@ -560,6 +533,8 @@ export const useAudioUpload = (options: {
         syncTranscripts,
     };
 };
+
+export type AudioUploadController = ReturnType<typeof useAudioUpload>;
 
 const parseJson = (value: string): UploadResponse => {
     try {

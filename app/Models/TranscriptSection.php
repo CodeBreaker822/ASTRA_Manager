@@ -15,6 +15,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $cleaned_text
  * @property int|null $started_at_ms
  * @property int|null $ended_at_ms
+ * @property array<int, array<string, mixed>>|null $speaker_timestamps
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -25,6 +26,7 @@ use Illuminate\Support\Carbon;
     'cleaned_text',
     'started_at_ms',
     'ended_at_ms',
+    'speaker_timestamps',
 ])]
 class TranscriptSection extends Model
 {
@@ -34,6 +36,7 @@ class TranscriptSection extends Model
             'position' => 'integer',
             'started_at_ms' => 'integer',
             'ended_at_ms' => 'integer',
+            'speaker_timestamps' => 'array',
         ];
     }
 
