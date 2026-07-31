@@ -1641,26 +1641,22 @@ class TranscriptionController extends Controller
      */
     private function transcribeBatchDurationTooLarge(array $clips): bool
     {
-        $totalDurationMs = 0;
-
         foreach ($clips as $clip) {
             $clipStartMs = $clip['clip_start_ms'] ?? null;
             $clipEndMs = $clip['clip_end_ms'] ?? null;
 
             if (! is_numeric($clipStartMs) || ! is_numeric($clipEndMs)) {
-                return count($clips) > 1;
-            }
-
-            $durationMs = max(0, (int) $clipEndMs - (int) $clipStartMs);
-
-            if ((int) $clipEndMs > self::MAX_TRANSCRIBE_BATCH_DURATION_MS || $durationMs > self::MAX_TRANSCRIBE_BATCH_DURATION_MS) {
                 return true;
             }
 
-            $totalDurationMs += $durationMs;
+            $durationMs = (int) $clipEndMs - (int) $clipStartMs;
+
+            if ($durationMs <= 0 || $durationMs > self::MAX_TRANSCRIBE_BATCH_DURATION_MS) {
+                return true;
+            }
         }
 
-        return $totalDurationMs > self::MAX_TRANSCRIBE_BATCH_DURATION_MS;
+        return false;
     }
 
     /**
