@@ -625,10 +625,14 @@ class AppSettingsService
             ->first();
 
         if (! $setting instanceof TranscriptionProviderSetting || ! is_array($setting->metadata)) {
+            if ($setting instanceof TranscriptionProviderSetting) {
+                return $this->metadataWithDefaults($provider);
+            }
+
             throw new \RuntimeException("Provider [{$provider}] is not configured in API Manager.");
         }
 
-        return $setting->metadata;
+        return $this->metadataWithDefaults($provider, $setting->metadata);
     }
 
     private function safeApiKey(TranscriptionProviderSetting $setting): ?string
@@ -917,6 +921,126 @@ class AppSettingsService
 
     private function metadataWithDefaults(string $providerId, array $metadata = []): array
     {
+        $geminiBaseUrl = rtrim((string) config('services.gemini.base_url'), '/');
+        $groqBaseUrl = rtrim((string) config('services.groq.base_url'), '/');
+        $defaults = match ($providerId) {
+            self::PROVIDER_DEEPGRAM => [
+                'listen_url' => config('services.deepgram.listen_url'),
+                'health_url' => config('services.deepgram.projects_url'),
+                'models_url' => config('services.deepgram.models_url'),
+                'timeout' => config('services.deepgram.timeout', 120),
+            ],
+            self::PROVIDER_ELEVENLABS => [
+                'speech_to_text_url' => config('services.elevenlabs.speech_to_text_url'),
+                'user_url' => config('services.elevenlabs.user_url'),
+                'models_url' => config('services.elevenlabs.models_url'),
+                'timeout' => config('services.elevenlabs.timeout', 120),
+            ],
+            self::PROVIDER_SPEECHMATICS => [
+                'base_url' => config('services.speechmatics.base_url'),
+                'timeout' => config('services.speechmatics.timeout', 120),
+                'poll_interval_ms' => config('services.speechmatics.poll_interval_ms', 1000),
+                'max_wait_seconds' => config('services.speechmatics.max_wait_seconds', 300),
+            ],
+            self::PROVIDER_GROQ_TRANSCRIPTION => [
+                'transcription_url' => config('services.groq.transcription_url'),
+                'models_url' => $groqBaseUrl.'/models',
+                'timeout' => config('services.groq.timeout', 120),
+            ],
+            self::PROVIDER_GLADIA => [
+                'base_url' => config('services.gladia.base_url'),
+                'timeout' => config('services.gladia.timeout', 120),
+                'poll_interval_ms' => config('services.gladia.poll_interval_ms', 1000),
+                'max_wait_seconds' => config('services.gladia.max_wait_seconds', 300),
+            ],
+            self::PROVIDER_ASSEMBLYAI => [
+                'base_url' => config('services.assemblyai.base_url'),
+                'timeout' => config('services.assemblyai.timeout', 120),
+                'poll_interval_ms' => config('services.assemblyai.poll_interval_ms', 1000),
+                'max_wait_seconds' => config('services.assemblyai.max_wait_seconds', 300),
+            ],
+            self::PROVIDER_AZURE_SPEECH => [
+                'fast_transcription_url' => config('services.azure_speech.fast_transcription_url'),
+                'timeout' => config('services.azure_speech.timeout', 180),
+            ],
+            self::PROVIDER_GOOGLE_SPEECH => [
+                'base_url' => config('services.google_speech.base_url'),
+                'token_url' => config('services.google_speech.token_url'),
+                'timeout' => config('services.google_speech.timeout', 180),
+            ],
+            self::PROVIDER_AWS_TRANSCRIBE => [
+                'poll_interval_ms' => config('services.aws_transcribe.poll_interval_ms', 1000),
+                'max_wait_seconds' => config('services.aws_transcribe.max_wait_seconds', 300),
+            ],
+            self::PROVIDER_RUNPOD => [
+                'timeout' => config('services.runpod.timeout', 1500),
+            ],
+            self::PROVIDER_GEMINI => [
+                'endpoint_template' => $geminiBaseUrl.'/models/%s:generateContent',
+                'generate_content_url_template' => $geminiBaseUrl.'/models/%s:generateContent',
+                'models_url' => $geminiBaseUrl.'/models',
+                'timeout' => config('services.gemini.timeout', 120),
+                'max_retries' => config('services.gemini.max_retries', 3),
+            ],
+            self::PROVIDER_GROQ_TEXT_FIXER => [
+                'chat_completions_url' => config('services.groq.chat_completions_url'),
+                'models_url' => $groqBaseUrl.'/models',
+                'timeout' => config('services.groq.timeout', 120),
+                'max_retries' => config('services.groq.max_retries', 3),
+            ],
+            self::PROVIDER_DEEPSEEK => [
+                'chat_completions_url' => config('services.deepseek.chat_completions_url'),
+                'models_url' => config('services.deepseek.models_url'),
+                'timeout' => config('services.deepseek.timeout', 120),
+                'max_retries' => config('services.deepseek.max_retries', 3),
+            ],
+            self::PROVIDER_CEREBRAS => [
+                'chat_completions_url' => config('services.cerebras.chat_completions_url'),
+                'models_url' => config('services.cerebras.models_url'),
+                'timeout' => config('services.cerebras.timeout', 120),
+                'max_retries' => config('services.cerebras.max_retries', 3),
+            ],
+            self::PROVIDER_MISTRAL => [
+                'chat_completions_url' => config('services.mistral.chat_completions_url'),
+                'models_url' => config('services.mistral.models_url'),
+                'timeout' => config('services.mistral.timeout', 120),
+                'max_retries' => config('services.mistral.max_retries', 3),
+            ],
+            self::PROVIDER_OPENROUTER => [
+                'chat_completions_url' => config('services.openrouter.chat_completions_url'),
+                'models_url' => config('services.openrouter.models_url'),
+                'timeout' => config('services.openrouter.timeout', 120),
+                'max_retries' => config('services.openrouter.max_retries', 3),
+            ],
+            self::PROVIDER_CLOUDFLARE => [
+                'account_id' => config('services.cloudflare.account_id'),
+                'timeout' => config('services.cloudflare.timeout', 120),
+                'max_retries' => config('services.cloudflare.max_retries', 3),
+            ],
+            default => [],
+        };
+
+        foreach ($defaults as $key => $value) {
+            if (blank($metadata[$key] ?? null) && filled($value)) {
+                $metadata[$key] = $value;
+            }
+        }
+
+        if ($providerId === self::PROVIDER_CLOUDFLARE) {
+            $accountId = trim((string) ($metadata['account_id'] ?? ''));
+
+            if ($accountId !== '') {
+                $accountUrl = rtrim((string) config('services.cloudflare.base_url'), '/')
+                    .'/'.rawurlencode($accountId);
+                $metadata['chat_completions_url'] = filled($metadata['chat_completions_url'] ?? null)
+                    ? $metadata['chat_completions_url']
+                    : $accountUrl.'/ai/v1/chat/completions';
+                $metadata['models_url'] = filled($metadata['models_url'] ?? null)
+                    ? $metadata['models_url']
+                    : $accountUrl.'/ai/models/search';
+            }
+        }
+
         if ($providerId === self::PROVIDER_RUNPOD) {
             $metadata['endpoint_id'] = trim((string) ($metadata['endpoint_id'] ?? ''));
             $metadata['runsync_url'] = trim((string) ($metadata['runsync_url'] ?? ''));

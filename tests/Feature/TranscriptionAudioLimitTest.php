@@ -69,7 +69,6 @@ it('uses provider priority for every batched clip and wraps fallback attempts', 
         'model' => 'nova-3',
         'is_enabled' => true,
         'sort_order' => 0,
-        'metadata' => audioLimitDeepgramRuntimeMetadata(),
     ]);
     TranscriptionProviderSetting::query()->create([
         'provider' => 'groq_transcription',
