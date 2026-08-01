@@ -260,6 +260,12 @@ export const useAudioUpload = (options: {
                 metaLine.value = 'Queued for server processing';
 
                 if (payload.transcript) {
+                    if (payload.transcript.duration_seconds > 0) {
+                        durationLabel.value = formatDuration(
+                            payload.transcript.duration_seconds,
+                        );
+                    }
+
                     queuedTranscriptIds.value.push(payload.transcript.id);
                     options.onTranscript(payload.transcript);
                 }
@@ -632,4 +638,15 @@ const formatBytes = (bytes: number) => {
     }
 
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const formatDuration = (seconds: number) => {
+    const totalSeconds = Math.max(0, Math.round(seconds));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const rest = String(totalSeconds % 60).padStart(2, '0');
+
+    return hours > 0
+        ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}`
+        : `${minutes}:${rest}`;
 };

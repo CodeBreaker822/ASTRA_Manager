@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Exceptions\InsufficientWalletBalanceException;
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessAsyncTranscriptionJob;
 use App\Models\API;
 use App\Models\ApiTranscriptionJob;
 use App\Models\User;
@@ -244,6 +245,7 @@ class TranscriptionController extends Controller
             'job_id' => $transcriptionJob->id,
             'status' => $transcriptionJob->status,
             'status_code' => $transcriptionJob->status_code,
+            'progress' => $this->asyncTranscriptionProgress($transcriptionJob),
             'created_at' => $transcriptionJob->created_at?->toISOString(),
             'started_at' => $transcriptionJob->started_at?->toISOString(),
             'finished_at' => $transcriptionJob->finished_at?->toISOString(),
@@ -260,6 +262,26 @@ class TranscriptionController extends Controller
         return response()->json($payload, $transcriptionJob->status === 'failed'
             ? max(400, (int) ($transcriptionJob->status_code ?: 500))
             : 200);
+    }
+
+    /**
+     * @return array{processed_clips: int, total_clips: int, percentage: int}
+     */
+    private function asyncTranscriptionProgress(ApiTranscriptionJob $job): array
+    {
+        $requestPayload = is_array($job->request_payload) ? $job->request_payload : [];
+        $totalClips = (int) ($job->total_clips ?: count(
+            array_filter($requestPayload['clips'] ?? [], 'is_array')
+        ));
+        $processedClips = min(max(0, (int) $job->processed_clips), max(0, $totalClips));
+
+        return [
+            'processed_clips' => $processedClips,
+            'total_clips' => $totalClips,
+            'percentage' => $totalClips > 0
+                ? (int) floor(($processedClips / $totalClips) * 100)
+                : 0,
+        ];
     }
 
     public function polish(Request $request, AppSettingsService $settings): JsonResponse
@@ -913,8 +935,15 @@ class TranscriptionController extends Controller
                 'request_payload' => $requestPayload,
                 'billing_feature' => $billingFeature,
                 'billing_seconds' => $billingSeconds,
+                'total_clips' => count($storedClips),
+                'processed_clips' => 0,
                 'started_at' => $status === 'processing' ? now() : null,
             ]);
+
+            // Local provider work must run in a queue worker, not while a client polls status.
+            if (in_array($requestPayload['mode'], ['queue', 'provider_fallback'], true)) {
+                ProcessAsyncTranscriptionJob::dispatch($transcriptionJob->id);
+            }
 
             $response = response()->json([
                 'job_id' => $transcriptionJob->id,
@@ -951,7 +980,7 @@ class TranscriptionController extends Controller
     {
         $claimed = ApiTranscriptionJob::query()
             ->whereKey($job->id)
-            ->where('status', 'queued')
+            ->whereIn('status', ['queued', 'processing'])
             ->update([
                 'status' => 'processing',
                 'started_at' => $job->started_at ?: now(),
@@ -980,13 +1009,22 @@ class TranscriptionController extends Controller
         }
 
         $clips = $this->storedClipsWithAudio($payload['clips'] ?? []);
+        $settings = app(AppSettingsService::class);
+        $providers = ($payload['mode'] ?? null) === 'provider_fallback'
+            ? array_values(array_filter(
+                $settings->orderedConnectedProviders('transcriber'),
+                fn (array $provider): bool => ($provider['provider'] ?? null) !== AppSettingsService::PROVIDER_RUNPOD,
+            ))
+            : null;
 
         $request = Request::create('/api/transcribe/jobs/'.$job->id, 'POST');
-        $response = $this->transcribeQueuedClips(
+        $response = $this->transcribeQueuedClipsWithProgress(
             $clips,
-            app(AppSettingsService::class),
+            $job,
+            $settings,
             $request,
             $license,
+            $providers,
         );
         $responsePayload = json_decode((string) $response->getContent(), true);
         $responsePayload = is_array($responsePayload) ? $responsePayload : [];
@@ -1062,21 +1100,12 @@ class TranscriptionController extends Controller
     {
         $payload = is_array($job->request_payload) ? $job->request_payload : [];
 
+        // Local provider work is handled by a background worker; polling must stay read-only.
+        if (in_array($payload['mode'] ?? null, ['queue', 'provider_fallback'], true)) {
+            return;
+        }
+
         if (($payload['mode'] ?? null) !== 'runpod_async') {
-            if (($payload['mode'] ?? null) === 'queue' && $job->status === 'queued') {
-                $this->processAsyncTranscriptionJob($job);
-            }
-
-            if (($payload['mode'] ?? null) === 'provider_fallback') {
-                $this->completeAsyncTranscriptionWithFallback(
-                    $job,
-                    $payload,
-                    $request,
-                    $license,
-                    new \RuntimeException((string) ($payload['initial_error'] ?? ServiceUserMessage::transcriptionFailed('RunPod'))),
-                );
-            }
-
             return;
         }
 
@@ -1205,57 +1234,30 @@ class TranscriptionController extends Controller
             return;
         }
 
-        try {
-            $clips = $this->storedClipsWithAudio($payload['clips'] ?? []);
-            $response = $this->transcribeQueuedClips($clips, $settings, $request, $license, $providers);
-            $responsePayload = json_decode((string) $response->getContent(), true);
-            $responsePayload = is_array($responsePayload) ? $responsePayload : [];
-            $statusCode = $response->getStatusCode();
+        $job->forceFill([
+            'status' => 'processing',
+            'request_payload' => [
+                ...$payload,
+                'mode' => 'provider_fallback',
+                'initial_error' => $runPodException->getMessage(),
+            ],
+            'error_message' => null,
+            'status_code' => null,
+            'started_at' => $job->started_at ?: now(),
+        ])->save();
 
-            if ($statusCode < 400) {
-                if (! $this->billCompletedAsyncTranscriptionJob($job, $license)) {
-                    return;
-                }
-
-                $attempted = array_values(array_unique([
-                    AppSettingsService::PROVIDER_RUNPOD,
-                    ...array_values(array_filter($responsePayload['attempted_providers'] ?? [], 'is_string')),
-                ]));
-
-                $responsePayload['attempted_providers'] = $attempted;
-                $responsePayload['fallback'] = ['used' => true];
-            }
-
-            $job->forceFill([
-                'status' => $statusCode >= 400 ? 'failed' : 'completed',
-                'result_payload' => $statusCode >= 400 ? null : $responsePayload,
-                'error_message' => $statusCode >= 400
-                    ? (string) ($responsePayload['message'] ?? 'Transcription job failed.')
-                    : null,
-                'status_code' => $statusCode,
-                'finished_at' => now(),
-            ])->save();
-        } catch (Throwable $exception) {
-            report($exception);
-
-            $job->forceFill([
-                'status' => 'failed',
-                'result_payload' => null,
-                'error_message' => $exception->getMessage() ?: 'Transcription job failed.',
-                'status_code' => max(500, (int) $exception->getCode()),
-                'finished_at' => now(),
-            ])->save();
-        } finally {
-            $this->deleteAsyncTranscriptionAudio($payload);
-        }
+        ProcessAsyncTranscriptionJob::dispatch($job->id);
     }
 
     /**
+     * Same as transcribeQueuedClips but updates job progress during processing.
+     *
      * @param  array<int, array<string, mixed>>  $queuedClips
      * @param  array<int, array<string, mixed>>|null  $providersOverride
      */
-    private function transcribeQueuedClips(
+    private function transcribeQueuedClipsWithProgress(
         array $queuedClips,
+        ApiTranscriptionJob $job,
         AppSettingsService $settings,
         Request $request,
         API $license,
@@ -1279,6 +1281,13 @@ class TranscriptionController extends Controller
             $clipTranscripts = $batchResult['clips'];
             $attemptedProviders = $batchResult['attempted_providers'];
             $usedProviders[] = $batchResult['provider']['provider'];
+
+            // Update progress for batch result
+            $clipsProcessed = count($batchResult['clips']);
+            $job->forceFill([
+                'processed_clips' => $clipsProcessed,
+                'last_progress_update' => now(),
+            ])->save();
         }
 
         foreach ($batchResult === null ? $queuedClips : [] as $queueIndex => $clip) {
@@ -1300,6 +1309,13 @@ class TranscriptionController extends Controller
             $attemptedProviders = array_merge($attemptedProviders, $clipResult['attempted_providers']);
             $usedProviders[] = $clipResult['provider']['provider'];
             $clipTranscripts[] = $this->clipTranscript($clip, $clipResult['result'], $clipResult['attempted_providers']);
+
+            // Update progress after each clip
+            $clipsProcessed = count($clipTranscripts);
+            $job->forceFill([
+                'processed_clips' => $clipsProcessed,
+                'last_progress_update' => now(),
+            ])->save();
         }
 
         return response()->json($this->transcriptionPayloadFromClips($clipTranscripts, $attemptedProviders, $usedProviders));

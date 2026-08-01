@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\ProcessAsyncTranscriptionJob;
 use App\Models\API;
 use App\Models\ApiTranscriptionJob;
 use App\Models\TranscriptionProviderSetting;
@@ -11,6 +12,7 @@ use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 
 it('publishes the transcribe batch limit in the license status response', function () {
     $license = API::query()->create([
@@ -612,6 +614,48 @@ it('keeps an accepted runpod async job pending when status polling is temporaril
     expect(ApiTranscriptionJob::query()->find($jobId)?->status)->toBe('processing');
 
     Http::assertNotSent(fn ($request): bool => $request->url() === config('services.groq.transcription_url'));
+});
+
+it('dispatches local async transcription to the queue without processing during status polling', function () {
+    $license = audioLimitAccountLicense();
+
+    TranscriptionProviderSetting::query()->create([
+        'provider' => 'deepgram',
+        'api_key' => 'deepgram-key',
+        'model' => 'nova-3',
+        'is_enabled' => true,
+        'sort_order' => 0,
+        'metadata' => audioLimitDeepgramRuntimeMetadata(),
+    ]);
+
+    Queue::fake();
+    Http::fake();
+
+    $created = $this->withToken($license->app_token)
+        ->post('/api/transcribe', [
+            'audio' => UploadedFile::fake()->createWithContent('queued.wav', 'fake queued audio'),
+            'clip_index' => 0,
+            'clip_start_ms' => 0,
+            'clip_end_ms' => 120000,
+            'response_mode' => 'async',
+        ], ['Accept' => 'application/json'])
+        ->assertAccepted()
+        ->assertJsonPath('status', 'queued');
+
+    $jobId = (string) $created->json('job_id');
+
+    Queue::assertPushed(ProcessAsyncTranscriptionJob::class, fn (ProcessAsyncTranscriptionJob $job): bool => $job->jobId === $jobId);
+
+    $this->withToken($license->app_token)
+        ->getJson('/api/transcribe/jobs/'.$jobId)
+        ->assertOk()
+        ->assertJsonPath('status', 'queued')
+        ->assertJsonPath('progress.processed_clips', 0)
+        ->assertJsonPath('progress.total_clips', 1)
+        ->assertJsonPath('progress.percentage', 0)
+        ->assertJsonMissingPath('result');
+
+    Http::assertNothingSent();
 });
 
 /**
