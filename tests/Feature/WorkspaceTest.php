@@ -230,6 +230,14 @@ test('web upload submits each server audio chunk as its own api job and advances
     }
 });
 
+test('web upload submits the selected source only once when server clip progress expands the display list', function () {
+    $uploadComposable = File::get(resource_path('js/composables/useAudioUpload.ts'));
+
+    expect(substr_count($uploadComposable, 'await postBatch(projectId)'))->toBe(1)
+        ->and($uploadComposable)->not->toContain('index += MAX_BATCH_CLIPS')
+        ->and($uploadComposable)->toContain('if (!projectId || inFlight.value)');
+});
+
 test('chunked web upload rebuilds audio and removes stored audio after completion', function () {
     $preparedClipPath = tempnam(sys_get_temp_dir(), 'workspace-prepared-clip-');
     file_put_contents($preparedClipPath, 'prepared clip bytes');

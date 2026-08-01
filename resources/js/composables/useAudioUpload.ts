@@ -24,7 +24,6 @@ type UploadResponse = {
     upgrade?: boolean;
 };
 
-const MAX_BATCH_CLIPS = 20;
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 const UPLOAD_CHUNK_BYTES = 20 * 1024 * 1024;
 const SERVER_AUDIO_CHUNK_MS = 60 * 1000;
@@ -145,7 +144,12 @@ export const useAudioUpload = (options: {
     };
 
     const start = async () => {
-        if (!selectedFile.value || clips.value.length === 0) {
+        if (
+            !selectedFile.value ||
+            clips.value.length === 0 ||
+            inFlight.value ||
+            hasSession.value
+        ) {
             return;
         }
 
@@ -209,88 +213,86 @@ export const useAudioUpload = (options: {
     const sendUnfinished = async () => {
         const projectId = options.projectId();
 
-        if (!projectId) {
+        if (!projectId || inFlight.value) {
             return;
         }
 
         inFlight.value = true;
 
-        for (
-            let index = 0;
-            index < clips.value.length;
-            index += MAX_BATCH_CLIPS
-        ) {
+        if (pauseRequested.value) {
+            status.value = 'Paused';
+            inFlight.value = false;
+
+            return;
+        }
+
+        const uploadDisplayClips = unfinishedClips();
+
+        if (uploadDisplayClips.length === 0) {
+            inFlight.value = false;
+
+            return;
+        }
+
+        uploadDisplayClips.forEach((clip) => {
+            clip.status = 'Sending';
+            clip.meta = `${formatBytes(selectedFile.value?.size ?? 0)} source`;
+        });
+
+        try {
+            const payload = await postBatch(projectId);
+
+            if (payload.upgrade) {
+                options.onUpgrade(
+                    payload.message ?? 'Audio upload could not be processed.',
+                );
+                markFailed(uploadDisplayClips);
+
+                return;
+            }
+
+            uploadDisplayClips.forEach((clip) => {
+                clip.status = 'Queued';
+                clip.meta = 'Queued for server processing';
+            });
+            status.value = 'Queued';
+            metaLine.value = 'Queued for server processing';
+
+            if (payload.transcript) {
+                if (
+                    !queuedTranscriptIds.value.includes(payload.transcript.id)
+                ) {
+                    queuedTranscriptIds.value.push(payload.transcript.id);
+                }
+
+                syncTranscripts([payload.transcript]);
+                options.onTranscript(payload.transcript);
+            }
+
+            options.onQueued();
+        } catch (error) {
             if (pauseRequested.value) {
+                uploadDisplayClips.forEach((clip) => {
+                    if (clip.status !== 'Complete') {
+                        clip.status = 'Cancelled';
+                        clip.meta = 'Ready to continue';
+                    }
+                });
                 status.value = 'Paused';
                 inFlight.value = false;
+                retryable.value = false;
 
                 return;
             }
 
-            const batch = clips.value
-                .slice(index, index + MAX_BATCH_CLIPS)
-                .filter((clip) => clip.status !== 'Complete');
+            markFailed(uploadDisplayClips);
+            options.onError(
+                error instanceof Error
+                    ? error.message
+                    : 'Audio upload could not be processed.',
+            );
 
-            if (batch.length === 0) {
-                continue;
-            }
-
-            batch.forEach((clip) => {
-                clip.status = 'Sending';
-                clip.meta = `${formatBytes(selectedFile.value?.size ?? 0)} source`;
-            });
-
-            try {
-                const payload = await postBatch(projectId);
-
-                if (payload.upgrade) {
-                    options.onUpgrade(
-                        payload.message ??
-                            'Audio upload could not be processed.',
-                    );
-                    markFailed(batch);
-
-                    return;
-                }
-
-                batch.forEach((clip) => {
-                    clip.status = 'Queued';
-                    clip.meta = 'Queued for server processing';
-                });
-                status.value = 'Queued';
-                metaLine.value = 'Queued for server processing';
-
-                if (payload.transcript) {
-                    queuedTranscriptIds.value.push(payload.transcript.id);
-                    syncTranscripts([payload.transcript]);
-                    options.onTranscript(payload.transcript);
-                }
-
-                options.onQueued();
-            } catch (error) {
-                if (pauseRequested.value) {
-                    batch.forEach((clip) => {
-                        if (clip.status !== 'Complete') {
-                            clip.status = 'Cancelled';
-                            clip.meta = 'Ready to continue';
-                        }
-                    });
-                    status.value = 'Paused';
-                    inFlight.value = false;
-                    retryable.value = false;
-
-                    return;
-                }
-
-                markFailed(batch);
-                options.onError(
-                    error instanceof Error
-                        ? error.message
-                        : 'Audio upload could not be processed.',
-                );
-
-                return;
-            }
+            return;
         }
 
         inFlight.value = false;
