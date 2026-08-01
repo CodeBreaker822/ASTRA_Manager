@@ -140,13 +140,18 @@ class GroqSpeechToTextService
 
         $models = $response->json('data', []);
 
-        return array_values(array_filter(
+        $filtered = array_values(array_filter(
             array_map(
                 fn (mixed $model): string => trim((string) ($model['id'] ?? '')),
                 array_filter($models, 'is_array'),
             ),
-            fn (string $model): bool => $model !== '',
+            fn (string $model): bool => $model !== '' && str_contains($model, 'whisper'),
         ));
+
+        return $filtered !== [] ? $filtered : config('services.groq.transcription_models', [
+            self::MODEL_WHISPER_LARGE_V3,
+            self::MODEL_WHISPER_LARGE_V3_TURBO,
+        ]);
     }
 
     private function payload(array $options): array

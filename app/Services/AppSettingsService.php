@@ -1433,19 +1433,8 @@ class AppSettingsService
                     fn (mixed $model): string => trim((string) $model),
                     $models,
                 ),
-                fn (string $model): bool => $model !== '' && ! str_contains($model, 'prompt-guard'),
+                fn (string $model): bool => $model !== '',
             ));
-
-            usort($models, function (string $a, string $b): int {
-                $aIsLlama = str_contains($a, 'llama');
-                $bIsLlama = str_contains($b, 'llama');
-
-                if ($aIsLlama !== $bIsLlama) {
-                    return $aIsLlama ? -1 : 1;
-                }
-
-                return strcmp($a, $b);
-            });
 
             if ($models === []) {
                 $models = $providerId === self::PROVIDER_GROQ_TRANSCRIPTION

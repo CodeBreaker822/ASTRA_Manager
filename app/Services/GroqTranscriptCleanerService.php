@@ -73,10 +73,15 @@ class GroqTranscriptCleanerService
     {
         $models = $this->fetchAvailableModels();
 
-        return array_map(
-            fn ($model) => $model['id'] ?? '',
-            array_filter($models, fn ($model) => !empty($model['id']))
-        );
+        $filtered = array_values(array_filter(
+            array_map(
+                fn ($model) => trim((string) ($model['id'] ?? '')),
+                array_filter($models, fn ($model) => is_array($model))
+            ),
+            fn (string $model): bool => $model !== '' && ! str_contains($model, 'whisper') && ! str_contains($model, 'safeguard'),
+        ));
+
+        return $filtered !== [] ? $filtered : array_values(array_filter((array) config('services.groq.text_fixer_models', []), 'is_string'));
     }
 
     /**
