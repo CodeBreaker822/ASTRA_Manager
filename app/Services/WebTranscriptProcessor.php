@@ -81,6 +81,41 @@ TEXT;
         }
     }
 
+    /**
+     * Persist completed async batches while the remaining batches continue.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    public function updatePartialTranscription(Transcript $transcript, array $result): void
+    {
+        try {
+            DB::transaction(function () use ($transcript, $result): void {
+                $lockedTranscript = Transcript::query()
+                    ->whereKey($transcript->id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                if ($this->isTerminalStatus($lockedTranscript->status)) {
+                    return;
+                }
+
+                $this->persistTranscriptionResult($lockedTranscript, $result, false);
+
+                if ($lockedTranscript->status !== 'processing') {
+                    $lockedTranscript->forceFill(['status' => 'processing'])->save();
+                }
+            });
+        } catch (Throwable $exception) {
+            Log::error('Web async partial transcription update failed.', [
+                'transcript_id' => $transcript->id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
+            $this->fail($transcript, 'Audio upload could not be processed.');
+        }
+    }
+
     public function failTranscription(Transcript $transcript): void
     {
         $this->fail($transcript, 'Audio upload could not be processed.');
@@ -335,14 +370,14 @@ TEXT;
     /**
      * @param  array<string, mixed>  $result
      */
-    private function persistTranscriptionResult(Transcript $transcript, array $result): void
+    private function persistTranscriptionResult(Transcript $transcript, array $result, bool $updateDuration = true): void
     {
         $text = trim((string) ($result['text'] ?? ''));
         $durationMs = (int) ($result['duration_ms'] ?? 0);
 
         $transcript->forceFill([
             'raw_text' => $text,
-            'duration_seconds' => $durationMs > 0
+            'duration_seconds' => $updateDuration && $durationMs > 0
                 ? (int) ceil($durationMs / 1000)
                 : $transcript->duration_seconds,
         ])->save();

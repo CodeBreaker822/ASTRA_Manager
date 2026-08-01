@@ -137,10 +137,10 @@ class TranscriptionWorkflowService
         $apiJobs = [];
 
         try {
-            foreach ($this->storedClipPayloads($transcript) as $queueIndex => $clip) {
+            foreach ($this->storedClipBatches($transcript) as $queueIndex => $clips) {
                 $payload = $this->transcriptionClient->queue(
                     $request->user(),
-                    [$clip],
+                    $clips,
                     $languageCode,
                     $transcript->source === 'live' ? 'live' : 'upload',
                 );
@@ -150,7 +150,11 @@ class TranscriptionWorkflowService
                     'status_url' => (string) ($payload['status_url'] ?? ''),
                     'status' => (string) ($payload['status'] ?? 'queued'),
                     'queue_index' => $queueIndex,
-                    'clip_index' => $clip['clip_index'] ?? $queueIndex,
+                    'clip_count' => count($clips),
+                    'clip_indexes' => array_map(
+                        fn (array $clip): int => (int) ($clip['clip_index'] ?? 0),
+                        $clips,
+                    ),
                     'result' => null,
                 ];
             }
@@ -228,9 +232,12 @@ class TranscriptionWorkflowService
                 $apiJobs[$pendingIndex]['result'] = $result;
 
                 $this->persistApiJobs($transcript, $apiJobs, 'processing');
+                $combinedResult = $this->combinedApiJobResult($apiJobs);
 
                 if ($this->apiJobsCompleted($apiJobs)) {
-                    $this->processor->completeTranscription($transcript, $this->combinedApiJobResult($apiJobs));
+                    $this->processor->completeTranscription($transcript, $combinedResult);
+                } else {
+                    $this->processor->updatePartialTranscription($transcript, $combinedResult);
                 }
 
                 continue;
@@ -292,6 +299,52 @@ class TranscriptionWorkflowService
     }
 
     /**
+     * @return array<int, array<int, array<string, mixed>>>
+     */
+    private function storedClipBatches(Transcript $transcript): array
+    {
+        $batches = [];
+        $batch = [];
+        $batchDurationMs = 0;
+
+        foreach ($this->storedClipPayloads($transcript) as $clip) {
+            $durationMs = $this->clipDurationMs($clip);
+            $wouldExceedDuration = $batch !== []
+                && ($batchDurationMs + $durationMs) > WebApiTranscriptionClient::MAX_BATCH_DURATION_MS;
+
+            if (count($batch) >= WebApiTranscriptionClient::MAX_BATCH_CLIPS || $wouldExceedDuration) {
+                $batches[] = $batch;
+                $batch = [];
+                $batchDurationMs = 0;
+            }
+
+            $batch[] = $clip;
+            $batchDurationMs += $durationMs;
+        }
+
+        if ($batch !== []) {
+            $batches[] = $batch;
+        }
+
+        return $batches;
+    }
+
+    /**
+     * @param  array<string, mixed>  $clip
+     */
+    private function clipDurationMs(array $clip): int
+    {
+        $startMs = $clip['clip_start_ms'] ?? null;
+        $endMs = $clip['clip_end_ms'] ?? null;
+
+        if (! is_numeric($startMs) || ! is_numeric($endMs)) {
+            return WebApiTranscriptionClient::MAX_BATCH_DURATION_MS;
+        }
+
+        return max(0, (int) $endMs - (int) $startMs);
+    }
+
+    /**
      * @param  array<string, mixed>  $context
      */
     private function appendProcessingLog(Transcript $transcript, string $status, string $message, array $context = []): void
@@ -332,7 +385,8 @@ class TranscriptionWorkflowService
                     'status_url' => (string) ($entry['context']['api_job_status_url'] ?? ''),
                     'status' => $transcript->status,
                     'queue_index' => 0,
-                    'clip_index' => 0,
+                    'clip_count' => 1,
+                    'clip_indexes' => [0],
                     'result' => null,
                 ]];
             }
@@ -419,10 +473,14 @@ class TranscriptionWorkflowService
         $clips = [];
 
         foreach ($apiJobs as $apiJob) {
-            $result = is_array($apiJob['result'] ?? null) ? $apiJob['result'] : [];
+            if (($apiJob['status'] ?? null) !== 'completed' || ! is_array($apiJob['result'] ?? null)) {
+                continue;
+            }
+
+            $result = $apiJob['result'];
             $resultClips = array_values(array_filter($result['clips'] ?? [], 'is_array'));
 
-            if ($resultClips === []) {
+            if ($resultClips === [] && $result !== []) {
                 $resultClips[] = $result;
             }
 

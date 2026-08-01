@@ -136,10 +136,10 @@ test('web upload queues the local async transcribe api job and finalizes from st
     Http::assertSent(fn ($request): bool => str_starts_with($request->url(), config('services.deepgram.listen_url')));
 });
 
-test('web upload submits each server audio chunk as its own api job and advances one job per poll', function () {
+test('web upload submits server audio chunks in batches of twenty and exposes each completed batch', function () {
     $preparedPaths = array_map(
         fn (int $index): string => tap(tempnam(sys_get_temp_dir(), 'workspace-api-clip-'.$index.'-'), fn (string $path) => file_put_contents($path, 'prepared clip '.$index)),
-        range(0, 2),
+        range(0, 20),
     );
 
     $this->mock(WebAudioChunkerService::class, function ($mock) use ($preparedPaths): void {
@@ -175,11 +175,23 @@ test('web upload submits each server audio chunk as its own api job and advances
         'metadata' => deepgramRuntimeMetadata(),
     ]);
 
+    $providerResponses = Http::sequence();
+
+    foreach (range(1, 21) as $position) {
+        $providerResponses->push([
+            'results' => [
+                'channels' => [[
+                    'alternatives' => [[
+                        'transcript' => 'Clip '.$position.'.',
+                        'words' => [],
+                    ]],
+                ]],
+            ],
+        ]);
+    }
+
     Http::fake([
-        config('services.deepgram.listen_url').'*' => Http::sequence()
-            ->push(['results' => ['channels' => [['alternatives' => [['transcript' => 'First clip.', 'words' => []]]]]]])
-            ->push(['results' => ['channels' => [['alternatives' => [['transcript' => 'Second clip.', 'words' => []]]]]]])
-            ->push(['results' => ['channels' => [['alternatives' => [['transcript' => 'Third clip.', 'words' => []]]]]]]),
+        config('services.deepgram.listen_url').'*' => $providerResponses,
     ]);
 
     try {
@@ -191,38 +203,37 @@ test('web upload submits each server audio chunk as its own api job and advances
             ->assertAccepted()
             ->assertJsonPath('transcript.status', 'queued')
             ->assertJsonPath('transcript.transcription_progress.processed_clips', 0)
-            ->assertJsonPath('transcript.transcription_progress.total_clips', 3);
+            ->assertJsonPath('transcript.transcription_progress.total_clips', 21);
 
-        expect(ApiTranscriptionJob::query()->count())->toBe(3);
+        $apiJobs = ApiTranscriptionJob::query()->orderBy('created_at')->get();
 
-        foreach (ApiTranscriptionJob::query()->get() as $apiJob) {
-            expect($apiJob->request_payload['clips'])->toHaveCount(1);
-        }
-
-        $this->actingAs($user)
-            ->getJson(route('workspace.status', $project))
-            ->assertOk()
-            ->assertJsonPath('project.transcripts.0.status', 'processing')
-            ->assertJsonPath('project.transcripts.0.transcription_progress.processed_clips', 1)
-            ->assertJsonPath('project.transcripts.0.transcription_progress.total_clips', 3);
+        expect($apiJobs)->toHaveCount(2)
+            ->and($apiJobs[0]->request_payload['clips'])->toHaveCount(20)
+            ->and($apiJobs[1]->request_payload['clips'])->toHaveCount(1);
 
         $this->actingAs($user)
             ->getJson(route('workspace.status', $project))
             ->assertOk()
             ->assertJsonPath('project.transcripts.0.status', 'processing')
-            ->assertJsonPath('project.transcripts.0.transcription_progress.processed_clips', 2);
+            ->assertJsonPath('project.transcripts.0.transcription_progress.processed_clips', 20)
+            ->assertJsonPath('project.transcripts.0.transcription_progress.total_clips', 21)
+            ->assertJsonPath('project.transcripts.0.raw_text', collect(range(1, 20))->map(fn (int $position): string => 'Clip '.$position.'.')->implode("\n\n"))
+            ->assertJsonPath('project.transcripts.0.sections.0.text', 'Clip 1.')
+            ->assertJsonPath('project.transcripts.0.sections.19.text', 'Clip 20.')
+            ->assertJsonCount(20, 'project.transcripts.0.sections');
 
         $this->actingAs($user)
             ->getJson(route('workspace.status', $project))
             ->assertOk()
             ->assertJsonPath('project.transcripts.0.status', 'completed')
-            ->assertJsonPath('project.transcripts.0.transcription_progress.processed_clips', 3)
+            ->assertJsonPath('project.transcripts.0.transcription_progress.processed_clips', 21)
             ->assertJsonPath('project.transcripts.0.transcription_progress.percentage', 100)
-            ->assertJsonPath('project.transcripts.0.raw_text', "First clip.\n\nSecond clip.\n\nThird clip.")
-            ->assertJsonCount(3, 'project.transcripts.0.sections');
+            ->assertJsonPath('project.transcripts.0.raw_text', collect(range(1, 21))->map(fn (int $position): string => 'Clip '.$position.'.')->implode("\n\n"))
+            ->assertJsonPath('project.transcripts.0.sections.20.text', 'Clip 21.')
+            ->assertJsonCount(21, 'project.transcripts.0.sections');
 
         expect($upload->json('transcript.id'))->not->toBeNull();
-        Http::assertSentCount(3);
+        Http::assertSentCount(21);
     } finally {
         foreach ($preparedPaths as $path) {
             @unlink($path);

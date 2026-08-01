@@ -62,10 +62,15 @@ class TranscriptPayloadPresenter
             }
         }
 
-        $totalClips = count($apiJobs);
-        $processedClips = count(array_filter(
+        $totalClips = array_sum(array_map(
+            fn (array $apiJob): int => max(1, (int) ($apiJob['clip_count'] ?? 1)),
             $apiJobs,
-            fn (array $apiJob): bool => ($apiJob['status'] ?? null) === 'completed',
+        ));
+        $processedClips = array_sum(array_map(
+            fn (array $apiJob): int => ($apiJob['status'] ?? null) === 'completed'
+                ? max(1, (int) ($apiJob['clip_count'] ?? 1))
+                : 0,
+            $apiJobs,
         ));
 
         if ($totalClips === 0 && in_array($transcript->status, ['queued', 'processing', 'completed'], true)) {
