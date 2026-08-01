@@ -136,6 +136,100 @@ test('web upload queues the local async transcribe api job and finalizes from st
     Http::assertSent(fn ($request): bool => str_starts_with($request->url(), config('services.deepgram.listen_url')));
 });
 
+test('web upload submits each server audio chunk as its own api job and advances one job per poll', function () {
+    $preparedPaths = array_map(
+        fn (int $index): string => tap(tempnam(sys_get_temp_dir(), 'workspace-api-clip-'.$index.'-'), fn (string $path) => file_put_contents($path, 'prepared clip '.$index)),
+        range(0, 2),
+    );
+
+    $this->mock(WebAudioChunkerService::class, function ($mock) use ($preparedPaths): void {
+        $mock->shouldReceive('clipsFromUpload')->once()->andReturn([
+            'clips' => array_map(
+                fn (string $path, int $index): array => [
+                    'audio' => new UploadedFile($path, 'clip-'.$index.'.wav', 'audio/wav', null, true),
+                    'clip_index' => $index,
+                    'clip_start_ms' => $index * 2000,
+                    'clip_end_ms' => ($index + 1) * 2000,
+                    'language_code' => null,
+                ],
+                $preparedPaths,
+                array_keys($preparedPaths),
+            ),
+            'cleanup' => null,
+        ]);
+        $mock->shouldReceive('cleanup')->zeroOrMoreTimes();
+    });
+
+    $user = User::factory()->create(['plan' => 'payg']);
+    $project = TranscriptProject::query()->create([
+        'user_id' => $user->id,
+        'title' => 'Multi-job web transcript',
+    ]);
+
+    TranscriptionProviderSetting::query()->create([
+        'provider' => 'deepgram',
+        'api_key' => 'deepgram-key',
+        'model' => 'nova-3',
+        'is_enabled' => true,
+        'sort_order' => 0,
+        'metadata' => deepgramRuntimeMetadata(),
+    ]);
+
+    Http::fake([
+        config('services.deepgram.listen_url').'*' => Http::sequence()
+            ->push(['results' => ['channels' => [['alternatives' => [['transcript' => 'First clip.', 'words' => []]]]]]])
+            ->push(['results' => ['channels' => [['alternatives' => [['transcript' => 'Second clip.', 'words' => []]]]]]])
+            ->push(['results' => ['channels' => [['alternatives' => [['transcript' => 'Third clip.', 'words' => []]]]]]]),
+    ]);
+
+    try {
+        $upload = $this->actingAs($user)
+            ->postJson(route('workspace.upload', $project), [
+                'audio' => UploadedFile::fake()->createWithContent('source.wav', 'source audio'),
+                'server_chunk' => true,
+            ])
+            ->assertAccepted()
+            ->assertJsonPath('transcript.status', 'queued')
+            ->assertJsonPath('transcript.transcription_progress.processed_clips', 0)
+            ->assertJsonPath('transcript.transcription_progress.total_clips', 3);
+
+        expect(ApiTranscriptionJob::query()->count())->toBe(3);
+
+        foreach (ApiTranscriptionJob::query()->get() as $apiJob) {
+            expect($apiJob->request_payload['clips'])->toHaveCount(1);
+        }
+
+        $this->actingAs($user)
+            ->getJson(route('workspace.status', $project))
+            ->assertOk()
+            ->assertJsonPath('project.transcripts.0.status', 'processing')
+            ->assertJsonPath('project.transcripts.0.transcription_progress.processed_clips', 1)
+            ->assertJsonPath('project.transcripts.0.transcription_progress.total_clips', 3);
+
+        $this->actingAs($user)
+            ->getJson(route('workspace.status', $project))
+            ->assertOk()
+            ->assertJsonPath('project.transcripts.0.status', 'processing')
+            ->assertJsonPath('project.transcripts.0.transcription_progress.processed_clips', 2);
+
+        $this->actingAs($user)
+            ->getJson(route('workspace.status', $project))
+            ->assertOk()
+            ->assertJsonPath('project.transcripts.0.status', 'completed')
+            ->assertJsonPath('project.transcripts.0.transcription_progress.processed_clips', 3)
+            ->assertJsonPath('project.transcripts.0.transcription_progress.percentage', 100)
+            ->assertJsonPath('project.transcripts.0.raw_text', "First clip.\n\nSecond clip.\n\nThird clip.")
+            ->assertJsonCount(3, 'project.transcripts.0.sections');
+
+        expect($upload->json('transcript.id'))->not->toBeNull();
+        Http::assertSentCount(3);
+    } finally {
+        foreach ($preparedPaths as $path) {
+            @unlink($path);
+        }
+    }
+});
+
 test('chunked web upload rebuilds audio and removes stored audio after completion', function () {
     $preparedClipPath = tempnam(sys_get_temp_dir(), 'workspace-prepared-clip-');
     file_put_contents($preparedClipPath, 'prepared clip bytes');

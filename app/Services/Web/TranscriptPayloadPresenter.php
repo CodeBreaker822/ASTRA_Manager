@@ -22,6 +22,7 @@ class TranscriptPayloadPresenter
             'source' => $transcript->source,
             'status' => $transcript->status,
             'duration_seconds' => $transcript->duration_seconds,
+            'transcription_progress' => $this->transcriptionProgress($transcript),
             'raw_text' => $transcript->raw_text,
             'cleaned_text' => $transcript->cleaned_text,
             'can_undo_polish' => filled($transcript->cleaned_text),
@@ -41,6 +42,43 @@ class TranscriptPayloadPresenter
                     'ended_at_ms' => $section->ended_at_ms,
                 ])
                 ->all(),
+        ];
+    }
+
+    /**
+     * @return array{processed_clips: int, total_clips: int, percentage: int}
+     */
+    private function transcriptionProgress(Transcript $transcript): array
+    {
+        $apiJobs = [];
+
+        foreach (array_reverse($transcript->processing_log ?? []) as $entry) {
+            $jobs = $entry['context']['api_jobs'] ?? null;
+
+            if (is_array($jobs)) {
+                $apiJobs = array_values(array_filter($jobs, 'is_array'));
+
+                break;
+            }
+        }
+
+        $totalClips = count($apiJobs);
+        $processedClips = count(array_filter(
+            $apiJobs,
+            fn (array $apiJob): bool => ($apiJob['status'] ?? null) === 'completed',
+        ));
+
+        if ($totalClips === 0 && in_array($transcript->status, ['queued', 'processing', 'completed'], true)) {
+            $totalClips = 1;
+            $processedClips = $transcript->status === 'completed' ? 1 : 0;
+        }
+
+        return [
+            'processed_clips' => $processedClips,
+            'total_clips' => $totalClips,
+            'percentage' => $totalClips > 0
+                ? (int) floor(($processedClips / $totalClips) * 100)
+                : 0,
         ];
     }
 

@@ -27,6 +27,7 @@ type UploadResponse = {
 const MAX_BATCH_CLIPS = 20;
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 const UPLOAD_CHUNK_BYTES = 20 * 1024 * 1024;
+const SERVER_AUDIO_CHUNK_MS = 60 * 1000;
 
 export const useAudioUpload = (options: {
     csrfToken: () => string;
@@ -260,13 +261,8 @@ export const useAudioUpload = (options: {
                 metaLine.value = 'Queued for server processing';
 
                 if (payload.transcript) {
-                    if (payload.transcript.duration_seconds > 0) {
-                        durationLabel.value = formatDuration(
-                            payload.transcript.duration_seconds,
-                        );
-                    }
-
                     queuedTranscriptIds.value.push(payload.transcript.id);
+                    syncTranscripts([payload.transcript]);
                     options.onTranscript(payload.transcript);
                 }
 
@@ -340,6 +336,23 @@ export const useAudioUpload = (options: {
             return;
         }
 
+        const totalClips = tracked.reduce(
+            (total, transcript) =>
+                total + transcript.transcription_progress.total_clips,
+            0,
+        );
+        const processedClips = tracked.reduce(
+            (total, transcript) =>
+                total + transcript.transcription_progress.processed_clips,
+            0,
+        );
+        const durationSeconds = tracked.reduce(
+            (total, transcript) => total + transcript.duration_seconds,
+            0,
+        );
+
+        syncServerClips(totalClips, processedClips, durationSeconds);
+
         if (tracked.every((transcript) => transcript.status === 'completed')) {
             finish();
 
@@ -363,15 +376,68 @@ export const useAudioUpload = (options: {
 
         if (tracked.some((transcript) => transcript.status === 'processing')) {
             status.value = 'Processing';
-            metaLine.value = `Processing ${clips.value.length} ${clips.value.length === 1 ? 'clip' : 'clips'}`;
-            clips.value.forEach((clip) => {
+            metaLine.value = `Processing ${processedClips} of ${totalClips} ${totalClips === 1 ? 'clip' : 'clips'}`;
+            clips.value.forEach((clip, index) => {
                 if (
                     !['Failed', 'Cancelled', 'Complete'].includes(clip.status)
                 ) {
-                    clip.status = 'Processing';
-                    clip.meta = 'Server processing';
+                    clip.status =
+                        index === processedClips ? 'Processing' : 'Queued';
+                    clip.meta =
+                        index === processedClips
+                            ? 'Server processing'
+                            : 'Queued for server processing';
                 }
             });
+        }
+    };
+
+    const syncServerClips = (
+        totalClips: number,
+        processedClips: number,
+        durationSeconds: number,
+    ) => {
+        if (totalClips <= 0) {
+            return;
+        }
+
+        const durationMs = Math.max(0, durationSeconds * 1000);
+
+        if (clips.value.length !== totalClips) {
+            clips.value = Array.from(
+                { length: totalClips },
+                (_, index): UploadClip => {
+                    const startMs = index * SERVER_AUDIO_CHUNK_MS;
+                    const endMs = Math.min(
+                        durationMs || startMs + SERVER_AUDIO_CHUNK_MS,
+                        startMs + SERVER_AUDIO_CHUNK_MS,
+                    );
+
+                    return {
+                        index,
+                        startMs,
+                        endMs,
+                        durationMs: Math.max(0, endMs - startMs),
+                        rangeLabel: `${formatDuration(startMs)}-${formatDuration(endMs)}`,
+                        status: index < processedClips ? 'Complete' : 'Queued',
+                        meta:
+                            index < processedClips
+                                ? 'Transcription complete'
+                                : 'Queued for server processing',
+                    };
+                },
+            );
+        } else {
+            clips.value.forEach((clip, index) => {
+                if (index < processedClips) {
+                    clip.status = 'Complete';
+                    clip.meta = 'Transcription complete';
+                }
+            });
+        }
+
+        if (durationSeconds > 0) {
+            durationLabel.value = formatDuration(durationMs);
         }
     };
 
@@ -640,13 +706,13 @@ const formatBytes = (bytes: number) => {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-const formatDuration = (seconds: number) => {
-    const totalSeconds = Math.max(0, Math.round(seconds));
+const formatDuration = (ms: number) => {
+    const totalSeconds = Math.max(0, Math.round(ms / 1000));
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const rest = String(totalSeconds % 60).padStart(2, '0');
+    const seconds = String(totalSeconds % 60).padStart(2, '0');
 
     return hours > 0
-        ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}`
-        : `${minutes}:${rest}`;
+        ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}`
+        : `${minutes}:${seconds}`;
 };

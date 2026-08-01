@@ -7,6 +7,7 @@ export const useTranscriptPolling = (
 ) => {
     const lastUpdated = ref<string | null>(null);
     let pollTimer: number | null = null;
+    let refreshInFlight = false;
 
     const stopPolling = () => {
         if (pollTimer === null) {
@@ -18,10 +19,18 @@ export const useTranscriptPolling = (
     };
 
     const tick = async () => {
+        if (refreshInFlight) {
+            return;
+        }
+
+        refreshInFlight = true;
+
         try {
             await refresh();
         } catch {
             return;
+        } finally {
+            refreshInFlight = false;
         }
 
         lastUpdated.value = new Date().toISOString();

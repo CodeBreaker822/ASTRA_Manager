@@ -134,13 +134,26 @@ class TranscriptionWorkflowService
 
     public function startApiTranscription(Request $request, Transcript $transcript, ?string $languageCode): void
     {
+        $apiJobs = [];
+
         try {
-            $payload = $this->transcriptionClient->queue(
-                $request->user(),
-                $this->storedClipPayloads($transcript),
-                $languageCode,
-                $transcript->source === 'live' ? 'live' : 'upload',
-            );
+            foreach ($this->storedClipPayloads($transcript) as $queueIndex => $clip) {
+                $payload = $this->transcriptionClient->queue(
+                    $request->user(),
+                    [$clip],
+                    $languageCode,
+                    $transcript->source === 'live' ? 'live' : 'upload',
+                );
+
+                $apiJobs[] = [
+                    'job_id' => (string) $payload['job_id'],
+                    'status_url' => (string) ($payload['status_url'] ?? ''),
+                    'status' => (string) ($payload['status'] ?? 'queued'),
+                    'queue_index' => $queueIndex,
+                    'clip_index' => $clip['clip_index'] ?? $queueIndex,
+                    'result' => null,
+                ];
+            }
         } catch (Throwable $exception) {
             Log::error('Web audio async transcription job could not be started.', [
                 'user_id' => $request->user()?->id,
@@ -155,8 +168,7 @@ class TranscriptionWorkflowService
         }
 
         $this->appendProcessingLog($transcript, 'queued', 'Queued', [
-            'api_job_id' => (string) $payload['job_id'],
-            'api_job_status_url' => (string) ($payload['status_url'] ?? ''),
+            'api_jobs' => $apiJobs,
         ]);
     }
 
@@ -165,9 +177,22 @@ class TranscriptionWorkflowService
         $user = $request->user();
 
         foreach ($project->transcripts()->whereIn('status', ['queued', 'processing'])->get() as $transcript) {
-            $apiJobId = $this->apiJobId($transcript);
+            $apiJobs = $this->apiJobs($transcript);
+            $pendingIndex = $this->pendingApiJobIndex($apiJobs);
+
+            if ($pendingIndex === null) {
+                if ($apiJobs !== [] && $this->apiJobsCompleted($apiJobs)) {
+                    $this->processor->completeTranscription($transcript, $this->combinedApiJobResult($apiJobs));
+                }
+
+                continue;
+            }
+
+            $apiJobId = (string) ($apiJobs[$pendingIndex]['job_id'] ?? '');
 
             if ($apiJobId === '') {
+                $this->processor->failTranscription($transcript);
+
                 continue;
             }
 
@@ -187,12 +212,25 @@ class TranscriptionWorkflowService
             }
 
             $status = (string) ($payload['status'] ?? '');
+            $apiJobs[$pendingIndex]['status'] = $status;
 
             if ($status === 'completed') {
                 $result = $payload['result'] ?? [];
 
-                if (is_array($result)) {
-                    $this->processor->completeTranscription($transcript, $result);
+                if (! is_array($result)) {
+                    $apiJobs[$pendingIndex]['status'] = 'failed';
+                    $this->persistApiJobs($transcript, $apiJobs, 'processing');
+                    $this->processor->failTranscription($transcript);
+
+                    continue;
+                }
+
+                $apiJobs[$pendingIndex]['result'] = $result;
+
+                $this->persistApiJobs($transcript, $apiJobs, 'processing');
+
+                if ($this->apiJobsCompleted($apiJobs)) {
+                    $this->processor->completeTranscription($transcript, $this->combinedApiJobResult($apiJobs));
                 }
 
                 continue;
@@ -208,14 +246,17 @@ class TranscriptionWorkflowService
                     'message' => $payload['message'] ?? null,
                 ]);
 
+                $this->persistApiJobs($transcript, $apiJobs, 'processing');
                 $this->processor->failTranscription($transcript);
 
                 continue;
             }
 
-            if ($status === 'processing' && $transcript->status !== 'processing') {
-                $this->processor->appendLog($transcript, 'processing', 'Processing');
-            }
+            $this->persistApiJobs(
+                $transcript,
+                $apiJobs,
+                $status === 'processing' ? 'processing' : $transcript->status,
+            );
         }
     }
 
@@ -269,19 +310,132 @@ class TranscriptionWorkflowService
         ])->save();
     }
 
-    private function apiJobId(Transcript $transcript): string
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function apiJobs(Transcript $transcript): array
     {
         $log = array_reverse($transcript->processing_log ?? []);
 
         foreach ($log as $entry) {
+            $jobs = $entry['context']['api_jobs'] ?? null;
+
+            if (is_array($jobs)) {
+                return array_values(array_filter($jobs, 'is_array'));
+            }
+
             $jobId = $entry['context']['api_job_id'] ?? null;
 
             if (is_string($jobId) && $jobId !== '') {
-                return $jobId;
+                return [[
+                    'job_id' => $jobId,
+                    'status_url' => (string) ($entry['context']['api_job_status_url'] ?? ''),
+                    'status' => $transcript->status,
+                    'queue_index' => 0,
+                    'clip_index' => 0,
+                    'result' => null,
+                ]];
             }
         }
 
-        return '';
+        return [];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $apiJobs
+     */
+    private function pendingApiJobIndex(array $apiJobs): ?int
+    {
+        foreach ($apiJobs as $index => $apiJob) {
+            if (($apiJob['status'] ?? null) !== 'completed') {
+                return $index;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $apiJobs
+     */
+    private function apiJobsCompleted(array $apiJobs): bool
+    {
+        return $apiJobs !== [] && collect($apiJobs)->every(
+            fn (array $apiJob): bool => ($apiJob['status'] ?? null) === 'completed'
+                && is_array($apiJob['result'] ?? null)
+        );
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $apiJobs
+     */
+    private function persistApiJobs(Transcript $transcript, array $apiJobs, string $status): void
+    {
+        $log = $transcript->processing_log ?? [];
+        $apiJobsEntry = null;
+
+        for ($index = count($log) - 1; $index >= 0; $index--) {
+            if (is_array($log[$index]['context']['api_jobs'] ?? null)) {
+                $apiJobsEntry = $index;
+
+                break;
+            }
+        }
+
+        if ($apiJobsEntry === null) {
+            $log[] = [
+                'status' => 'queued',
+                'message' => 'Queued',
+                'context' => ['api_jobs' => $apiJobs],
+                'created_at' => now()->toISOString(),
+            ];
+        } else {
+            $log[$apiJobsEntry]['context']['api_jobs'] = $apiJobs;
+        }
+
+        if ($status === 'processing' && $transcript->status !== 'processing') {
+            $log[] = [
+                'status' => 'processing',
+                'message' => 'Processing',
+                'context' => [],
+                'created_at' => now()->toISOString(),
+            ];
+        }
+
+        $transcript->forceFill([
+            'status' => $status,
+            'processing_log' => $log,
+        ])->save();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $apiJobs
+     * @return array<string, mixed>
+     */
+    private function combinedApiJobResult(array $apiJobs): array
+    {
+        usort($apiJobs, fn (array $left, array $right): int => ((int) ($left['queue_index'] ?? 0)) <=> ((int) ($right['queue_index'] ?? 0)));
+
+        $clips = [];
+
+        foreach ($apiJobs as $apiJob) {
+            $result = is_array($apiJob['result'] ?? null) ? $apiJob['result'] : [];
+            $resultClips = array_values(array_filter($result['clips'] ?? [], 'is_array'));
+
+            if ($resultClips === []) {
+                $resultClips[] = $result;
+            }
+
+            foreach ($resultClips as $clip) {
+                $clips[] = $clip;
+            }
+        }
+
+        return [
+            'text' => collect($clips)->pluck('text')->filter()->implode("\n\n"),
+            'duration_ms' => collect($clips)->sum(fn (array $clip): int => (int) ($clip['duration_ms'] ?? 0)),
+            'clips' => $clips,
+        ];
     }
 
     /**

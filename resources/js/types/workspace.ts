@@ -30,6 +30,11 @@ export type Transcript = {
     source: string;
     status: string;
     duration_seconds: number;
+    transcription_progress: {
+        processed_clips: number;
+        total_clips: number;
+        percentage: number;
+    };
     raw_text: string | null;
     cleaned_text: string | null;
     can_undo_polish: boolean;
