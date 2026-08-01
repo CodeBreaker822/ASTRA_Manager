@@ -65,6 +65,12 @@ class ProviderConnectionService
                 continue;
             }
 
+            if ($provider['provider'] === AppSettingsService::PROVIDER_MISTRAL_TRANSCRIPTION) {
+                $results[$provider['setting_id']] = $this->checkMistralTranscriptionProvider($setting->api_key, $provider['model'], $provider['metadata'] ?? []);
+
+                continue;
+            }
+
             $request = $this->requestFor(
                 $provider['provider'],
                 $provider['model'],
@@ -170,6 +176,7 @@ class ProviderConnectionService
             AppSettingsService::PROVIDER_CEREBRAS => $request + [
                 'url' => $this->metadataString($metadata, 'models_url'),
             ],
+            AppSettingsService::PROVIDER_MISTRAL_TRANSCRIPTION,
             AppSettingsService::PROVIDER_MISTRAL => $request + [
                 'url' => $this->metadataString($metadata, 'models_url'),
             ],
@@ -327,6 +334,58 @@ class ProviderConnectionService
         }
 
         return $this->result('online', 'Online', 'The Groq transcription endpoint accepted the configured model.');
+    }
+
+    private function checkMistralTranscriptionProvider(string $apiKey, string $model, array $metadata): array
+    {
+        $endpoint = $this->metadataString($metadata, 'transcription_url');
+
+        if ($endpoint === '') {
+            return $this->result('offline', 'Configuration required', 'Mistral transcription URL is not configured in API Manager.');
+        }
+
+        $stream = fopen('php://temp', 'w+b');
+
+        if ($stream === false) {
+            return $this->result('offline', 'Check failed', 'The server could not prepare a provider health check.');
+        }
+
+        try {
+            fwrite($stream, $this->wavProbe());
+            rewind($stream);
+
+            $response = Http::withToken(trim($apiKey))
+                ->acceptJson()
+                ->connectTimeout(self::CONNECT_TIMEOUT_SECONDS)
+                ->timeout(self::REQUEST_TIMEOUT_SECONDS)
+                ->attach('file', $stream, 'jerva-health.wav')
+                ->post($endpoint, [
+                    'model' => $model,
+                    'timestamp_granularities[]' => 'segment',
+                ]);
+        } catch (ConnectionException|RequestException) {
+            return $this->result('offline', 'Offline', 'The Mistral transcription endpoint could not be reached.');
+        } finally {
+            fclose($stream);
+        }
+
+        if ($response->status() === 429) {
+            return $this->result('limited', 'Rate limited', 'Mistral is reachable but is currently rate limited or out of quota.');
+        }
+
+        if (in_array($response->status(), [401, 403], true)) {
+            return $this->result('offline', 'Authentication failed', 'The Mistral API key was rejected by the transcription endpoint.');
+        }
+
+        if (in_array($response->status(), [400, 404, 422], true)) {
+            return $this->result('offline', 'Probe rejected', 'Mistral rejected the transcription probe or configured model.');
+        }
+
+        if ($response->failed()) {
+            return $this->result('offline', 'Offline', 'Mistral transcription returned HTTP '.$response->status().'.');
+        }
+
+        return $this->result('online', 'Online', 'The Mistral transcription endpoint accepted the configured model.');
     }
 
     private function runPodEndpointUrl(array $metadata = []): string

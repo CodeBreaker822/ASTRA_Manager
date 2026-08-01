@@ -20,6 +20,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -63,10 +64,25 @@ class APIController extends Controller
             $existingProvider = $settingId
                 ? $providerCatalog->first(fn (array $item): bool => $item['setting_id'] === $settingId && $item['provider'] === $provider)
                 : $providerCatalog->first(fn (array $item): bool => ! $item['configured']
-                    && $item['provider'] === $provider
-                    && in_array($data['model'], $item['models'], true));
+                    && $item['provider'] === $provider);
 
-            if (! $existingProvider || ! in_array($data['model'], $existingProvider['models'], true)) {
+            $availableModels = is_array($existingProvider['models'] ?? null)
+                ? $existingProvider['models']
+                : [];
+
+            if (filled($data['api_key'] ?? null) && $this->supportsCredentialModelDiscovery($provider)) {
+                $discovered = $settings->discoverProviderModels($provider, (string) $data['api_key']);
+
+                if ($discovered['models'] === []) {
+                    throw ValidationException::withMessages([
+                        "providers.$provider.api_key" => 'No compatible models were returned for this API key.',
+                    ]);
+                }
+
+                $availableModels = $discovered['models'];
+            }
+
+            if (! $existingProvider || ! in_array($data['model'], $availableModels, true)) {
                 throw ValidationException::withMessages([
                     "providers.$provider" => 'The selected provider is not available.',
                 ]);
@@ -139,6 +155,37 @@ class APIController extends Controller
             'message' => 'Transcription provider settings saved successfully!',
             'providers' => $settings->providerCards(),
         ]);
+    }
+
+    public function transcriptionProviderModels(Request $request, AppSettingsService $settings): JsonResponse
+    {
+        $validated = $request->validate([
+            'provider' => [
+                'required',
+                'string',
+                Rule::in([
+                    AppSettingsService::PROVIDER_GEMINI,
+                    AppSettingsService::PROVIDER_GROQ_TRANSCRIPTION,
+                    AppSettingsService::PROVIDER_GROQ_TEXT_FIXER,
+                    AppSettingsService::PROVIDER_MISTRAL,
+                    AppSettingsService::PROVIDER_MISTRAL_TRANSCRIPTION,
+                ]),
+            ],
+            'api_key' => ['nullable', 'string', 'max:12000'],
+        ]);
+        $provider = (string) $validated['provider'];
+        $models = $settings->discoverProviderModels(
+            $provider,
+            isset($validated['api_key']) ? (string) $validated['api_key'] : null,
+        );
+
+        if ($models['models'] === []) {
+            throw ValidationException::withMessages([
+                'api_key' => 'No compatible models were returned. Check the API key and provider access.',
+            ]);
+        }
+
+        return response()->json($models);
     }
 
     public function transcriptionProviderHealth(ProviderConnectionService $connections): JsonResponse
@@ -414,5 +461,16 @@ class APIController extends Controller
     private function packageUploadOwnerKey(Request $request): string
     {
         return 'user-'.$request->user()?->id.'-transcriber-package';
+    }
+
+    private function supportsCredentialModelDiscovery(string $provider): bool
+    {
+        return in_array($provider, [
+            AppSettingsService::PROVIDER_GEMINI,
+            AppSettingsService::PROVIDER_GROQ_TRANSCRIPTION,
+            AppSettingsService::PROVIDER_GROQ_TEXT_FIXER,
+            AppSettingsService::PROVIDER_MISTRAL,
+            AppSettingsService::PROVIDER_MISTRAL_TRANSCRIPTION,
+        ], true);
     }
 }

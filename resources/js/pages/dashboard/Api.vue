@@ -5,6 +5,7 @@ import {
     FileText,
     GripVertical,
     Plus,
+    RefreshCw,
     UploadCloud,
     X,
 } from '@lucide/vue';
@@ -120,6 +121,9 @@ const providerMode = ref<'add' | 'edit'>('add');
 const providerCategory = ref<ProviderCategory>('transcriber');
 const selectedProviderKey = ref('');
 const providerSaving = ref(false);
+const providerModelsLoading = ref(false);
+const providerModelsMessage = ref('');
+const providerModelsReady = ref(true);
 const providerForm = reactive({
     api_key: '',
     model: '',
@@ -160,6 +164,14 @@ const providerSections: Array<{
         description: 'Transcript polishing and cleanup providers',
     },
 ];
+
+const credentialModelProviders = new Set([
+    'gemini',
+    'groq_transcription',
+    'groq_text_fixer',
+    'mistral',
+    'mistral_transcription',
+]);
 
 const providerCatalog = computed<Record<string, ProviderCard>>(() =>
     Object.fromEntries(
@@ -370,12 +382,21 @@ function openEditProviderModal(provider: ProviderCard) {
 
 function resetProviderForm(provider: ProviderCard, adding: boolean) {
     providerForm.api_key = '';
-    providerForm.model = provider.model;
+    const requiresInitialDiscovery =
+        supportsModelDiscovery(provider) &&
+        adding &&
+        !provider.has_reusable_api_key;
+    providerForm.model = requiresInitialDiscovery ? '' : provider.model;
     providerForm.is_enabled = adding ? true : provider.is_enabled;
     providerForm.account_id = metadataText(provider, 'account_id');
     providerForm.endpoint_id = metadataText(provider, 'endpoint_id');
     providerForm.runsync_url = metadataText(provider, 'runsync_url');
     providerForm.metadata_json = JSON.stringify(provider.metadata, null, 2);
+    providerModelsLoading.value = false;
+    providerModelsReady.value = !requiresInitialDiscovery;
+    providerModelsMessage.value = requiresInitialDiscovery
+        ? 'Paste the API key, then load every compatible model.'
+        : '';
 }
 
 function metadataText(provider: ProviderCard, key: string): string {
@@ -387,6 +408,94 @@ function metadataText(provider: ProviderCard, key: string): string {
 function selectProvider(key: string) {
     selectedProviderKey.value = key;
     resetProviderForm(providerCatalog.value[key], providerMode.value === 'add');
+}
+
+function supportsModelDiscovery(provider: ProviderCard): boolean {
+    return credentialModelProviders.has(provider.provider);
+}
+
+function handleProviderApiKeyInput() {
+    const provider = selectedProvider.value;
+
+    if (!provider || !supportsModelDiscovery(provider)) {
+        return;
+    }
+
+    if (providerForm.api_key.trim() === '' && provider.has_reusable_api_key) {
+        providerModelsReady.value = true;
+        providerForm.model = provider.model;
+        providerModelsMessage.value = '';
+
+        return;
+    }
+
+    providerModelsReady.value = false;
+    providerForm.model = '';
+    providerModelsMessage.value =
+        'Load every compatible model for this API key.';
+}
+
+async function loadProviderModels() {
+    const provider = selectedProvider.value;
+
+    if (!provider || !supportsModelDiscovery(provider)) {
+        return;
+    }
+
+    const apiKey = providerForm.api_key.trim();
+
+    if (apiKey === '' && !provider.has_reusable_api_key) {
+        providerModelsMessage.value =
+            'Paste the API key before loading models.';
+
+        return;
+    }
+
+    if (providerModelsLoading.value) {
+        return;
+    }
+
+    const integrationKey = provider.integration_key;
+    providerModelsLoading.value = true;
+    providerModelsMessage.value = 'Loading every compatible model…';
+
+    try {
+        const payload = await requestJson<{
+            models: string[];
+            model_labels: Record<string, string>;
+        }>('/dashboard/api/transcription-providers/models', {
+            method: 'POST',
+            body: JSON.stringify({
+                provider: provider.provider,
+                api_key: apiKey,
+            }),
+        });
+        const index = providers.value.findIndex(
+            (item) => item.integration_key === integrationKey,
+        );
+
+        if (index >= 0) {
+            providers.value[index] = {
+                ...providers.value[index],
+                models: payload.models,
+                model_labels: payload.model_labels,
+            };
+        }
+
+        if (!payload.models.includes(providerForm.model)) {
+            providerForm.model = payload.models[0] ?? '';
+        }
+
+        if (selectedProviderKey.value === integrationKey) {
+            providerModelsReady.value = true;
+            providerModelsMessage.value = `${payload.models.length} compatible models loaded.`;
+        }
+    } catch (error) {
+        providerModelsMessage.value = exceptionMessage(error);
+        showNotice(providerModelsMessage.value, 'error');
+    } finally {
+        providerModelsLoading.value = false;
+    }
 }
 
 async function saveProvider() {
@@ -1609,6 +1718,8 @@ function exceptionMessage(error: unknown): string {
                                     providerMode === 'add' &&
                                     !selectedProvider.has_reusable_api_key
                                 "
+                                @input="handleProviderApiKeyInput"
+                                @change="loadProviderModels"
                             />
                             <p
                                 v-if="
@@ -1629,20 +1740,63 @@ function exceptionMessage(error: unknown): string {
                         </div>
 
                         <div v-if="selectedProvider">
-                            <label
-                                for="providerModel"
-                                class="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                            <div
+                                class="flex items-center justify-between gap-3"
                             >
-                                Model
-                            </label>
+                                <label
+                                    for="providerModel"
+                                    class="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                                >
+                                    Model
+                                </label>
+                                <button
+                                    v-if="
+                                        supportsModelDiscovery(selectedProvider)
+                                    "
+                                    type="button"
+                                    class="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-400 dark:hover:text-blue-300"
+                                    :disabled="
+                                        providerModelsLoading ||
+                                        (providerForm.api_key.trim() === '' &&
+                                            !selectedProvider.has_reusable_api_key)
+                                    "
+                                    @click="loadProviderModels"
+                                >
+                                    <RefreshCw
+                                        class="size-3.5"
+                                        :class="{
+                                            'animate-spin':
+                                                providerModelsLoading,
+                                        }"
+                                    />
+                                    {{
+                                        providerModelsLoading
+                                            ? 'Loading models'
+                                            : 'Load all models'
+                                    }}
+                                </button>
+                            </div>
                             <select
                                 id="providerModel"
                                 v-model="providerForm.model"
                                 required
+                                :disabled="
+                                    providerModelsLoading ||
+                                    !providerModelsReady
+                                "
                                 class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
                             >
                                 <option
-                                    v-for="model in selectedProvider.models"
+                                    v-if="!providerModelsReady"
+                                    value=""
+                                    disabled
+                                >
+                                    Load models using API key
+                                </option>
+                                <option
+                                    v-for="model in providerModelsReady
+                                        ? selectedProvider.models
+                                        : []"
                                     :key="model"
                                     :value="model"
                                 >
@@ -1652,6 +1806,12 @@ function exceptionMessage(error: unknown): string {
                                     }}
                                 </option>
                             </select>
+                            <p
+                                v-if="providerModelsMessage"
+                                class="mt-1 text-xs text-gray-500 dark:text-gray-400"
+                            >
+                                {{ providerModelsMessage }}
+                            </p>
                         </div>
 
                         <div v-if="selectedProvider?.requires_account_id">
@@ -1779,7 +1939,11 @@ function exceptionMessage(error: unknown): string {
                         <button
                             type="submit"
                             class="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
-                            :disabled="providerSaving"
+                            :disabled="
+                                providerSaving ||
+                                providerModelsLoading ||
+                                !providerModelsReady
+                            "
                         >
                             {{
                                 providerSaving

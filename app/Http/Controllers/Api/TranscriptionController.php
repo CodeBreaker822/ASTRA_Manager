@@ -22,6 +22,7 @@ use App\Services\GladiaSpeechToTextService;
 use App\Services\GoogleCloudSpeechToTextService;
 use App\Services\GroqSpeechToTextService;
 use App\Services\GroqTranscriptCleanerService;
+use App\Services\MistralSpeechToTextService;
 use App\Services\MistralTranscriptCleanerService;
 use App\Services\OpenAICompatibleTranscriptCleanerService;
 use App\Services\OpenRouterTranscriptCleanerService;
@@ -1364,6 +1365,14 @@ class TranscriptionController extends Controller
                 apiKey: $provider['api_key'],
                 endpoint: $this->providerMetadataString($provider, 'transcription_url'),
                 modelId: $provider['model'],
+                modelsUrl: $this->providerMetadataString($provider, 'models_url'),
+                timeout: $this->providerMetadataInt($provider, 'timeout'),
+            ),
+            AppSettingsService::PROVIDER_MISTRAL_TRANSCRIPTION => new MistralSpeechToTextService(
+                apiKey: $provider['api_key'],
+                endpoint: $this->providerMetadataString($provider, 'transcription_url'),
+                modelId: $provider['model'],
+                modelsUrl: $this->providerMetadataString($provider, 'models_url'),
                 timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_GLADIA => new GladiaSpeechToTextService(
@@ -2076,15 +2085,18 @@ class TranscriptionController extends Controller
     {
         return match ($provider['provider']) {
             AppSettingsService::PROVIDER_GEMINI => new GeminiTranscriptCleanerService(
+                allowedModels: $this->providerModels($provider),
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
                 endpointTemplate: $this->providerMetadataString($provider, 'endpoint_template'),
+                modelsUrl: $this->providerMetadataString($provider, 'models_url'),
                 timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_GROQ_TEXT_FIXER => new GroqTranscriptCleanerService(
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
                 endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                modelsUrl: $this->providerMetadataString($provider, 'models_url'),
                 timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_DEEPSEEK => new DeepSeekTranscriptCleanerService(
@@ -2106,6 +2118,7 @@ class TranscriptionController extends Controller
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
                 endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                modelsUrl: $this->providerMetadataString($provider, 'models_url'),
                 timeout: $this->providerMetadataInt($provider, 'timeout'),
                 maxRetries: $this->providerMetadataInt($provider, 'max_retries'),
             ),

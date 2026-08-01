@@ -142,6 +142,7 @@ return [
     'gemini' => [
         'key' => env('GEMINI_API_KEY'),
         'base_url' => env('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
+        'models_url' => env('GEMINI_MODELS_URL', rtrim(env('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'), '/').'/models'),
         'model' => 'gemini-3.1-flash-lite',
         'models' => ['gemini-3.1-flash-lite'],
         'timeout' => env('GEMINI_TIMEOUT', 120),
@@ -153,6 +154,7 @@ return [
     'groq' => [
         'key' => env('GROQ_API_KEY'),
         'base_url' => env('GROQ_BASE_URL', 'https://api.groq.com/openai/v1'),
+        'models_url' => env('GROQ_MODELS_URL', rtrim(env('GROQ_BASE_URL', 'https://api.groq.com/openai/v1'), '/').'/models'),
         'transcription_url' => env('GROQ_TRANSCRIPTION_URL', rtrim(env('GROQ_BASE_URL', 'https://api.groq.com/openai/v1'), '/').'/audio/transcriptions'),
         'chat_completions_url' => env('GROQ_CHAT_COMPLETIONS_URL', rtrim(env('GROQ_BASE_URL', 'https://api.groq.com/openai/v1'), '/').'/chat/completions'),
         'transcription_model' => 'whisper-large-v3',
@@ -188,10 +190,13 @@ return [
     'mistral' => [
         'key' => env('MISTRAL_API_KEY'),
         'base_url' => env('MISTRAL_BASE_URL', 'https://api.mistral.ai/v1'),
+        'transcription_url' => env('MISTRAL_TRANSCRIPTION_URL', rtrim(env('MISTRAL_BASE_URL', 'https://api.mistral.ai/v1'), '/').'/audio/transcriptions'),
         'chat_completions_url' => env('MISTRAL_CHAT_COMPLETIONS_URL', rtrim(env('MISTRAL_BASE_URL', 'https://api.mistral.ai/v1'), '/').'/chat/completions'),
         'models_url' => env('MISTRAL_MODELS_URL', rtrim(env('MISTRAL_BASE_URL', 'https://api.mistral.ai/v1'), '/').'/models'),
-        'model' => 'mistral-small-2603',
-        'models' => ['mistral-small-2603'],
+        'transcription_model' => 'voxtral-mini-latest',
+        'transcription_models' => ['voxtral-mini-latest'],
+        'text_fixer_model' => 'mistral-small-2603',
+        'text_fixer_models' => ['mistral-small-2603'],
         'timeout' => env('MISTRAL_TIMEOUT', 120),
         'max_retries' => env('MISTRAL_MAX_RETRIES', 3),
     ],

@@ -21,6 +21,7 @@ class GroqSpeechToTextService
         private readonly ?string $apiKey = null,
         private readonly ?string $endpoint = null,
         private readonly ?string $modelId = null,
+        private readonly ?string $modelsUrl = null,
         private readonly ?int $timeout = null,
     ) {}
 
@@ -127,26 +128,16 @@ class GroqSpeechToTextService
 
     public function getAvailableModelIds(): array
     {
-        try {
-            $response = $this->client()
-                ->get(rtrim((string) config('services.groq.base_url'), '/').'/models');
-        } catch (ConnectionException) {
-            return [];
-        }
-
-        if (! $response->successful()) {
-            return [];
-        }
-
-        $models = $response->json('data', []);
-
-        $filtered = array_values(array_filter(
-            array_map(
-                fn (mixed $model): string => trim((string) ($model['id'] ?? '')),
-                array_filter($models, 'is_array'),
-            ),
-            fn (string $model): bool => $model !== '' && str_contains($model, 'whisper'),
+        $apiKey = trim((string) (
+            $this->apiKey
+            ?? app(AppSettingsService::class)->groqTranscriptionApiKey()
+            ?? config('services.groq.key')
         ));
+        $filtered = (new GroqModelCatalogService(
+            apiKey: $apiKey,
+            modelsUrl: $this->modelsUrl,
+            timeout: $this->timeout,
+        ))->transcriptionModelIds();
 
         return $filtered !== [] ? $filtered : config('services.groq.transcription_models', [
             self::MODEL_WHISPER_LARGE_V3,

@@ -478,15 +478,18 @@ TEXT;
     {
         return match ($provider['provider']) {
             AppSettingsService::PROVIDER_GEMINI => new GeminiTranscriptCleanerService(
+                allowedModels: $this->providerModels($provider),
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
                 endpointTemplate: $this->providerMetadataString($provider, 'endpoint_template'),
+                modelsUrl: $this->providerMetadataString($provider, 'models_url'),
                 timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_GROQ_TEXT_FIXER => new GroqTranscriptCleanerService(
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
                 endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                modelsUrl: $this->providerMetadataString($provider, 'models_url'),
                 timeout: $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_DEEPSEEK => new DeepSeekTranscriptCleanerService(
@@ -508,6 +511,7 @@ TEXT;
                 apiKey: $provider['api_key'],
                 model: $provider['model'],
                 endpoint: $this->providerMetadataString($provider, 'chat_completions_url'),
+                modelsUrl: $this->providerMetadataString($provider, 'models_url'),
                 timeout: $this->providerMetadataInt($provider, 'timeout'),
                 maxRetries: $this->providerMetadataInt($provider, 'max_retries'),
             ),

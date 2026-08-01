@@ -7,79 +7,49 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class GroqTranscriptCleanerService
 {
-    private const CACHE_KEY = 'groq:available_models';
-    private const CACHE_TTL = 3600; // 1 hour
-
     public function __construct(
         private readonly ?string $apiKey = null,
         private readonly ?string $model = null,
         private readonly ?string $endpoint = null,
+        private readonly ?string $modelsUrl = null,
         private readonly ?int $timeout = null,
     ) {}
 
     /**
      * Fetch available models from Groq API dynamically
+     *
      * @return array<string, mixed> Array of model objects with id, object, created, owned_by properties
      */
     public function fetchAvailableModels(): array
     {
-        return Cache::remember(self::CACHE_KEY, self::CACHE_TTL, function () {
-            try {
-                $response = $this->client()->get('https://api.groq.com/openai/v1/models');
-
-                if ($response->successful()) {
-                    $models = $response->json('data', []);
-
-                    Log::info('Successfully fetched Groq models', [
-                        'model_count' => count($models),
-                    ]);
-
-                    return $models;
-                }
-
-                Log::error('Failed to fetch Groq models', [
-                    'status' => $response->status(),
-                    'response' => $response->body(),
-                ]);
-
-                throw new GroqTranscriptCleanerException(
-                    ServiceUserMessage::cleanerFailed('Groq'),
-                    $response->status(),
-                );
-            } catch (\Exception $e) {
-                Log::error('Exception while fetching Groq models', [
-                    'error' => $e->getMessage(),
-                ]);
-
-                throw new GroqTranscriptCleanerException(
-                    ServiceUserMessage::cannotReachProvider('Groq'),
-                    0,
-                    $e,
-                );
-            }
-        });
+        return (new GroqModelCatalogService(
+            apiKey: $this->getApiKey(),
+            modelsUrl: $this->modelsUrl,
+            timeout: $this->timeout,
+        ))->fetchModels();
     }
 
     /**
      * Get list of available model IDs
+     *
      * @return array<string> Array of model IDs
      */
     public function getAvailableModelIds(): array
     {
-        $models = $this->fetchAvailableModels();
-
-        $filtered = array_values(array_filter(
-            array_map(
-                fn ($model) => trim((string) ($model['id'] ?? '')),
-                array_filter($models, fn ($model) => is_array($model))
-            ),
-            fn (string $model): bool => $model !== '' && ! str_contains($model, 'whisper') && ! str_contains($model, 'safeguard'),
+        $apiKey = trim((string) (
+            $this->apiKey
+            ?? app(AppSettingsService::class)->groqTextFixerApiKey()
+            ?? config('services.groq.key')
         ));
+        $filtered = (new GroqModelCatalogService(
+            apiKey: $apiKey,
+            modelsUrl: $this->modelsUrl,
+            timeout: $this->timeout,
+        ))->cleanerModelIds();
 
         return $filtered !== [] ? $filtered : array_values(array_filter((array) config('services.groq.text_fixer_models', []), 'is_string'));
     }
@@ -97,7 +67,15 @@ class GroqTranscriptCleanerService
      */
     public function clearModelCache(): void
     {
-        Cache::forget(self::CACHE_KEY);
+        $apiKey = $this->apiKey
+            ?? app(AppSettingsService::class)->groqTextFixerApiKey()
+            ?? config('services.groq.key');
+
+        (new GroqModelCatalogService(
+            apiKey: is_string($apiKey) ? trim($apiKey) : null,
+            modelsUrl: $this->modelsUrl,
+            timeout: $this->timeout,
+        ))->clear();
     }
 
     /**

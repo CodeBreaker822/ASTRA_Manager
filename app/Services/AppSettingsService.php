@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\TranscriptionProviderSetting;
 use Illuminate\Contracts\Encryption\DecryptException;
-use Illuminate\Support\Facades\Log;
 
 class AppSettingsService
 {
@@ -25,6 +24,8 @@ class AppSettingsService
     public const PROVIDER_GEMINI = 'gemini';
 
     public const PROVIDER_GROQ_TRANSCRIPTION = 'groq_transcription';
+
+    public const PROVIDER_MISTRAL_TRANSCRIPTION = 'mistral_transcription';
 
     public const PROVIDER_GLADIA = 'gladia';
 
@@ -153,6 +154,7 @@ class AppSettingsService
                     $capability['accepts_custom_language_code'] = in_array($provider['provider'], [
                         self::PROVIDER_ELEVENLABS,
                         self::PROVIDER_GROQ_TRANSCRIPTION,
+                        self::PROVIDER_MISTRAL_TRANSCRIPTION,
                         self::PROVIDER_GLADIA,
                         self::PROVIDER_ASSEMBLYAI,
                         self::PROVIDER_AZURE_SPEECH,
@@ -245,7 +247,14 @@ class AppSettingsService
             }
 
             $definition = $this->providerDefinitions()[$provider];
-            $model = $this->validModelForDefinition($definition, $data['model'] ?? null);
+            $apiKey = trim((string) ($data['api_key'] ?? ''));
+            $candidateModel = trim((string) ($data['model'] ?? ''));
+            $discoveredModels = $apiKey !== ''
+                ? $this->discoverProviderModels($provider, $apiKey)['models']
+                : [];
+            $model = in_array($candidateModel, $discoveredModels, true)
+                ? $candidateModel
+                : $this->validModelForDefinition($definition, $candidateModel);
 
             $values = [
                 'model' => $model,
@@ -262,8 +271,6 @@ class AppSettingsService
             if (! $setting->exists) {
                 $values['sort_order'] = $this->nextSortOrder($definition['category']);
             }
-
-            $apiKey = trim((string) ($data['api_key'] ?? ''));
 
             if ($apiKey !== '') {
                 $values['api_key'] = $apiKey;
@@ -377,7 +384,10 @@ class AppSettingsService
 
     public function geminiModel(): string
     {
-        return self::GEMINI_MODEL_FLASH_LITE;
+        return $this->providerDefinitionModel(
+            self::PROVIDER_GEMINI,
+            self::GEMINI_MODEL_FLASH_LITE,
+        );
     }
 
     public function geminiTimeout(): int
@@ -413,7 +423,7 @@ class AppSettingsService
         $definition = $this->providerDefinitions()[self::PROVIDER_GROQ_TEXT_FIXER];
 
         // Use empty string as fallback if no models are available
-        $fallback = !empty($definition['models']) ? $definition['models'][0] : '';
+        $fallback = ! empty($definition['models']) ? $definition['models'][0] : '';
 
         return $this->validModelForDefinition(
             $definition,
@@ -429,6 +439,19 @@ class AppSettingsService
     public function groqMaxRetries(): int
     {
         return $this->providerMetadataInt(self::PROVIDER_GROQ_TEXT_FIXER, 'max_retries');
+    }
+
+    public function mistralTranscriptionApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_MISTRAL_TRANSCRIPTION);
+    }
+
+    public function mistralTranscriptionModel(): string
+    {
+        return $this->providerDefinitionModel(
+            self::PROVIDER_MISTRAL_TRANSCRIPTION,
+            MistralSpeechToTextService::MODEL_VOXTRAL_MINI_LATEST,
+        );
     }
 
     public function deepSeekApiKey(): ?string
@@ -534,6 +557,71 @@ class AppSettingsService
         return $this->providerMetadataInt(self::PROVIDER_CLOUDFLARE, 'max_retries');
     }
 
+    /**
+     * Fetch every model exposed to a credential that matches the provider's
+     * actual transcription or text-generation API capability.
+     *
+     * @return array{models: array<int, string>, model_labels: array<string, string>}
+     */
+    public function discoverProviderModels(string $provider, ?string $apiKey = null): array
+    {
+        $apiKey = trim((string) $apiKey);
+        $apiKey = $apiKey !== '' ? $apiKey : match ($provider) {
+            self::PROVIDER_GEMINI => trim((string) $this->geminiApiKey()),
+            self::PROVIDER_GROQ_TRANSCRIPTION => trim((string) $this->groqTranscriptionApiKey()),
+            self::PROVIDER_GROQ_TEXT_FIXER => trim((string) $this->groqTextFixerApiKey()),
+            self::PROVIDER_MISTRAL => trim((string) $this->mistralApiKey()),
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => trim((string) $this->mistralTranscriptionApiKey()),
+            default => '',
+        };
+
+        if ($apiKey === '') {
+            return ['models' => [], 'model_labels' => []];
+        }
+
+        $models = match ($provider) {
+            self::PROVIDER_GEMINI => (new GeminiModelCatalogService(
+                apiKey: $apiKey,
+                modelsUrl: config('services.gemini.models_url'),
+                timeout: (int) config('services.gemini.timeout', 120),
+            ))->cleanerModelIds(),
+            self::PROVIDER_GROQ_TRANSCRIPTION => (new GroqModelCatalogService(
+                apiKey: $apiKey,
+                modelsUrl: config('services.groq.models_url'),
+                timeout: (int) config('services.groq.timeout', 120),
+            ))->transcriptionModelIds(),
+            self::PROVIDER_GROQ_TEXT_FIXER => (new GroqModelCatalogService(
+                apiKey: $apiKey,
+                modelsUrl: config('services.groq.models_url'),
+                timeout: (int) config('services.groq.timeout', 120),
+            ))->cleanerModelIds(),
+            self::PROVIDER_MISTRAL => (new MistralModelCatalogService(
+                apiKey: $apiKey,
+                modelsUrl: config('services.mistral.models_url'),
+                timeout: (int) config('services.mistral.timeout', 120),
+            ))->cleanerModelIds(),
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => (new MistralModelCatalogService(
+                apiKey: $apiKey,
+                modelsUrl: config('services.mistral.models_url'),
+                timeout: (int) config('services.mistral.timeout', 120),
+            ))->transcriptionModelIds(),
+            default => [],
+        };
+        $models = array_values(array_unique(array_filter(
+            array_map(fn (mixed $model): string => trim((string) $model), $models),
+            fn (string $model): bool => $model !== '',
+        )));
+
+        return [
+            'models' => $models,
+            'model_labels' => array_reduce(
+                $models,
+                fn (array $labels, string $model): array => $labels + [$model => $this->generateModelLabel($model)],
+                [],
+            ),
+        ];
+    }
+
     public function cloudflareChatCompletionsUrl(?string $accountId = null): string
     {
         return $this->providerMetadataString(self::PROVIDER_CLOUDFLARE, 'chat_completions_url');
@@ -552,6 +640,7 @@ class AppSettingsService
             self::PROVIDER_SPEECHMATICS => $this->speechmaticsModel(),
             self::PROVIDER_GEMINI => $this->geminiModel(),
             self::PROVIDER_GROQ_TRANSCRIPTION => $this->groqTranscriptionModel(),
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => $this->mistralTranscriptionModel(),
             self::PROVIDER_GLADIA => GladiaSpeechToTextService::MODEL_SOLARIA,
             self::PROVIDER_ASSEMBLYAI => $this->providerDefinitionModel(self::PROVIDER_ASSEMBLYAI, AssemblyAiSpeechToTextService::MODEL_UNIVERSAL_2),
             self::PROVIDER_AZURE_SPEECH => AzureSpeechToTextService::MODEL_FAST_TRANSCRIPTION,
@@ -676,8 +765,11 @@ class AppSettingsService
 
     private function providerDefinitions(): array
     {
+        $geminiTextFixerModels = $this->getGeminiAvailableModels();
         $groqTranscriptionModels = $this->getGroqAvailableModels(self::PROVIDER_GROQ_TRANSCRIPTION);
         $groqTextFixerModels = $this->getGroqAvailableModels(self::PROVIDER_GROQ_TEXT_FIXER);
+        $mistralTranscriptionModels = $this->getMistralAvailableModels(self::PROVIDER_MISTRAL_TRANSCRIPTION);
+        $mistralTextFixerModels = $this->getMistralAvailableModels(self::PROVIDER_MISTRAL);
 
         return [
             self::PROVIDER_DEEPGRAM => [
@@ -728,6 +820,17 @@ class AppSettingsService
                 'models' => $groqTranscriptionModels['models'],
                 'model_labels' => $groqTranscriptionModels['model_labels'],
                 'api_key_url' => 'https://console.groq.com/keys',
+                'purpose' => 'Speech to text',
+                'category' => 'transcriber',
+            ],
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => [
+                'provider' => self::PROVIDER_MISTRAL_TRANSCRIPTION,
+                'name' => 'Mistral AI',
+                'endpoint' => '',
+                'default_model' => $mistralTranscriptionModels['models'][0] ?? MistralSpeechToTextService::MODEL_VOXTRAL_MINI_LATEST,
+                'models' => $mistralTranscriptionModels['models'],
+                'model_labels' => $mistralTranscriptionModels['model_labels'],
+                'api_key_url' => 'https://console.mistral.ai/api-keys/',
                 'purpose' => 'Speech to text',
                 'category' => 'transcriber',
             ],
@@ -819,11 +922,9 @@ class AppSettingsService
                 'provider' => self::PROVIDER_GEMINI,
                 'name' => 'Gemini',
                 'endpoint' => '',
-                'default_model' => self::GEMINI_MODEL_FLASH_LITE,
-                'models' => [self::GEMINI_MODEL_FLASH_LITE],
-                'model_labels' => [
-                    self::GEMINI_MODEL_FLASH_LITE => self::GEMINI_MODEL_FLASH_LITE,
-                ],
+                'default_model' => $geminiTextFixerModels['models'][0] ?? self::GEMINI_MODEL_FLASH_LITE,
+                'models' => $geminiTextFixerModels['models'],
+                'model_labels' => $geminiTextFixerModels['model_labels'],
                 'api_key_url' => 'https://aistudio.google.com/app/apikey',
                 'purpose' => 'Transcript polishing',
                 'category' => 'text_fixer',
@@ -869,11 +970,9 @@ class AppSettingsService
                 'provider' => self::PROVIDER_MISTRAL,
                 'name' => 'Mistral AI',
                 'endpoint' => '',
-                'default_model' => MistralTranscriptCleanerService::MODEL_SMALL_2603,
-                'models' => [MistralTranscriptCleanerService::MODEL_SMALL_2603],
-                'model_labels' => [
-                    MistralTranscriptCleanerService::MODEL_SMALL_2603 => 'Mistral Small 4',
-                ],
+                'default_model' => $mistralTextFixerModels['models'][0] ?? MistralTranscriptCleanerService::MODEL_SMALL_2603,
+                'models' => $mistralTextFixerModels['models'],
+                'model_labels' => $mistralTextFixerModels['model_labels'],
                 'api_key_url' => 'https://console.mistral.ai/api-keys/',
                 'purpose' => 'Transcript polishing',
                 'category' => 'text_fixer',
@@ -941,8 +1040,13 @@ class AppSettingsService
             ],
             self::PROVIDER_GROQ_TRANSCRIPTION => [
                 'transcription_url' => config('services.groq.transcription_url'),
-                'models_url' => $groqBaseUrl.'/models',
+                'models_url' => config('services.groq.models_url', $groqBaseUrl.'/models'),
                 'timeout' => config('services.groq.timeout', 120),
+            ],
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => [
+                'transcription_url' => config('services.mistral.transcription_url'),
+                'models_url' => config('services.mistral.models_url'),
+                'timeout' => config('services.mistral.timeout', 120),
             ],
             self::PROVIDER_GLADIA => [
                 'base_url' => config('services.gladia.base_url'),
@@ -975,13 +1079,13 @@ class AppSettingsService
             self::PROVIDER_GEMINI => [
                 'endpoint_template' => $geminiBaseUrl.'/models/%s:generateContent',
                 'generate_content_url_template' => $geminiBaseUrl.'/models/%s:generateContent',
-                'models_url' => $geminiBaseUrl.'/models',
+                'models_url' => config('services.gemini.models_url', $geminiBaseUrl.'/models'),
                 'timeout' => config('services.gemini.timeout', 120),
                 'max_retries' => config('services.gemini.max_retries', 3),
             ],
             self::PROVIDER_GROQ_TEXT_FIXER => [
                 'chat_completions_url' => config('services.groq.chat_completions_url'),
-                'models_url' => $groqBaseUrl.'/models',
+                'models_url' => config('services.groq.models_url', $groqBaseUrl.'/models'),
                 'timeout' => config('services.groq.timeout', 120),
                 'max_retries' => config('services.groq.max_retries', 3),
             ],
@@ -1052,15 +1156,16 @@ class AppSettingsService
             self::PROVIDER_DEEPGRAM => ['listen_url', 'timeout'],
             self::PROVIDER_ELEVENLABS => ['speech_to_text_url', 'timeout'],
             self::PROVIDER_SPEECHMATICS => ['base_url', 'timeout', 'poll_interval_ms', 'max_wait_seconds'],
-            self::PROVIDER_GROQ_TRANSCRIPTION => ['transcription_url', 'timeout'],
+            self::PROVIDER_GROQ_TRANSCRIPTION => ['transcription_url', 'models_url', 'timeout'],
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => ['transcription_url', 'models_url', 'timeout'],
             self::PROVIDER_GLADIA => ['base_url', 'timeout', 'poll_interval_ms', 'max_wait_seconds'],
             self::PROVIDER_ASSEMBLYAI => ['base_url', 'timeout', 'poll_interval_ms', 'max_wait_seconds'],
             self::PROVIDER_AZURE_SPEECH => ['fast_transcription_url'],
             self::PROVIDER_GOOGLE_SPEECH => ['base_url', 'token_url'],
             self::PROVIDER_AWS_TRANSCRIBE => ['poll_interval_ms', 'max_wait_seconds'],
             self::PROVIDER_RUNPOD => ['timeout'],
-            self::PROVIDER_GEMINI => ['endpoint_template', 'generate_content_url_template', 'timeout', 'max_retries'],
-            self::PROVIDER_GROQ_TEXT_FIXER,
+            self::PROVIDER_GEMINI => ['endpoint_template', 'generate_content_url_template', 'models_url', 'timeout', 'max_retries'],
+            self::PROVIDER_GROQ_TEXT_FIXER => ['chat_completions_url', 'models_url', 'timeout', 'max_retries'],
             self::PROVIDER_DEEPSEEK,
             self::PROVIDER_CEREBRAS,
             self::PROVIDER_MISTRAL,
@@ -1085,6 +1190,7 @@ class AppSettingsService
             self::PROVIDER_ELEVENLABS => trim((string) ($metadata['speech_to_text_url'] ?? '')),
             self::PROVIDER_SPEECHMATICS => $this->metadataBaseEndpoint($metadata, '/jobs'),
             self::PROVIDER_GROQ_TRANSCRIPTION => trim((string) ($metadata['transcription_url'] ?? '')),
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => trim((string) ($metadata['transcription_url'] ?? '')),
             self::PROVIDER_GLADIA => $this->metadataBaseEndpoint($metadata, '/pre-recorded'),
             self::PROVIDER_ASSEMBLYAI => $this->metadataBaseEndpoint($metadata, '/transcript'),
             self::PROVIDER_AZURE_SPEECH => trim((string) ($metadata['fast_transcription_url'] ?? '')),
@@ -1159,6 +1265,7 @@ class AppSettingsService
             self::PROVIDER_DEEPGRAM => 'multi',
             self::PROVIDER_ELEVENLABS => null,
             self::PROVIDER_GROQ_TRANSCRIPTION => null,
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => null,
             self::PROVIDER_GLADIA, self::PROVIDER_ASSEMBLYAI, self::PROVIDER_AWS_TRANSCRIBE, self::PROVIDER_RUNPOD => 'auto',
             self::PROVIDER_AZURE_SPEECH, self::PROVIDER_GOOGLE_SPEECH => 'en-US',
             self::PROVIDER_SPEECHMATICS => $model === SpeechmaticsSpeechToTextService::MODEL_MELIA_1 ? 'multi' : 'auto',
@@ -1172,6 +1279,7 @@ class AppSettingsService
             self::PROVIDER_DEEPGRAM => $this->deepgramNova3Languages(),
             self::PROVIDER_ELEVENLABS => $this->elevenLabsScribeLanguages(),
             self::PROVIDER_GROQ_TRANSCRIPTION => [['code' => 'auto', 'label' => 'Automatic detection']],
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => [['code' => 'auto', 'label' => 'Automatic detection']],
             self::PROVIDER_GLADIA, self::PROVIDER_AWS_TRANSCRIBE => $this->languageRows([
                 'auto' => 'Automatic detection', 'en' => 'English', 'fil' => 'Filipino / Tagalog',
             ]),
@@ -1411,69 +1519,92 @@ class AppSettingsService
 
     /**
      * Dynamically fetch available Groq models for the requested provider.
+     *
      * @return array{models: array<string>, model_labels: array<string, string>}
      */
     private function getGroqAvailableModels(string $providerId): array
     {
-        static $cachedResults = [];
+        $models = $this->discoverProviderModels($providerId)['models'];
 
-        if (isset($cachedResults[$providerId])) {
-            return $cachedResults[$providerId];
-        }
-
-        try {
-            $models = match ($providerId) {
-                self::PROVIDER_GROQ_TRANSCRIPTION => (new GroqSpeechToTextService())->getAvailableModelIds(),
-                self::PROVIDER_GROQ_TEXT_FIXER => (new GroqTranscriptCleanerService())->getAvailableModelIds(),
-                default => [],
-            };
-
-            $models = array_values(array_filter(
-                array_map(
-                    fn (mixed $model): string => trim((string) $model),
-                    $models,
-                ),
-                fn (string $model): bool => $model !== '',
-            ));
-
-            if ($models === []) {
-                $models = $providerId === self::PROVIDER_GROQ_TRANSCRIPTION
-                    ? array_values(array_filter((array) config('services.groq.transcription_models', []), 'is_string'))
-                    : array_values(array_filter((array) config('services.groq.text_fixer_models', []), 'is_string'));
-            }
-
-            $modelLabels = [];
-            foreach ($models as $model) {
-                $modelLabels[$model] = $this->generateModelLabel($model);
-            }
-
-            $cachedResults[$providerId] = [
-                'models' => $models,
-                'model_labels' => $modelLabels,
-            ];
-
-            return $cachedResults[$providerId];
-        } catch (\Exception $e) {
-            Log::warning('Failed to fetch Groq models, using config fallbacks', [
-                'provider' => $providerId,
-                'error' => $e->getMessage(),
-            ]);
-
-            $fallbackModels = $providerId === self::PROVIDER_GROQ_TRANSCRIPTION
+        if ($models === []) {
+            $models = $providerId === self::PROVIDER_GROQ_TRANSCRIPTION
                 ? array_values(array_filter((array) config('services.groq.transcription_models', []), 'is_string'))
                 : array_values(array_filter((array) config('services.groq.text_fixer_models', []), 'is_string'));
-
-            $cachedResults[$providerId] = [
-                'models' => $fallbackModels,
-                'model_labels' => array_reduce(
-                    $fallbackModels,
-                    fn (array $labels, string $model): array => $labels + [$model => $this->generateModelLabel($model)],
-                    [],
-                ),
-            ];
-
-            return $cachedResults[$providerId];
         }
+
+        return [
+            'models' => $models,
+            'model_labels' => array_reduce(
+                $models,
+                fn (array $labels, string $model): array => $labels + [$model => $this->generateModelLabel($model)],
+                [],
+            ),
+        ];
+    }
+
+    /**
+     * Fetch Gemini models that support text generation for transcript cleanup.
+     *
+     * @return array{models: array<string>, model_labels: array<string, string>}
+     */
+    private function getGeminiAvailableModels(): array
+    {
+        $models = (new GeminiModelCatalogService(
+            apiKey: $this->geminiApiKey(),
+            modelsUrl: config('services.gemini.models_url'),
+            timeout: (int) config('services.gemini.timeout', 120),
+        ))->cleanerModelIds();
+        $models = array_values(array_unique(array_filter(
+            array_map(fn (mixed $model): string => trim((string) $model), $models),
+            fn (string $model): bool => $model !== '',
+        )));
+
+        if ($models === []) {
+            $models = array_values(array_filter((array) config('services.gemini.models', []), 'is_string'));
+        }
+
+        return [
+            'models' => $models,
+            'model_labels' => array_reduce(
+                $models,
+                fn (array $labels, string $model): array => $labels + [$model => $this->generateModelLabel($model)],
+                [],
+            ),
+        ];
+    }
+
+    /**
+     * Fetch and separate Mistral models by the API surface that can use them.
+     *
+     * @return array{models: array<string>, model_labels: array<string, string>}
+     */
+    private function getMistralAvailableModels(string $providerId): array
+    {
+        $models = match ($providerId) {
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => (new MistralSpeechToTextService)->getAvailableModelIds(),
+            self::PROVIDER_MISTRAL => (new MistralTranscriptCleanerService)->getAvailableModelIds(),
+            default => [],
+        };
+        $fallbackKey = $providerId === self::PROVIDER_MISTRAL_TRANSCRIPTION
+            ? 'services.mistral.transcription_models'
+            : 'services.mistral.text_fixer_models';
+        $models = array_values(array_unique(array_filter(
+            array_map(fn (mixed $model): string => trim((string) $model), $models),
+            fn (string $model): bool => $model !== '',
+        )));
+
+        if ($models === []) {
+            $models = array_values(array_filter((array) config($fallbackKey, []), 'is_string'));
+        }
+
+        return [
+            'models' => $models,
+            'model_labels' => array_reduce(
+                $models,
+                fn (array $labels, string $model): array => $labels + [$model => $this->generateModelLabel($model)],
+                [],
+            ),
+        ];
     }
 
     /**

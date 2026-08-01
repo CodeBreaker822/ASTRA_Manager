@@ -12,12 +12,45 @@ use Illuminate\Support\Facades\Log;
 
 class GeminiTranscriptCleanerService
 {
+    /** @var array<int, string> */
+    private readonly array $allowedModels;
+
+    /**
+     * @param  array<int, string>  $allowedModels
+     */
     public function __construct(
+        array $allowedModels = [],
         private readonly ?string $apiKey = null,
         private readonly ?string $model = null,
         private readonly ?string $endpointTemplate = null,
+        private readonly ?string $modelsUrl = null,
         private readonly ?int $timeout = null,
-    ) {}
+    ) {
+        $this->allowedModels = $allowedModels !== []
+            ? $this->normalizeModelIds($allowedModels)
+            : $this->getAvailableModelIds();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function getAvailableModelIds(): array
+    {
+        $apiKey = trim((string) (
+            $this->apiKey
+            ?? app(AppSettingsService::class)->geminiApiKey()
+            ?? config('services.gemini.key')
+        ));
+        $models = (new GeminiModelCatalogService(
+            apiKey: $apiKey,
+            modelsUrl: $this->modelsUrl,
+            timeout: $this->timeout,
+        ))->cleanerModelIds();
+
+        return $models !== []
+            ? $models
+            : $this->normalizeModelIds((array) config('services.gemini.models', []));
+    }
 
     /**
      * @return array{text: string, timestamps: array<int, array<string, mixed>>, model: string}
@@ -105,7 +138,23 @@ class GeminiTranscriptCleanerService
 
     private function getModel(): string
     {
-        return $this->model ?? app(AppSettingsService::class)->geminiModel();
+        $candidate = trim((string) ($this->model ?? app(AppSettingsService::class)->geminiModel()));
+
+        return in_array($candidate, $this->allowedModels, true)
+            ? $candidate
+            : ($this->allowedModels[0] ?? AppSettingsService::GEMINI_MODEL_FLASH_LITE);
+    }
+
+    /**
+     * @param  array<int, mixed>  $models
+     * @return array<int, string>
+     */
+    private function normalizeModelIds(array $models): array
+    {
+        return array_values(array_unique(array_filter(
+            array_map(fn (mixed $model): string => trim((string) $model), $models),
+            fn (string $model): bool => $model !== '',
+        )));
     }
 
     private function getApiKey(): string

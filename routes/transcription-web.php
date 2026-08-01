@@ -14,6 +14,7 @@ Route::middleware(['auth', 'can:API-manage_api'])->group(function () {
     Route::get('/dashboard/api', [APIController::class, 'index'])->name('api.manager');
     Route::get('/dashboard/api/transcription-providers/health', [APIController::class, 'transcriptionProviderHealth'])->name('api.transcription-providers.health');
     Route::get('/dashboard/api/transcription-providers/logs', [APIController::class, 'transcriptionProviderLogs'])->name('api.transcription-providers.logs');
+    Route::post('/dashboard/api/transcription-providers/models', [APIController::class, 'transcriptionProviderModels'])->name('api.transcription-providers.models');
     Route::post('/dashboard/api/transcription-providers', [APIController::class, 'updateTranscriptionProviders'])->name('api.transcription-providers.update');
     Route::post('/dashboard/api/transcription-providers/order', [APIController::class, 'reorderTranscriptionProviders'])->name('api.transcription-providers.order');
     Route::post('/dashboard/api/transcriber-package', [APIController::class, 'uploadTranscriberPackage'])->name('api.transcriber-package.upload');
