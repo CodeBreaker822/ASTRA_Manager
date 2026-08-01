@@ -125,6 +125,30 @@ class GroqSpeechToTextService
         return $this->endpoint ?? (string) config('services.groq.transcription_url');
     }
 
+    public function getAvailableModelIds(): array
+    {
+        try {
+            $response = $this->client()
+                ->get(rtrim((string) config('services.groq.base_url'), '/').'/models');
+        } catch (ConnectionException) {
+            return [];
+        }
+
+        if (! $response->successful()) {
+            return [];
+        }
+
+        $models = $response->json('data', []);
+
+        return array_values(array_filter(
+            array_map(
+                fn (mixed $model): string => trim((string) ($model['id'] ?? '')),
+                array_filter($models, 'is_array'),
+            ),
+            fn (string $model): bool => $model !== '',
+        ));
+    }
+
     private function payload(array $options): array
     {
         $payload = [
@@ -148,13 +172,23 @@ class GroqSpeechToTextService
             ?? app(AppSettingsService::class)->groqTranscriptionModel()
             ?? config('services.groq.transcription_model', self::MODEL_WHISPER_LARGE_V3);
 
+        $availableModels = $this->getAvailableModelIds();
+
+        if ($availableModels !== []) {
+            if (is_string($modelId) && trim($modelId) !== '' && in_array($modelId, $availableModels, true)) {
+                return $modelId;
+            }
+
+            return $availableModels[0];
+        }
+
         $allowedModels = config('services.groq.transcription_models', [
             self::MODEL_WHISPER_LARGE_V3,
             self::MODEL_WHISPER_LARGE_V3_TURBO,
         ]);
 
         if (! is_string($modelId) || ! in_array($modelId, $allowedModels, true)) {
-            throw new GroqSpeechToTextException(ServiceUserMessage::unsupportedProviderModel('Groq'));
+            return $allowedModels[0] ?? self::MODEL_WHISPER_LARGE_V3;
         }
 
         return $modelId;

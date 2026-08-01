@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\TranscriptionProviderSetting;
 use Illuminate\Contracts\Encryption\DecryptException;
+use Illuminate\Support\Facades\Log;
 
 class AppSettingsService
 {
@@ -409,9 +410,14 @@ class AppSettingsService
 
     public function groqTextFixerModel(): string
     {
+        $definition = $this->providerDefinitions()[self::PROVIDER_GROQ_TEXT_FIXER];
+
+        // Use empty string as fallback if no models are available
+        $fallback = !empty($definition['models']) ? $definition['models'][0] : '';
+
         return $this->validModelForDefinition(
-            $this->providerDefinitions()[self::PROVIDER_GROQ_TEXT_FIXER],
-            $this->model(self::PROVIDER_GROQ_TEXT_FIXER, GroqTranscriptCleanerService::MODEL_LLAMA_4_SCOUT),
+            $definition,
+            $this->model(self::PROVIDER_GROQ_TEXT_FIXER, $fallback),
         );
     }
 
@@ -670,6 +676,9 @@ class AppSettingsService
 
     private function providerDefinitions(): array
     {
+        $groqTranscriptionModels = $this->getGroqAvailableModels(self::PROVIDER_GROQ_TRANSCRIPTION);
+        $groqTextFixerModels = $this->getGroqAvailableModels(self::PROVIDER_GROQ_TEXT_FIXER);
+
         return [
             self::PROVIDER_DEEPGRAM => [
                 'provider' => self::PROVIDER_DEEPGRAM,
@@ -715,15 +724,9 @@ class AppSettingsService
                 'provider' => self::PROVIDER_GROQ_TRANSCRIPTION,
                 'name' => 'Groq',
                 'endpoint' => '',
-                'default_model' => GroqSpeechToTextService::MODEL_WHISPER_LARGE_V3,
-                'models' => [
-                    GroqSpeechToTextService::MODEL_WHISPER_LARGE_V3,
-                    GroqSpeechToTextService::MODEL_WHISPER_LARGE_V3_TURBO,
-                ],
-                'model_labels' => [
-                    GroqSpeechToTextService::MODEL_WHISPER_LARGE_V3 => 'Whisper Large V3',
-                    GroqSpeechToTextService::MODEL_WHISPER_LARGE_V3_TURBO => 'Whisper Large V3 Turbo',
-                ],
+                'default_model' => $groqTranscriptionModels['models'][0] ?? config('services.groq.transcription_model', GroqSpeechToTextService::MODEL_WHISPER_LARGE_V3),
+                'models' => $groqTranscriptionModels['models'],
+                'model_labels' => $groqTranscriptionModels['model_labels'],
                 'api_key_url' => 'https://console.groq.com/keys',
                 'purpose' => 'Speech to text',
                 'category' => 'transcriber',
@@ -829,15 +832,9 @@ class AppSettingsService
                 'provider' => self::PROVIDER_GROQ_TEXT_FIXER,
                 'name' => 'Groq',
                 'endpoint' => '',
-                'default_model' => GroqTranscriptCleanerService::MODEL_LLAMA_4_SCOUT,
-                'models' => [
-                    GroqTranscriptCleanerService::MODEL_LLAMA_4_SCOUT,
-                    GroqTranscriptCleanerService::MODEL_QWEN_3_32B,
-                ],
-                'model_labels' => [
-                    GroqTranscriptCleanerService::MODEL_LLAMA_4_SCOUT => 'Llama 4 Scout 17B',
-                    GroqTranscriptCleanerService::MODEL_QWEN_3_32B => 'Qwen 3 32B',
-                ],
+                'default_model' => $groqTextFixerModels['models'][0] ?? config('services.groq.text_fixer_model', ''),
+                'models' => $groqTextFixerModels['models'],
+                'model_labels' => $groqTextFixerModels['model_labels'],
                 'api_key_url' => 'https://console.groq.com/keys',
                 'purpose' => 'Transcript polishing',
                 'category' => 'text_fixer',
@@ -1410,5 +1407,99 @@ class AppSettingsService
             array_keys($languages),
             $languages,
         );
+    }
+
+    /**
+     * Dynamically fetch available Groq models for the requested provider.
+     * @return array{models: array<string>, model_labels: array<string, string>}
+     */
+    private function getGroqAvailableModels(string $providerId): array
+    {
+        static $cachedResults = [];
+
+        if (isset($cachedResults[$providerId])) {
+            return $cachedResults[$providerId];
+        }
+
+        try {
+            $models = match ($providerId) {
+                self::PROVIDER_GROQ_TRANSCRIPTION => (new GroqSpeechToTextService())->getAvailableModelIds(),
+                self::PROVIDER_GROQ_TEXT_FIXER => (new GroqTranscriptCleanerService())->getAvailableModelIds(),
+                default => [],
+            };
+
+            $models = array_values(array_filter(
+                array_map(
+                    fn (mixed $model): string => trim((string) $model),
+                    $models,
+                ),
+                fn (string $model): bool => $model !== '' && ! str_contains($model, 'prompt-guard'),
+            ));
+
+            usort($models, function (string $a, string $b): int {
+                $aIsLlama = str_contains($a, 'llama');
+                $bIsLlama = str_contains($b, 'llama');
+
+                if ($aIsLlama !== $bIsLlama) {
+                    return $aIsLlama ? -1 : 1;
+                }
+
+                return strcmp($a, $b);
+            });
+
+            if ($models === []) {
+                $models = $providerId === self::PROVIDER_GROQ_TRANSCRIPTION
+                    ? array_values(array_filter((array) config('services.groq.transcription_models', []), 'is_string'))
+                    : array_values(array_filter((array) config('services.groq.text_fixer_models', []), 'is_string'));
+            }
+
+            $modelLabels = [];
+            foreach ($models as $model) {
+                $modelLabels[$model] = $this->generateModelLabel($model);
+            }
+
+            $cachedResults[$providerId] = [
+                'models' => $models,
+                'model_labels' => $modelLabels,
+            ];
+
+            return $cachedResults[$providerId];
+        } catch (\Exception $e) {
+            Log::warning('Failed to fetch Groq models, using config fallbacks', [
+                'provider' => $providerId,
+                'error' => $e->getMessage(),
+            ]);
+
+            $fallbackModels = $providerId === self::PROVIDER_GROQ_TRANSCRIPTION
+                ? array_values(array_filter((array) config('services.groq.transcription_models', []), 'is_string'))
+                : array_values(array_filter((array) config('services.groq.text_fixer_models', []), 'is_string'));
+
+            $cachedResults[$providerId] = [
+                'models' => $fallbackModels,
+                'model_labels' => array_reduce(
+                    $fallbackModels,
+                    fn (array $labels, string $model): array => $labels + [$model => $this->generateModelLabel($model)],
+                    [],
+                ),
+            ];
+
+            return $cachedResults[$providerId];
+        }
+    }
+
+    /**
+     * Generate user-friendly label from model ID
+     */
+    private function generateModelLabel(string $model): string
+    {
+        // Extract meaningful parts from model ID
+        $parts = explode('/', $model);
+        $modelName = end($parts);
+
+        // Convert model ID to readable format
+        $label = str_replace(['-', '_'], ' ', $modelName);
+        $label = ucwords($label);
+
+        return $label;
     }
 }

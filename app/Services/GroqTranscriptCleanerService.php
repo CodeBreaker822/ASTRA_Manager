@@ -7,13 +7,13 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class GroqTranscriptCleanerService
 {
-    public const MODEL_LLAMA_4_SCOUT = 'meta-llama/llama-4-scout-17b-16e-instruct';
-
-    public const MODEL_QWEN_3_32B = 'qwen/qwen3-32b';
+    private const CACHE_KEY = 'groq:available_models';
+    private const CACHE_TTL = 3600; // 1 hour
 
     public function __construct(
         private readonly ?string $apiKey = null,
@@ -21,6 +21,79 @@ class GroqTranscriptCleanerService
         private readonly ?string $endpoint = null,
         private readonly ?int $timeout = null,
     ) {}
+
+    /**
+     * Fetch available models from Groq API dynamically
+     * @return array<string, mixed> Array of model objects with id, object, created, owned_by properties
+     */
+    public function fetchAvailableModels(): array
+    {
+        return Cache::remember(self::CACHE_KEY, self::CACHE_TTL, function () {
+            try {
+                $response = $this->client()->get('https://api.groq.com/openai/v1/models');
+
+                if ($response->successful()) {
+                    $models = $response->json('data', []);
+
+                    Log::info('Successfully fetched Groq models', [
+                        'model_count' => count($models),
+                    ]);
+
+                    return $models;
+                }
+
+                Log::error('Failed to fetch Groq models', [
+                    'status' => $response->status(),
+                    'response' => $response->body(),
+                ]);
+
+                throw new GroqTranscriptCleanerException(
+                    ServiceUserMessage::cleanerFailed('Groq'),
+                    $response->status(),
+                );
+            } catch (\Exception $e) {
+                Log::error('Exception while fetching Groq models', [
+                    'error' => $e->getMessage(),
+                ]);
+
+                throw new GroqTranscriptCleanerException(
+                    ServiceUserMessage::cannotReachProvider('Groq'),
+                    0,
+                    $e,
+                );
+            }
+        });
+    }
+
+    /**
+     * Get list of available model IDs
+     * @return array<string> Array of model IDs
+     */
+    public function getAvailableModelIds(): array
+    {
+        $models = $this->fetchAvailableModels();
+
+        return array_map(
+            fn ($model) => $model['id'] ?? '',
+            array_filter($models, fn ($model) => !empty($model['id']))
+        );
+    }
+
+    /**
+     * Check if a specific model is available
+     */
+    public function isModelAvailable(string $modelId): bool
+    {
+        return in_array($modelId, $this->getAvailableModelIds(), true);
+    }
+
+    /**
+     * Clear the cached models (useful for testing or when you want to refresh)
+     */
+    public function clearModelCache(): void
+    {
+        Cache::forget(self::CACHE_KEY);
+    }
 
     /**
      * @return array{text: string, timestamps: array<int, array<string, mixed>>, model: string}
@@ -104,14 +177,24 @@ class GroqTranscriptCleanerService
 
     private function getModel(): string
     {
-        $model = $this->model ?? app(AppSettingsService::class)->groqTextFixerModel();
-        $allowedModels = config('services.groq.text_fixer_models', [
-            self::MODEL_LLAMA_4_SCOUT,
-            self::MODEL_QWEN_3_32B,
-        ]);
+        $availableModels = $this->getAvailableModelIds();
 
-        if (! is_string($model) || ! in_array($model, $allowedModels, true)) {
-            throw new GroqTranscriptCleanerException(ServiceUserMessage::unsupportedProviderModel('Groq'));
+        if ($availableModels === []) {
+            $model = $this->model ?? app(AppSettingsService::class)->groqTextFixerModel();
+
+            if (! is_string($model) || trim($model) === '') {
+                throw new GroqTranscriptCleanerException(
+                    ServiceUserMessage::unsupportedProviderModel('Groq', $availableModels)
+                );
+            }
+
+            return $model;
+        }
+
+        $model = $this->model ?? app(AppSettingsService::class)->groqTextFixerModel();
+
+        if (! is_string($model) || trim($model) === '' || ! in_array($model, $availableModels, true)) {
+            return $availableModels[0];
         }
 
         return $model;
@@ -284,8 +367,9 @@ class GroqTranscriptCleanerService
 
     private function chatPayload(string $systemInstruction, array $userPayload, array $options): array
     {
+        $currentModel = $this->getModel();
         $payload = [
-            'model' => $this->getModel(),
+            'model' => $currentModel,
             'messages' => [
                 ['role' => 'system', 'content' => $systemInstruction],
                 [
@@ -298,7 +382,9 @@ class GroqTranscriptCleanerService
             'response_format' => ['type' => 'json_object'],
         ];
 
-        if ($this->getModel() === self::MODEL_QWEN_3_32B) {
+        // Check if the model supports reasoning_format
+        // This is typically needed for Qwen and other reasoning models
+        if (str_contains($currentModel, 'qwen') || str_contains($currentModel, 'deepseek')) {
             $payload['reasoning_format'] = 'hidden';
         }
 
