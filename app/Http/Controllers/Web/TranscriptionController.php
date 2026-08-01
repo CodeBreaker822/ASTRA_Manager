@@ -67,10 +67,6 @@ class TranscriptionController extends Controller
             $clips = $prepared['clips'];
             $cleanup = $prepared['cleanup'];
 
-            if ($workflow->batchIsTooLarge($clips)) {
-                return response()->json(['message' => 'Audio is too big.'], 422);
-            }
-
             $durationSeconds = $workflow->durationSeconds($clips, (int) ($validated['duration_seconds'] ?? 0));
 
             if (! $entitlements->allows($request->user(), 'upload')) {
@@ -137,10 +133,6 @@ class TranscriptionController extends Controller
 
         $clips = $workflow->normalizeClips($request, $validated);
         $durationSeconds = $workflow->durationSeconds($clips, (int) ($validated['duration_seconds'] ?? 0));
-
-        if ($workflow->batchIsTooLarge($clips)) {
-            return response()->json(['message' => 'Audio is too big.'], 422);
-        }
 
         $transcript = $workflow->queueTranscript($request, $project, 'live', $clips, $durationSeconds);
         $workflow->startApiTranscription($request, $transcript, $validated['language_code'] ?? null);
@@ -223,10 +215,6 @@ class TranscriptionController extends Controller
             ]);
             $clips = $prepared['clips'];
             $cleanup = $prepared['cleanup'];
-
-            if ($workflow->batchIsTooLarge($clips)) {
-                return response()->json(['message' => 'Audio is too big.'], 422);
-            }
 
             $durationSeconds = $workflow->durationSeconds($clips, (int) ($validated['duration_seconds'] ?? 0));
 

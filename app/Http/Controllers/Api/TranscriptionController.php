@@ -113,15 +113,6 @@ class TranscriptionController extends Controller
         $billingFeature = $this->billingFeature($validated['billing_feature'] ?? null);
         $billingSeconds = $this->billableDurationSeconds($queuedClips);
 
-        if ($this->transcribeBatchDurationTooLarge($queuedClips)) {
-            return $this->logAndReturn($request, 'transcribe', $license, response()->json([
-                'message' => 'Audio is too big.',
-            ], 422), $startedAt, [
-                'status' => 'validation_error',
-                'severity' => 'low',
-            ]);
-        }
-
         $billingError = $this->transcriptionBillingPreflight($license, $billingFeature, $billingSeconds);
 
         if ($billingError instanceof JsonResponse) {
