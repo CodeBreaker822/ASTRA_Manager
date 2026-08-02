@@ -241,12 +241,89 @@ test('web upload submits server audio chunks in batches of twenty and exposes ea
     }
 });
 
-test('web upload submits the selected source only once when server clip progress expands the display list', function () {
-    $uploadComposable = File::get(resource_path('js/composables/useAudioUpload.ts'));
+test('completing the same upload session twice creates only one transcript', function () {
+    $preparedClipPath = tempnam(sys_get_temp_dir(), 'workspace-prepared-clip-');
+    file_put_contents($preparedClipPath, 'prepared clip bytes');
 
-    expect(substr_count($uploadComposable, 'await postBatch(projectId)'))->toBe(1)
-        ->and($uploadComposable)->not->toContain('index += MAX_BATCH_CLIPS')
-        ->and($uploadComposable)->toContain('if (!projectId || inFlight.value)');
+    $this->mock(WebAudioChunkerService::class, function ($mock) use ($preparedClipPath): void {
+        $mock->shouldReceive('clipsFromUpload')->once()->andReturn([
+            'clips' => [[
+                'audio' => new UploadedFile($preparedClipPath, 'prepared.wav', 'audio/wav', null, true),
+                'clip_index' => 0,
+                'clip_start_ms' => 0,
+                'clip_end_ms' => 2000,
+                'language_code' => null,
+            ]],
+            'cleanup' => null,
+        ]);
+        $mock->shouldReceive('cleanup')->zeroOrMoreTimes();
+    });
+
+    $user = User::factory()->create(['plan' => 'payg']);
+    $project = TranscriptProject::query()->create([
+        'user_id' => $user->id,
+        'title' => 'Duplicate completion guard',
+    ]);
+    $contents = 'duplicate completion source bytes';
+    $chunkPath = tempnam(sys_get_temp_dir(), 'workspace-audio-part-');
+    file_put_contents($chunkPath, $contents);
+    $uploadId = 'workspace-upload-'.bin2hex(random_bytes(4));
+
+    TranscriptionProviderSetting::query()->create([
+        'provider' => 'deepgram',
+        'api_key' => 'deepgram-key',
+        'model' => 'nova-3',
+        'is_enabled' => true,
+        'sort_order' => 0,
+        'metadata' => deepgramRuntimeMetadata(),
+    ]);
+
+    Http::fake([
+        config('services.deepgram.listen_url').'*' => Http::response([
+            'results' => [
+                'channels' => [[
+                    'alternatives' => [[
+                        'transcript' => 'Duplicate completion transcript.',
+                        'words' => [],
+                    ]],
+                ]],
+            ],
+        ]),
+    ]);
+
+    try {
+        $this->actingAs($user)
+            ->postJson(route('workspace.upload.chunk', $project), [
+                'upload_id' => $uploadId,
+                'chunk_index' => 0,
+                'total_chunks' => 1,
+                'total_size' => strlen($contents),
+                'filename' => 'duplicate.wav',
+                'mime_type' => 'audio/wav',
+                'chunk_hash' => hash_file('sha256', $chunkPath),
+                'chunk' => new UploadedFile($chunkPath, 'duplicate.part0', 'application/octet-stream', null, true),
+            ])
+            ->assertOk()
+            ->assertJsonPath('complete', true);
+
+        $this->actingAs($user)
+            ->postJson(route('workspace.upload.complete', $project), [
+                'upload_id' => $uploadId,
+            ])
+            ->assertAccepted()
+            ->assertJsonPath('transcript.status', 'queued');
+
+        $this->actingAs($user)
+            ->postJson(route('workspace.upload.complete', $project), [
+                'upload_id' => $uploadId,
+            ])
+            ->assertStatus(422);
+    } finally {
+        @unlink($chunkPath);
+        @unlink($preparedClipPath);
+    }
+
+    expect(Transcript::query()->where('project_id', $project->id)->count())->toBe(1);
 });
 
 test('chunked web upload rebuilds audio and removes stored audio after completion', function () {

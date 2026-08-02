@@ -32,7 +32,8 @@
             }
         </style>
 
-        <link rel="icon" href="/JervaLogo.png" type="image/png">
+        <link rel="icon" href="/favicon.ico" type="image/x-icon" sizes="any">
+        <link rel="apple-touch-icon" href="/JervaLogo.png">
 
         <script src="{{ asset('js/notification.js') }}" defer></script>
         @vite(['resources/css/app.css', 'resources/js/app.ts'])

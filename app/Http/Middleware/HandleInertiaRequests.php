@@ -119,7 +119,7 @@ class HandleInertiaRequests extends Middleware
             return null;
         }
 
-        if (! in_array($tab, ['profile', 'security', 'appearance', 'billing'], true)) {
+        if (! in_array($tab, ['profile', 'security', 'appearance', 'recording', 'billing'], true)) {
             return null;
         }
 

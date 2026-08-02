@@ -26,6 +26,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::inertia('settings/appearance', 'settings/Appearance')->name('appearance.edit');
 
+    Route::inertia('settings/recording', 'settings/Recording')->name('recording.edit');
+
     Route::get('settings/billing', [BillingController::class, 'edit'])->name('billing.edit');
     Route::post('settings/billing/checkout', [BillingController::class, 'checkout'])->name('billing.checkout');
     Route::get('settings/billing/success', [BillingController::class, 'success'])->name('billing.success');

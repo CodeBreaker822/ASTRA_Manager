@@ -8,6 +8,7 @@ import WorkspaceHeader from '@/components/workspace/WorkspaceHeader.vue';
 import WorkspaceSidebar from '@/components/workspace/WorkspaceSidebar.vue';
 import { useAudioUpload } from '@/composables/useAudioUpload';
 import { useLiveRecorder } from '@/composables/useLiveRecorder';
+import { useRecordingSettings } from '@/composables/useRecordingSettings';
 import { useTranscriptPolling } from '@/composables/useTranscriptPolling';
 import { useWorkspaceToast } from '@/composables/useWorkspaceToast';
 import { csrfToken } from '@/lib/workspace';
@@ -34,6 +35,7 @@ const workspaceMode = ref<WorkspaceMode>('choose');
 const localProject = ref<ActiveProject | null>(props.activeProject);
 const localEntitlements = ref<Entitlements>(props.entitlements);
 const upgradeBanner = ref('');
+const { captureScreenAudio } = useRecordingSettings();
 
 const displayProject = computed(
     () => localProject.value ?? props.activeProject,
@@ -290,6 +292,7 @@ const live = useLiveRecorder({
     csrfToken,
     projectId: () => displayProject.value?.id ?? null,
     canUseLive: () => canUseLive.value,
+    captureScreenAudio: () => captureScreenAudio.value,
     onTranscript: addTranscriptToLocal,
     onQueued: startPolling,
     onUpgrade: (message) => {

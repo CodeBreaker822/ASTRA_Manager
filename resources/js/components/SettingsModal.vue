@@ -3,6 +3,7 @@ import { Link, router, usePage } from '@inertiajs/vue3';
 import {
     CreditCard,
     LogOut,
+    Mic,
     Palette,
     ShieldCheck,
     UserRound,
@@ -21,6 +22,9 @@ const Billing = defineAsyncComponent(
 );
 const Profile = defineAsyncComponent(
     () => import('@/pages/settings/Profile.vue'),
+);
+const Recording = defineAsyncComponent(
+    () => import('@/pages/settings/Recording.vue'),
 );
 const Security = defineAsyncComponent(
     () => import('@/pages/settings/Security.vue'),
@@ -110,6 +114,7 @@ const navItems: Array<{
     { title: 'Profile', tab: 'profile', icon: UserRound },
     { title: 'Security', tab: 'security', icon: ShieldCheck },
     { title: 'Appearance', tab: 'appearance', icon: Palette },
+    { title: 'Recording', tab: 'recording', icon: Mic },
     { title: 'Billing', tab: 'billing', icon: CreditCard },
 ];
 
@@ -219,6 +224,9 @@ const handleLogout = () => {
                         />
                         <Appearance
                             v-else-if="settingsModal.tab === 'appearance'"
+                        />
+                        <Recording
+                            v-else-if="settingsModal.tab === 'recording'"
                         />
                         <Billing
                             v-else-if="

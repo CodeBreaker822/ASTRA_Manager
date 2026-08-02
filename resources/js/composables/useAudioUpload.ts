@@ -24,6 +24,19 @@ type UploadResponse = {
     upgrade?: boolean;
 };
 
+type UploadRequestError = Error & {
+    status?: number;
+    serverMessage?: boolean;
+};
+
+type UploadSession = {
+    id: string;
+    totalChunks: number;
+    nextChunkIndex: number;
+    completeAttempts: number;
+    consumed: boolean;
+};
+
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 const UPLOAD_CHUNK_BYTES = 20 * 1024 * 1024;
 const SERVER_AUDIO_CHUNK_MS = 60 * 1000;
@@ -59,6 +72,7 @@ export const useAudioUpload = (options: {
     const selectedFile = ref<File | null>(null);
     const selectedDurationMs = ref(0);
     const currentXhr = ref<XMLHttpRequest | null>(null);
+    const uploadSession = ref<UploadSession | null>(null);
     const isPreparing = ref(false);
     const inFlight = ref(false);
     const pauseRequested = ref(false);
@@ -155,7 +169,7 @@ export const useAudioUpload = (options: {
 
         retryable.value = false;
         hasSession.value = true;
-        await sendUnfinished();
+        await sendSource();
     };
 
     const pause = () => {
@@ -178,10 +192,14 @@ export const useAudioUpload = (options: {
                 clip.meta = 'Ready to continue';
             }
         });
-        await sendUnfinished();
+        await sendSource();
     };
 
     const retry = async () => {
+        if (inFlight.value) {
+            return;
+        }
+
         retryable.value = false;
         clips.value.forEach((clip) => {
             if (['Failed', 'Cancelled'].includes(clip.status)) {
@@ -189,7 +207,7 @@ export const useAudioUpload = (options: {
                 clip.meta = 'Ready to retry';
             }
         });
-        await sendUnfinished();
+        await sendSource();
     };
 
     const cancel = () => {
@@ -210,10 +228,10 @@ export const useAudioUpload = (options: {
         }, 350);
     };
 
-    const sendUnfinished = async () => {
+    const sendSource = async () => {
         const projectId = options.projectId();
 
-        if (!projectId || inFlight.value) {
+        if (!projectId || inFlight.value || !selectedFile.value) {
             return;
         }
 
@@ -240,7 +258,7 @@ export const useAudioUpload = (options: {
         });
 
         try {
-            const payload = await postBatch(projectId);
+            const payload = await uploadSource(projectId);
 
             if (payload.upgrade) {
                 options.onUpgrade(
@@ -332,36 +350,52 @@ export const useAudioUpload = (options: {
             return;
         }
 
-        if (tracked.some((transcript) => transcript.status === 'failed')) {
+        const failedIds = tracked
+            .filter((transcript) => transcript.status === 'failed')
+            .map((transcript) => transcript.id);
+
+        if (failedIds.length > 0) {
+            // Failed transcripts must leave the tracked list, otherwise a
+            // stale failure keeps overriding the progress of a later retry.
+            queuedTranscriptIds.value = queuedTranscriptIds.value.filter(
+                (id) => !failedIds.includes(id),
+            );
+        }
+
+        const live = tracked.filter(
+            (transcript) => transcript.status !== 'failed',
+        );
+
+        if (live.length === 0) {
             markFailed(clips.value);
 
             return;
         }
 
-        const totalClips = tracked.reduce(
+        const totalClips = live.reduce(
             (total, transcript) =>
                 total + transcript.transcription_progress.total_clips,
             0,
         );
-        const processedClips = tracked.reduce(
+        const processedClips = live.reduce(
             (total, transcript) =>
                 total + transcript.transcription_progress.processed_clips,
             0,
         );
-        const durationSeconds = tracked.reduce(
+        const durationSeconds = live.reduce(
             (total, transcript) => total + transcript.duration_seconds,
             0,
         );
 
         syncServerClips(totalClips, processedClips, durationSeconds);
 
-        if (tracked.every((transcript) => transcript.status === 'completed')) {
+        if (live.every((transcript) => transcript.status === 'completed')) {
             finish();
 
             return;
         }
 
-        if (tracked.every((transcript) => transcript.status === 'queued')) {
+        if (live.every((transcript) => transcript.status === 'queued')) {
             status.value = 'Queued';
             metaLine.value = `Queued ${clips.value.length} ${clips.value.length === 1 ? 'clip' : 'clips'}`;
             clips.value.forEach((clip) => {
@@ -376,7 +410,7 @@ export const useAudioUpload = (options: {
             return;
         }
 
-        if (tracked.some((transcript) => transcript.status === 'processing')) {
+        if (live.some((transcript) => transcript.status === 'processing')) {
             status.value = 'Processing';
             metaLine.value = `Processing ${processedClips} of ${totalClips} ${totalClips === 1 ? 'clip' : 'clips'}`;
             clips.value.forEach((clip, index) => {
@@ -443,21 +477,45 @@ export const useAudioUpload = (options: {
         }
     };
 
-    const postBatch = async (projectId: number): Promise<UploadResponse> => {
+    const uploadSource = async (
+        projectId: number,
+    ): Promise<UploadResponse> => {
         const file = selectedFile.value;
 
         if (!file) {
             throw new Error('Select an audio file first.');
         }
 
-        const uploadId = makeUploadId();
         const totalChunks = Math.max(
             1,
             Math.ceil(file.size / UPLOAD_CHUNK_BYTES),
         );
-        let uploadedBytes = 0;
 
-        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+        // Reuse the pending session so pause/failure recovery resumes the
+        // same upload id instead of re-submitting the source from scratch.
+        // A consumed session means the server already claimed its chunks;
+        // only then may a brand-new upload id be issued.
+        if (
+            !uploadSession.value ||
+            uploadSession.value.consumed ||
+            uploadSession.value.totalChunks !== totalChunks
+        ) {
+            uploadSession.value = {
+                id: makeUploadId(),
+                totalChunks,
+                nextChunkIndex: 0,
+                completeAttempts: 0,
+                consumed: false,
+            };
+        }
+
+        const session = uploadSession.value;
+
+        for (
+            let chunkIndex = session.nextChunkIndex;
+            chunkIndex < totalChunks;
+            chunkIndex += 1
+        ) {
             if (pauseRequested.value) {
                 throw new Error('Audio upload could not be processed.');
             }
@@ -465,9 +523,10 @@ export const useAudioUpload = (options: {
             const start = chunkIndex * UPLOAD_CHUNK_BYTES;
             const end = Math.min(file.size, start + UPLOAD_CHUNK_BYTES);
             const chunk = file.slice(end > start ? start : 0, end || file.size);
+            const uploadedBytes = Math.min(start, file.size);
             const form = new FormData();
 
-            form.append('upload_id', uploadId);
+            form.append('upload_id', session.id);
             form.append('chunk_index', String(chunkIndex));
             form.append('total_chunks', String(totalChunks));
             form.append('total_size', String(file.size));
@@ -489,11 +548,11 @@ export const useAudioUpload = (options: {
                     status.value = 'Uploading source';
                 },
             );
-            uploadedBytes += chunk.size;
+            session.nextChunkIndex = chunkIndex + 1;
         }
 
         const completeForm = new FormData();
-        completeForm.append('upload_id', uploadId);
+        completeForm.append('upload_id', session.id);
 
         if (selectedDurationMs.value > 0) {
             completeForm.append(
@@ -504,11 +563,32 @@ export const useAudioUpload = (options: {
 
         uploadPercent.value = 99;
         status.value = 'Uploading source';
+        session.completeAttempts += 1;
+        const firstCompleteAttempt = session.completeAttempts === 1;
 
-        return xhrJson<UploadResponse>(
-            `/workspace/${projectId}/upload/complete`,
-            completeForm,
-        );
+        let payload: UploadResponse;
+
+        try {
+            payload = await xhrJson<UploadResponse>(
+                `/workspace/${projectId}/upload/complete`,
+                completeForm,
+            );
+        } catch (error) {
+            // Only a first-attempt definitive rejection proves the server
+            // discarded this session without creating a transcript. Any
+            // other failure is indeterminate (timeout, network, retry), so
+            // the session is kept: retrying it can never duplicate the
+            // source, while a fresh upload id could.
+            if (firstCompleteAttempt && isDefinitiveRejection(error)) {
+                uploadSession.value = null;
+            }
+
+            throw error;
+        }
+
+        session.consumed = true;
+
+        return payload;
     };
 
     const xhrJson = <T>(
@@ -544,12 +624,13 @@ export const useAudioUpload = (options: {
                     return;
                 }
 
-                reject(
-                    new Error(
-                        payload.message ??
-                            'Audio upload could not be processed.',
-                    ),
+                const error: UploadRequestError = new Error(
+                    payload.message ??
+                        'Audio upload could not be processed.',
                 );
+                error.status = xhr.status;
+                error.serverMessage = typeof payload.message === 'string';
+                reject(error);
             };
             xhr.onerror = () =>
                 reject(new Error('Audio upload could not be processed.'));
@@ -630,6 +711,7 @@ export const useAudioUpload = (options: {
         selectedFile.value = null;
         selectedDurationMs.value = 0;
         currentXhr.value = null;
+        uploadSession.value = null;
         isPreparing.value = false;
         inFlight.value = false;
         pauseRequested.value = false;
@@ -680,6 +762,11 @@ const parseJson = (value: string): UploadResponse => {
         return {};
     }
 };
+
+const isDefinitiveRejection = (error: unknown): boolean =>
+    error instanceof Error &&
+    (error as UploadRequestError).status === 422 &&
+    (error as UploadRequestError).serverMessage === true;
 
 const makeUploadId = () => {
     if (crypto.randomUUID) {

@@ -1,12 +1,14 @@
 import { usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 
-export type SettingsTab = 'profile' | 'security' | 'appearance' | 'billing';
+export type SettingsTab =
+    'profile' | 'security' | 'appearance' | 'recording' | 'billing';
 
 const settingsTabs: SettingsTab[] = [
     'profile',
     'security',
     'appearance',
+    'recording',
     'billing',
 ];
 

@@ -61,7 +61,7 @@ class TrackPageVisit
         $isBot = $this->isBot((string) $request->userAgent());
 
         $stat = PageVisitDailyStat::query()->firstOrCreate([
-            'visit_date' => now()->toDateString(),
+            'visit_date' => now()->startOfDay(),
             'path_hash' => hash('sha256', $path),
         ], [
             'route_name' => $routeName,

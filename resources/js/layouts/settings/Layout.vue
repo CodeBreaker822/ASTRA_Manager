@@ -3,6 +3,7 @@ import { Link, router, usePage } from '@inertiajs/vue3';
 import {
     CreditCard,
     LogOut,
+    Mic,
     Palette,
     ShieldCheck,
     UserRound,
@@ -38,6 +39,11 @@ const sidebarNavItems = computed<NavItem[]>(() => [
         title: 'Appearance',
         href: editAppearance(),
         icon: Palette,
+    },
+    {
+        title: 'Recording',
+        href: '/settings/recording',
+        icon: Mic,
     },
     {
         title: 'Billing',

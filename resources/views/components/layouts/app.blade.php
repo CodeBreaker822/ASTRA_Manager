@@ -9,7 +9,7 @@
         <meta name="description" content="Use JERVA Transcriber for online audio transcription, transcript cleanup, summaries, and exports.">
         <meta name="image" content="{{ asset('JervaLogo.png') }}">
 
-        <link rel="icon" href="/JervaLogo.png" type="image/png">
+        <link rel="icon" href="/favicon.ico" type="image/x-icon" sizes="any">
         <link rel="apple-touch-icon" href="/JervaLogo.png">
 
         <title>{{ config('app.name', 'JERVA Transcriber') }}</title>
