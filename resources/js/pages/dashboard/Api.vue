@@ -62,6 +62,15 @@ type ProviderLog = {
     error: string | null;
 };
 
+type ProviderLogPagination = {
+    current_page: number;
+    last_page: number;
+    per_page: number;
+    total: number;
+    from: number | null;
+    to: number | null;
+};
+
 type ProviderHealth = {
     status: 'online' | 'limited' | 'offline' | 'disabled';
     label: string;
@@ -139,6 +148,14 @@ const logsTitle = ref('Provider Log');
 const logsCategory = ref<ProviderCategory>('transcriber');
 const logsLoading = ref(false);
 const providerLogs = ref<ProviderLog[]>([]);
+const providerLogPagination = ref<ProviderLogPagination>({
+    current_page: 1,
+    last_page: 1,
+    per_page: 25,
+    total: 0,
+    from: null,
+    to: null,
+});
 const providerHealth = ref<Record<number, ProviderHealth>>({});
 const draggingProviderId = ref<number | null>(null);
 
@@ -178,6 +195,18 @@ const providerCatalog = computed<Record<string, ProviderCard>>(() =>
         providers.value.map((provider) => [provider.integration_key, provider]),
     ),
 );
+
+const providerLogPages = computed<number[]>(() => {
+    const current = providerLogPagination.value.current_page;
+    const last = providerLogPagination.value.last_page;
+    const start = Math.max(1, Math.min(current - 2, last - 4));
+    const end = Math.min(last, start + 4);
+
+    return Array.from(
+        { length: Math.max(0, end - start + 1) },
+        (_, index) => start + index,
+    );
+});
 
 const selectedProvider = computed(
     () => providerCatalog.value[selectedProviderKey.value],
@@ -593,10 +622,12 @@ async function openProviderLogs(category: ProviderCategory, title: string) {
     logsCategory.value = category;
     logsTitle.value = `${title} Log`;
     logsModalOpen.value = true;
-    await loadProviderLogs();
+    await loadProviderLogs(1);
 }
 
-async function loadProviderLogs() {
+async function loadProviderLogs(
+    page = providerLogPagination.value.current_page,
+) {
     logsLoading.value = true;
 
     try {
@@ -605,16 +636,44 @@ async function loadProviderLogs() {
             window.location.origin,
         );
         url.searchParams.set('category', logsCategory.value);
-        const payload = await requestJson<{ logs: ProviderLog[] }>(
-            url.toString(),
-        );
+        url.searchParams.set('page', String(page));
+        url.searchParams.set('per_page', '25');
+        const payload = await requestJson<{
+            logs: ProviderLog[];
+            pagination: ProviderLogPagination;
+        }>(url.toString());
         providerLogs.value = payload.logs ?? [];
+        providerLogPagination.value = payload.pagination;
     } catch (error) {
         providerLogs.value = [];
+        providerLogPagination.value = {
+            current_page: 1,
+            last_page: 1,
+            per_page: 25,
+            total: 0,
+            from: null,
+            to: null,
+        };
         showNotice(exceptionMessage(error), 'error');
     } finally {
         logsLoading.value = false;
     }
+}
+
+function providerLogSucceeded(log: ProviderLog): boolean {
+    return ['provider_succeeded', 'fallback_succeeded'].includes(log.status);
+}
+
+function providerLogStatus(log: ProviderLog): string {
+    if (log.status === 'provider_succeeded') {
+        return 'Succeeded';
+    }
+
+    if (log.status === 'fallback_succeeded') {
+        return 'Fallback succeeded';
+    }
+
+    return 'Failed; fallback continued';
 }
 
 function startDrag(provider: ProviderCard) {
@@ -1968,7 +2027,7 @@ function exceptionMessage(error: unknown): string {
     >
         <div class="flex min-h-full items-center justify-center p-4">
             <div
-                class="w-full max-w-4xl overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800"
+                class="w-full max-w-7xl overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800"
             >
                 <div
                     class="flex items-start justify-between border-b border-gray-200 px-6 py-4 dark:border-gray-700"
@@ -1982,14 +2041,14 @@ function exceptionMessage(error: unknown): string {
                         <p
                             class="mt-1 text-sm text-gray-500 dark:text-gray-400"
                         >
-                            Latest fallback failures and successful recoveries.
+                            Successful provider usage and fallback attempts.
                         </p>
                     </div>
                     <div class="flex items-center gap-3">
                         <button
                             type="button"
                             class="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                            @click="loadProviderLogs"
+                            @click="loadProviderLogs()"
                         >
                             Refresh
                         </button>
@@ -2002,7 +2061,7 @@ function exceptionMessage(error: unknown): string {
                         </button>
                     </div>
                 </div>
-                <div class="max-h-[65vh] overflow-y-auto p-6">
+                <div class="p-6">
                     <p
                         v-if="logsLoading"
                         class="py-8 text-center text-sm text-gray-500 dark:text-gray-400"
@@ -2013,62 +2072,200 @@ function exceptionMessage(error: unknown): string {
                         v-else-if="providerLogs.length === 0"
                         class="py-8 text-center text-sm text-gray-500 dark:text-gray-400"
                     >
-                        No fallback errors have been recorded for this group.
+                        No provider activity has been recorded for this group.
                     </p>
                     <div
                         v-else
-                        class="divide-y divide-gray-200 overflow-hidden rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700"
+                        class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700"
                     >
-                        <div
-                            v-for="log in providerLogs"
-                            :key="log.id"
-                            class="space-y-2 px-4 py-3"
-                        >
-                            <div
-                                class="flex flex-wrap items-center justify-between gap-2"
+                        <div class="max-h-[58vh] overflow-y-auto">
+                            <table
+                                class="min-w-full divide-y divide-gray-200 text-left text-sm dark:divide-gray-700"
                             >
-                                <p
-                                    class="text-sm font-semibold text-gray-900 dark:text-gray-100"
+                                <thead
+                                    class="sticky top-0 bg-gray-50 text-xs tracking-wide text-gray-500 uppercase dark:bg-gray-900 dark:text-gray-400"
                                 >
-                                    {{ log.provider || 'Unknown provider' }} ·
-                                    {{ log.model || 'Unknown model' }}
-                                </p>
-                                <span
-                                    class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
-                                    :class="
-                                        log.status === 'fallback_succeeded'
-                                            ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
-                                            : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'
-                                    "
+                                    <tr>
+                                        <th class="px-3 py-3 font-medium">#</th>
+                                        <th
+                                            class="px-3 py-3 font-medium whitespace-nowrap"
+                                        >
+                                            Date and time
+                                        </th>
+                                        <th class="px-3 py-3 font-medium">
+                                            Activity
+                                        </th>
+                                        <th class="px-3 py-3 font-medium">
+                                            Provider / model
+                                        </th>
+                                        <th class="px-3 py-3 font-medium">
+                                            Result
+                                        </th>
+                                        <th
+                                            class="px-3 py-3 font-medium whitespace-nowrap"
+                                        >
+                                            Attempt
+                                        </th>
+                                        <th class="px-3 py-3 font-medium">
+                                            HTTP
+                                        </th>
+                                        <th class="px-3 py-3 font-medium">
+                                            Details
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody
+                                    class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800"
                                 >
-                                    {{
-                                        log.status === 'fallback_succeeded'
-                                            ? 'Fallback recovered'
-                                            : 'Failed · fallback continued'
-                                    }}
-                                </span>
-                            </div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">
-                                {{
-                                    log.created_at
-                                        ? new Date(
-                                              log.created_at,
-                                          ).toLocaleString()
-                                        : 'Unknown time'
-                                }}
-                                · {{ log.source }} · Priority
-                                {{ log.fallback_position || '?' }}
-                                <span v-if="log.http_status">
-                                    · HTTP {{ log.http_status }}</span
-                                >
-                            </p>
-                            <p
-                                v-if="log.error"
-                                class="text-sm text-red-700 dark:text-red-300"
-                            >
-                                {{ log.error }}
-                            </p>
+                                    <tr
+                                        v-for="(log, index) in providerLogs"
+                                        :key="log.id"
+                                        class="align-top"
+                                    >
+                                        <td
+                                            class="px-3 py-3 whitespace-nowrap text-gray-500 dark:text-gray-400"
+                                        >
+                                            {{
+                                                (providerLogPagination.from ||
+                                                    1) + index
+                                            }}
+                                        </td>
+                                        <td
+                                            class="px-3 py-3 whitespace-nowrap text-gray-600 dark:text-gray-300"
+                                        >
+                                            {{
+                                                log.created_at
+                                                    ? new Date(
+                                                          log.created_at,
+                                                      ).toLocaleString()
+                                                    : 'Unknown time'
+                                            }}
+                                        </td>
+                                        <td
+                                            class="px-3 py-3 whitespace-nowrap text-gray-700 dark:text-gray-200"
+                                        >
+                                            {{ log.source }}
+                                        </td>
+                                        <td class="px-3 py-3">
+                                            <p
+                                                class="font-medium text-gray-900 dark:text-gray-100"
+                                            >
+                                                {{
+                                                    log.provider ||
+                                                    'Unknown provider'
+                                                }}
+                                            </p>
+                                            <p
+                                                class="mt-0.5 max-w-64 text-xs break-all text-gray-500 dark:text-gray-400"
+                                            >
+                                                {{
+                                                    log.model || 'Unknown model'
+                                                }}
+                                            </p>
+                                        </td>
+                                        <td class="px-3 py-3 whitespace-nowrap">
+                                            <span
+                                                class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+                                                :class="
+                                                    providerLogSucceeded(log)
+                                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
+                                                        : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'
+                                                "
+                                            >
+                                                {{ providerLogStatus(log) }}
+                                            </span>
+                                        </td>
+                                        <td
+                                            class="px-3 py-3 whitespace-nowrap text-gray-600 dark:text-gray-300"
+                                        >
+                                            {{ log.fallback_position || '?' }}
+                                        </td>
+                                        <td
+                                            class="px-3 py-3 whitespace-nowrap text-gray-600 dark:text-gray-300"
+                                        >
+                                            {{ log.http_status || '—' }}
+                                        </td>
+                                        <td
+                                            class="max-w-72 px-3 py-3 text-gray-600 dark:text-gray-300"
+                                        >
+                                            <span
+                                                v-if="log.error"
+                                                class="text-red-700 dark:text-red-300"
+                                                >{{ log.error }}</span
+                                            >
+                                            <span v-else>—</span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
+                    </div>
+                    <div
+                        v-if="!logsLoading && providerLogPagination.total > 0"
+                        class="mt-4 flex flex-wrap items-center justify-between gap-3"
+                    >
+                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                            Showing {{ providerLogPagination.from }}–{{
+                                providerLogPagination.to
+                            }}
+                            of
+                            {{ providerLogPagination.total }}
+                        </p>
+                        <nav
+                            class="flex items-center gap-1"
+                            aria-label="Provider log pages"
+                        >
+                            <button
+                                type="button"
+                                class="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:text-gray-200"
+                                :disabled="
+                                    logsLoading ||
+                                    providerLogPagination.current_page <= 1
+                                "
+                                @click="
+                                    loadProviderLogs(
+                                        providerLogPagination.current_page - 1,
+                                    )
+                                "
+                            >
+                                Previous
+                            </button>
+                            <button
+                                v-for="page in providerLogPages"
+                                :key="page"
+                                type="button"
+                                class="min-w-9 rounded-md border px-3 py-1.5 text-sm"
+                                :class="
+                                    page === providerLogPagination.current_page
+                                        ? 'border-blue-600 bg-blue-600 text-white'
+                                        : 'border-gray-300 text-gray-700 dark:border-gray-600 dark:text-gray-200'
+                                "
+                                :aria-current="
+                                    page === providerLogPagination.current_page
+                                        ? 'page'
+                                        : undefined
+                                "
+                                @click="loadProviderLogs(page)"
+                            >
+                                {{ page }}
+                            </button>
+                            <button
+                                type="button"
+                                class="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:text-gray-200"
+                                :disabled="
+                                    logsLoading ||
+                                    providerLogPagination.current_page >=
+                                        providerLogPagination.last_page
+                                "
+                                @click="
+                                    loadProviderLogs(
+                                        providerLogPagination.current_page + 1,
+                                    )
+                                "
+                            >
+                                Next
+                            </button>
+                        </nav>
                     </div>
                 </div>
             </div>

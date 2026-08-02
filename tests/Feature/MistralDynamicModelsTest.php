@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\API;
+use App\Models\TranscriptionApiRequestLog;
 use App\Models\TranscriptionProviderSetting;
 use App\Models\User;
 use App\Services\AppSettingsService;
@@ -157,6 +158,7 @@ test('mistral transcription service fetches valid models and transcribes with th
         ->and($result['timestamps'][0]['speaker_id'])->toBe('speaker_0');
 
     Http::assertSent(fn ($request): bool => $request->url() === $transcriptionUrl);
+
 });
 
 test('mistral cleaner fetches only chat-capable text models when no model list is supplied', function () {
@@ -245,6 +247,13 @@ test('transcription api uses the dynamically selected mistral voxtral provider',
         ->assertJsonPath('clips.0.attempted_providers', [AppSettingsService::PROVIDER_MISTRAL_TRANSCRIPTION]);
 
     Http::assertSent(fn ($request): bool => $request->url() === $transcriptionUrl);
+
+    $this->assertDatabaseHas(TranscriptionApiRequestLog::class, [
+        'operation' => 'transcribe_provider',
+        'status' => 'provider_succeeded',
+        'provider' => AppSettingsService::PROVIDER_MISTRAL_TRANSCRIPTION,
+        'model' => 'voxtral-mini-2602',
+    ]);
 });
 
 test('polish api uses a dynamically fetched mistral cleaner model', function () {
@@ -304,4 +313,11 @@ test('polish api uses a dynamically fetched mistral cleaner model', function () 
 
     Http::assertSent(fn ($request): bool => $request->url() === $chatUrl
         && $request['model'] === 'mistral-small-latest');
+
+    $this->assertDatabaseHas(TranscriptionApiRequestLog::class, [
+        'operation' => 'polish_provider',
+        'status' => 'provider_succeeded',
+        'provider' => AppSettingsService::PROVIDER_MISTRAL,
+        'model' => 'mistral-small-latest',
+    ]);
 });

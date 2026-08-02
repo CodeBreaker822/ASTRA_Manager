@@ -149,7 +149,7 @@ class EntitlementService
                 throw new InsufficientWalletBalanceException;
             }
 
-            $this->recordUsage($usage, $feature, $units);
+            $this->recordUsage($usage, $feature, $units, $costCents);
 
             if ($costCents > 0) {
                 $lockedUser->forceFill([
@@ -194,14 +194,33 @@ class EntitlementService
         return max(1, (int) ceil($cost * 100));
     }
 
-    private function recordUsage(UsageRecord $usage, string $feature, float $units): void
+    private function recordUsage(UsageRecord $usage, string $feature, float $units, int $costCents): void
     {
-        match ($feature) {
-            'upload', 'live' => $usage->increment('seconds_transcribed', (int) ceil($units)),
-            'polish' => $usage->increment('polish_count'),
-            'summarize' => $usage->increment('summary_count'),
+        $increments = match ($feature) {
+            'upload' => [
+                'seconds_transcribed' => (int) ceil($units),
+                'charged_cents' => $costCents,
+                'upload_charged_cents' => $costCents,
+            ],
+            'live' => [
+                'seconds_transcribed' => (int) ceil($units),
+                'charged_cents' => $costCents,
+                'live_charged_cents' => $costCents,
+            ],
+            'polish' => [
+                'polish_count' => 1,
+                'charged_cents' => $costCents,
+                'polish_charged_cents' => $costCents,
+            ],
+            'summarize' => [
+                'summary_count' => 1,
+                'charged_cents' => $costCents,
+                'summary_charged_cents' => $costCents,
+            ],
             default => throw new \InvalidArgumentException("Unknown billing feature: {$feature}"),
         };
+
+        $usage->incrementEach($increments);
     }
 
     private function freeSecondsRemaining(UsageRecord $usage): int

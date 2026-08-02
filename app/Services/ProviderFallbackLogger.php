@@ -62,6 +62,32 @@ class ProviderFallbackLogger
     /**
      * @param  ProviderPayload  $provider
      */
+    public function success(
+        string $category,
+        string $operation,
+        array $provider,
+        int $position,
+        ?Request $request = null,
+        ?API $license = null,
+    ): void {
+        $this->write([
+            'category' => $category,
+            'operation' => $operation,
+            'provider' => $provider,
+            'position' => $position,
+            'request' => $request,
+            'license' => $license,
+            'status' => $position === 0 ? 'provider_succeeded' : 'fallback_succeeded',
+            'severity' => 'low',
+            'http_status' => 200,
+            'error_message' => null,
+            'exception' => null,
+        ]);
+    }
+
+    /**
+     * @param  ProviderPayload  $provider
+     */
     public function recovered(
         string $category,
         string $operation,
@@ -70,23 +96,7 @@ class ProviderFallbackLogger
         ?Request $request = null,
         ?API $license = null,
     ): void {
-        if ($position === 0) {
-            return;
-        }
-
-        $this->write([
-            'category' => $category,
-            'operation' => $operation,
-            'provider' => $provider,
-            'position' => $position,
-            'request' => $request,
-            'license' => $license,
-            'status' => 'fallback_succeeded',
-            'severity' => 'low',
-            'http_status' => 200,
-            'error_message' => null,
-            'exception' => null,
-        ]);
+        $this->success($category, $operation, $provider, $position, $request, $license);
     }
 
     /**
@@ -107,7 +117,7 @@ class ProviderFallbackLogger
                 'license_token_prefix' => $this->tokens->prefix($request?->bearerToken()),
                 'license_token_hash' => $this->tokens->hash($request?->bearerToken()),
                 'operation' => $data['operation'].'_provider',
-                'endpoint' => $request ? '/'.$request->path() : '/chatbot',
+                'endpoint' => $request ? '/'.$request->path() : '/internal/'.$data['operation'],
                 'http_method' => $request?->method() ?? 'INTERNAL',
                 'status' => $data['status'],
                 'severity' => $data['severity'],
@@ -124,11 +134,12 @@ class ProviderFallbackLogger
                 'response_summary' => [
                     'continued_to_fallback' => $data['status'] === 'fallback_failed',
                     'recovered_by_fallback' => $data['status'] === 'fallback_succeeded',
+                    'provider_succeeded' => in_array($data['status'], ['provider_succeeded', 'fallback_succeeded'], true),
                 ],
                 'error_message' => $data['error_message'],
             ]);
         } catch (Throwable $loggingException) {
-            Log::warning('Unable to write provider fallback log.', [
+            Log::warning('Unable to write provider attempt log.', [
                 'operation' => $data['operation'],
                 'provider' => $provider['provider'] ?? null,
                 'model' => $provider['model'] ?? null,
@@ -137,7 +148,7 @@ class ProviderFallbackLogger
             ]);
         }
 
-        Log::log($data['status'] === 'fallback_failed' ? 'warning' : 'info', 'Provider fallback attempt recorded.', [
+        Log::log($data['status'] === 'fallback_failed' ? 'warning' : 'info', 'Provider attempt recorded.', [
             'operation' => $data['operation'],
             'provider' => $provider['provider'] ?? null,
             'model' => $provider['model'] ?? null,

@@ -355,10 +355,16 @@ class TranscriptionController extends Controller
                     );
                     $usedProvider = $provider;
                     $fallbackUsed = $position > 0;
-                    app(ProviderFallbackLogger::class)->recovered('text_fixer', 'polish', $provider, $position, $request, $license);
+                    $operation = $this->isSummaryTask($validated['task'] ?? null, $validated['instruction'] ?? null)
+                        ? 'summarize'
+                        : 'polish';
+                    app(ProviderFallbackLogger::class)->success('text_fixer', $operation, $provider, $position, $request, $license);
                     break;
                 } catch (Throwable $exception) {
-                    app(ProviderFallbackLogger::class)->failure('text_fixer', 'polish', $provider, $position, $exception, $request, $license);
+                    $operation = $this->isSummaryTask($validated['task'] ?? null, $validated['instruction'] ?? null)
+                        ? 'summarize'
+                        : 'polish';
+                    app(ProviderFallbackLogger::class)->failure('text_fixer', $operation, $provider, $position, $exception, $request, $license);
                     report($exception);
                 }
             }
@@ -1170,6 +1176,8 @@ class TranscriptionController extends Controller
                 'finished_at' => now(),
             ])->save();
 
+            app(ProviderFallbackLogger::class)->success('transcriber', 'transcribe', $provider, 0, $request, $license);
+
             $this->deleteAsyncTranscriptionAudio($payload);
         } catch (Throwable $exception) {
             app(ProviderFallbackLogger::class)->failure('transcriber', 'transcribe', $provider, 0, $exception, $request, $license);
@@ -1477,6 +1485,8 @@ class TranscriptionController extends Controller
                 $clips,
             ));
 
+            app(ProviderFallbackLogger::class)->success('transcriber', 'transcribe', $provider, 0, $request, $license);
+
             return [
                 'clips' => array_map(function (array $clip, int $index) use ($results): array {
                     $result = $this->resultForBatchClip($results, $clip, $index);
@@ -1594,9 +1604,7 @@ class TranscriptionController extends Controller
             try {
                 $result = $this->transcribeUsingProvider($provider, $clip['audio'], $clip);
 
-                if ($offset > 0) {
-                    app(ProviderFallbackLogger::class)->recovered('transcriber', 'transcribe', $provider, $offset, $request, $license);
-                }
+                app(ProviderFallbackLogger::class)->success('transcriber', 'transcribe', $provider, $offset, $request, $license);
 
                 return [
                     'result' => $result,
@@ -1778,16 +1786,14 @@ class TranscriptionController extends Controller
                     false,
                 );
 
-                if ($offset > 0) {
-                    app(ProviderFallbackLogger::class)->recovered(
-                        'text_fixer',
-                        'polish',
-                        $provider,
-                        $offset,
-                        $request,
-                        $license,
-                    );
-                }
+                app(ProviderFallbackLogger::class)->success(
+                    'text_fixer',
+                    'summarize',
+                    $provider,
+                    $offset,
+                    $request,
+                    $license,
+                );
 
                 return [
                     'result' => $result,
@@ -1798,7 +1804,7 @@ class TranscriptionController extends Controller
                 $lastException = $exception;
                 app(ProviderFallbackLogger::class)->failure(
                     'text_fixer',
-                    'polish',
+                    'summarize',
                     $provider,
                     $offset,
                     $exception,

@@ -73,6 +73,7 @@ class HandleInertiaRequests extends Middleware
         $canManagePricing = $user?->can('cms.manage-pricing') ?? false;
         $canManagePages = $user?->can('cms.manage-pages') ?? false;
         $canViewCms = $user?->can('cms.view') ?? false;
+        $canViewAnalytics = $user?->can('analytics.view') ?? false;
 
         return [
             ...parent::share($request),
@@ -87,6 +88,7 @@ class HandleInertiaRequests extends Middleware
                 'canManageBlog' => $canManageBlog,
                 'canManagePricing' => $canManagePricing,
                 'canManagePages' => $canManagePages,
+                'canViewAnalytics' => $canViewAnalytics,
             ],
             'flash' => fn () => [
                 'toast' => $request->session()->get('toast'),

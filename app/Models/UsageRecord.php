@@ -14,6 +14,11 @@ use Illuminate\Support\Carbon;
  * @property int $seconds_transcribed
  * @property int $polish_count
  * @property int $summary_count
+ * @property int $charged_cents
+ * @property int $upload_charged_cents
+ * @property int $live_charged_cents
+ * @property int $polish_charged_cents
+ * @property int $summary_charged_cents
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -23,6 +28,11 @@ use Illuminate\Support\Carbon;
     'seconds_transcribed',
     'polish_count',
     'summary_count',
+    'charged_cents',
+    'upload_charged_cents',
+    'live_charged_cents',
+    'polish_charged_cents',
+    'summary_charged_cents',
 ])]
 class UsageRecord extends Model
 {
@@ -32,6 +42,11 @@ class UsageRecord extends Model
             'seconds_transcribed' => 'integer',
             'polish_count' => 'integer',
             'summary_count' => 'integer',
+            'charged_cents' => 'integer',
+            'upload_charged_cents' => 'integer',
+            'live_charged_cents' => 'integer',
+            'polish_charged_cents' => 'integer',
+            'summary_charged_cents' => 'integer',
         ];
     }
 

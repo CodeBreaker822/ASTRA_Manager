@@ -19,6 +19,7 @@ TEXT;
     public function __construct(
         private readonly AppSettingsService $settings,
         private readonly WebApiTranscriptionClient $transcriptionClient,
+        private readonly ProviderFallbackLogger $providerLogger,
     ) {}
 
     /**
@@ -453,13 +454,17 @@ TEXT;
             throw new \RuntimeException('All configured text-fixer providers are unavailable.');
         }
 
-        foreach ($providers as $provider) {
+        foreach ($providers as $position => $provider) {
             try {
-                return $this->cleanerForProvider($provider)->clean($text, [], [
+                $result = $this->cleanerForProvider($provider)->clean($text, [], [
                     'instructions' => $instruction,
                     'task' => $task,
                 ]);
+                $this->providerLogger->success('text_fixer', $task, $provider, $position);
+
+                return $result;
             } catch (Throwable $exception) {
+                $this->providerLogger->failure('text_fixer', $task, $provider, $position, $exception);
                 Log::warning('Web transcript text fixer provider failed.', [
                     'provider' => $provider['provider'] ?? null,
                     'task' => $task,

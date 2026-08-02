@@ -24,6 +24,15 @@ class UserGates
             return self::checkPermission($user, 'user.manage-permissions');
         });
 
+        Gate::define('analytics.view', function (User $user): bool {
+            return self::checkAnyPermission($user, [
+                'analytics.view',
+                'user.manage-users',
+                'user.manage-profiles',
+                'API-manage_api',
+            ]);
+        });
+
         // Certificate Management Gates
         Gate::define('certificates.view', function (User $user): bool {
             return self::checkPermission($user, 'certificates.view');

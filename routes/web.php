@@ -34,6 +34,9 @@ Route::middleware('guest')->group(function (): void {
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('dashboard/analytics/users.csv', [DashboardController::class, 'exportUsers'])
+        ->middleware('can:analytics.view')
+        ->name('dashboard.analytics.users.export');
     Route::middleware('can:cms.manage-blog')->prefix('dashboard/blog')->name('dashboard.blog.')->group(function (): void {
         Route::get('/', [DashboardBlogController::class, 'index'])->name('index');
         Route::get('create', [DashboardBlogController::class, 'create'])->name('create');

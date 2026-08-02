@@ -25,7 +25,7 @@ class ChatbotService
             try {
                 $response = $this->chatWithProvider($provider, $messages);
                 $this->updateSessionContext($userId);
-                $this->fallbackLogger->recovered('text_fixer', 'chatbot', $provider, $position, request());
+                $this->fallbackLogger->success('text_fixer', 'chatbot', $provider, $position, request());
 
                 Log::info('Chatbot provider request completed.', [
                     'provider' => $provider['provider'],

@@ -19,6 +19,7 @@ export type Auth = {
     canManageBlog: boolean;
     canManagePricing: boolean;
     canManagePages: boolean;
+    canViewAnalytics: boolean;
 };
 
 export type TwoFactorConfigContent = {

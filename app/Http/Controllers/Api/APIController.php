@@ -195,35 +195,47 @@ class APIController extends Controller
         ]);
     }
 
-    public function transcriptionProviderLogs(Request $request, AppSettingsService $settings): JsonResponse
+    public function transcriptionProviderLogs(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'category' => ['required', 'in:transcriber,text_fixer'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', Rule::in([10, 25, 50])],
         ]);
 
         $operations = $validated['category'] === 'transcriber'
             ? ['transcribe_provider']
-            : ['polish_provider', 'chatbot_provider'];
+            : ['polish_provider', 'summarize_provider', 'chatbot_provider'];
 
-        $providerNames = collect($settings->providerCards())
-            ->groupBy('provider')
-            ->map(fn ($providers): string => (string) $providers->first()['name']);
-
-        $logs = TranscriptionApiRequestLog::query()
+        $paginator = TranscriptionApiRequestLog::query()
+            ->select([
+                'id',
+                'created_at',
+                'operation',
+                'provider',
+                'model',
+                'status',
+                'http_status',
+                'request_summary',
+                'error_message',
+            ])
             ->whereIn('operation', $operations)
-            ->latest()
-            ->limit(100)
-            ->get()
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->paginate((int) ($validated['per_page'] ?? 25));
+
+        $logs = $paginator->getCollection()
             ->map(fn (TranscriptionApiRequestLog $log): array => [
                 'id' => $log->id,
                 'created_at' => $log->created_at?->toISOString(),
                 'source' => match ($log->operation) {
                     'transcribe_provider' => 'Transcription',
                     'polish_provider' => 'Text polishing',
+                    'summarize_provider' => 'Summarization',
                     'chatbot_provider' => 'Chatbot',
                     default => $log->operation,
                 },
-                'provider' => $providerNames->get($log->provider, Str::headline((string) $log->provider)),
+                'provider' => $this->transcriptionProviderName($log->provider),
                 'model' => $log->model,
                 'status' => $log->status,
                 'http_status' => $log->http_status,
@@ -231,7 +243,42 @@ class APIController extends Controller
                 'error' => $log->error_message,
             ]);
 
-        return response()->json(['logs' => $logs]);
+        return response()->json([
+            'logs' => $logs->values(),
+            'pagination' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'from' => $paginator->firstItem(),
+                'to' => $paginator->lastItem(),
+            ],
+        ]);
+    }
+
+    private function transcriptionProviderName(?string $provider): string
+    {
+        return match ($provider) {
+            AppSettingsService::PROVIDER_DEEPGRAM => 'Deepgram',
+            AppSettingsService::PROVIDER_ELEVENLABS => 'ElevenLabs',
+            AppSettingsService::PROVIDER_SPEECHMATICS => 'Speechmatics',
+            AppSettingsService::PROVIDER_GROQ_TRANSCRIPTION,
+            AppSettingsService::PROVIDER_GROQ_TEXT_FIXER => 'Groq',
+            AppSettingsService::PROVIDER_MISTRAL_TRANSCRIPTION,
+            AppSettingsService::PROVIDER_MISTRAL => 'Mistral AI',
+            AppSettingsService::PROVIDER_GLADIA => 'Gladia',
+            AppSettingsService::PROVIDER_ASSEMBLYAI => 'AssemblyAI',
+            AppSettingsService::PROVIDER_AZURE_SPEECH => 'Azure Speech',
+            AppSettingsService::PROVIDER_GOOGLE_SPEECH => 'Google Cloud Speech-to-Text',
+            AppSettingsService::PROVIDER_AWS_TRANSCRIBE => 'Amazon Transcribe',
+            AppSettingsService::PROVIDER_RUNPOD => 'RunPod Cebuano/Bisaya Epoch 1',
+            AppSettingsService::PROVIDER_GEMINI => 'Gemini',
+            AppSettingsService::PROVIDER_DEEPSEEK => 'DeepSeek',
+            AppSettingsService::PROVIDER_CEREBRAS => 'Cerebras',
+            AppSettingsService::PROVIDER_OPENROUTER => 'OpenRouter',
+            AppSettingsService::PROVIDER_CLOUDFLARE => 'Cloudflare Workers AI',
+            default => Str::headline((string) $provider),
+        };
     }
 
     public function reorderTranscriptionProviders(Request $request, AppSettingsService $settings): JsonResponse

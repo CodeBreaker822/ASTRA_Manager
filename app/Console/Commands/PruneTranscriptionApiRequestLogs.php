@@ -24,10 +24,10 @@ class PruneTranscriptionApiRequestLogs extends Command
 
         $plans = [
             'successful logs' => TranscriptionApiRequestLog::query()
-                ->where('status', 'success')
+                ->whereIn('status', ['success', 'provider_succeeded', 'fallback_succeeded'])
                 ->where('created_at', '<', now()->subDays($successDays)),
             'non-critical failed logs' => TranscriptionApiRequestLog::query()
-                ->where('status', '!=', 'success')
+                ->whereNotIn('status', ['success', 'provider_succeeded', 'fallback_succeeded'])
                 ->where('severity', '!=', 'critical')
                 ->where('created_at', '<', now()->subDays($noncriticalDays)),
             'critical logs' => TranscriptionApiRequestLog::query()
