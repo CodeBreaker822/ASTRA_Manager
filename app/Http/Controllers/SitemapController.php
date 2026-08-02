@@ -12,7 +12,7 @@ class SitemapController extends Controller
     public function __invoke(): Response
     {
         $pageDates = PageContent::query()
-            ->whereIn('page', ['home', 'features', 'pricing', 'download'])
+            ->whereIn('page', ['home', 'audio_to_text', 'features', 'pricing', 'download', 'blog'])
             ->selectRaw('page, MAX(updated_at) as last_modified')
             ->groupBy('page')
             ->pluck('last_modified', 'page');
@@ -24,12 +24,19 @@ class SitemapController extends Controller
             ->orderByDesc('published_at')
             ->get(['slug', 'published_at', 'updated_at']);
 
-        $blogLastModified = $posts
-            ->map(fn (BlogPost $post): Carbon => $post->updated_at->max($post->published_at))
+        $blogLastModified = collect([
+            $pageDates->get('blog'),
+            $posts
+                ->map(fn (BlogPost $post) => $post->updated_at->max($post->published_at))
+                ->max(),
+        ])
+            ->filter()
+            ->map(fn (mixed $date) => Carbon::parse($date))
             ->max();
 
         $urls = [
             $this->url(route('home'), $pageDates->get('home'), 'weekly', '1.0'),
+            $this->url(route('audio-to-text'), $pageDates->get('audio_to_text'), 'weekly', '0.9'),
             $this->url(route('features'), $pageDates->get('features'), 'monthly', '0.8'),
             $this->url(route('price'), $pageDates->get('pricing'), 'weekly', '0.8'),
             $this->url(route('download'), $pageDates->get('download'), 'weekly', '0.9'),

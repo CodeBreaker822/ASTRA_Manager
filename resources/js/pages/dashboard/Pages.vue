@@ -1,614 +1,508 @@
 <script setup lang="ts">
-import { Head, Link, useForm } from '@inertiajs/vue3';
-import { Save } from '@lucide/vue';
-import { computed } from 'vue';
+import { Head, router } from '@inertiajs/vue3';
+import type { RequestPayload } from '@inertiajs/core';
+import {
+    AlertCircle,
+    CheckCircle2,
+    ExternalLink,
+    FilePenLine,
+    LayoutTemplate,
+    Save,
+    Search,
+} from '@lucide/vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import ContentField from '@/components/cms/ContentField.vue';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import DashboardLayout from '@/layouts/dashboard/Layout.vue';
 
-type SeoContent = { title: string; description: string };
-type HeroContent = {
-    eyebrow: string;
-    title: string;
-    intro: string;
-    online_button_label?: string;
-    desktop_button_label?: string;
-};
-type FaqItem = { question: string; answer: string };
-type TextItem = { title: string; body: string };
-type IconItem = TextItem & { icon: string };
-type FeatureRow = IconItem & {
-    eyebrow: string;
-    bullets: string[];
-};
+type JsonPrimitive = string | number | boolean | null;
+type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
+type JsonObject = { [key: string]: JsonValue };
 
-type HomeContent = {
-    seo: SeoContent;
-    hero: HeroContent & {
-        online_button_label: string;
-        desktop_button_label: string;
-    };
-    paths: Array<
-        TextItem & {
-            eyebrow: string;
-            bullets: string[];
-            button_label: string;
-            button_url: string;
-        }
-    >;
-    workflow: { title: string; intro: string; steps: TextItem[] };
-    use_cases: { title: string; intro: string; items: TextItem[] };
-    vad: { eyebrow: string; title: string; body: string; note: string };
-    faq: FaqItem[];
-    cta: {
-        title: string;
-        body: string;
-        online_button_label: string;
-        desktop_button_label: string;
-    };
+type PageOption = {
+    key: string;
+    label: string;
+    description: string;
+    preview_url: string;
 };
-
-type FeaturesContent = {
-    seo: SeoContent;
-    hero: HeroContent;
-    feature_rows: FeatureRow[];
-    comparison: {
-        title: string;
-        intro: string;
-        rows: Array<{ label: string; online: string; desktop: string }>;
-    };
-    faq: FaqItem[];
-    cta: {
-        title: string;
-        body: string;
-        online_button_label: string;
-        desktop_button_label: string;
-    };
-};
-
-type DownloadContent = {
-    seo: SeoContent;
-    hero: HeroContent;
-    download_card: {
-        title: string;
-        body: string;
-        button_label: string;
-        empty_label: string;
-    };
-    benefits: IconItem[];
-    models: {
-        title: string;
-        intro: string;
-        items: Array<{ name: string; size: string; best_for: string }>;
-        note: string;
-    };
-    requirements: IconItem[];
-    steps: { title: string; items: TextItem[] };
-    account: {
-        title: string;
-        body: string;
-        bullets: string[];
-        button_label: string;
-    };
-    faq: FaqItem[];
-};
-
-type PageFormContent = HomeContent | FeaturesContent | DownloadContent;
 
 const props = defineProps<{
-    pageKey: 'home' | 'features' | 'download';
+    pageKey: string;
     title: string;
-    content: PageFormContent;
+    description: string;
+    previewUrl: string;
+    pageOptions: PageOption[];
+    content: JsonObject;
+    schema: JsonObject;
 }>();
 
-defineOptions({ layout: DashboardLayout });
+defineOptions({
+    layout: DashboardLayout,
+});
 
-const form = useForm({
-    content: JSON.parse(JSON.stringify(props.content)) as PageFormContent,
+const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+const content = ref<JsonObject>(clone(props.content));
+const originalContent = ref(JSON.stringify(props.content));
+const processing = ref(false);
+const recentlySaved = ref(false);
+const errors = ref<Record<string, string>>({});
+let savedTimer: ReturnType<typeof setTimeout> | null = null;
+let removeNavigationGuard: VoidFunction | null = null;
+let allowNextVisit = false;
+const activeSection = ref(Object.keys(props.schema)[0] ?? '');
+const isDirty = computed(
+    () => JSON.stringify(content.value) !== originalContent.value,
+);
+
+const sectionNames: Record<string, string> = {
+    seo: 'Search preview',
+    schema: 'Search data',
+    brand: 'Brand',
+    navigation: 'Header navigation',
+    footer: 'Footer',
+    pricing_proof: 'Shared pricing facts',
+    hero: 'Hero section',
+    workspace_preview: 'Workspace preview',
+    pricing_note: 'Pricing note',
+    paths_intro: 'Workflow choices heading',
+    paths: 'Transcription choices',
+    workflow: 'How it works',
+    use_cases: 'Use cases',
+    vad: 'Voice activity detection',
+    benefits: 'Benefits',
+    benefits_intro: 'Benefits heading',
+    hero_preview: 'Hero illustration',
+    comparison: 'Comparison',
+    limitations: 'Important limitations',
+    guides: 'Recommended guides',
+    feature_rows: 'Feature sections',
+    feature_visual: 'Feature illustration labels',
+    download_card: 'Download card',
+    models: 'Whisper models',
+    requirements: 'System requirements',
+    requirements_intro: 'Requirements heading',
+    steps: 'Getting started steps',
+    account: 'Online account option',
+    topics: 'Blog topics',
+    index: 'Blog landing labels',
+    article: 'Article layout',
+    article_cta: 'Article call to action',
+    plans_ui: 'Pricing-card labels',
+    faq_heading: 'FAQ heading',
+    faq: 'Frequently asked questions',
+    cta: 'Final call to action',
+};
+
+const sectionDescriptions: Record<string, string> = {
+    seo: 'Control the page title and summary shown by search engines and social previews.',
+    schema: 'Advanced names and descriptions supplied to search engines as structured data.',
+    navigation: 'Edit the main menu, sign-in link, and primary header button.',
+    pricing_proof: 'These five fact boxes appear on several marketing pages.',
+    workspace_preview:
+        'Edit the example workspace shown beside the home-page headline.',
+    article: 'Labels and safety copy shared by every published blog article.',
+    plans_ui:
+        'Edit public labels only. Use Pricing Manager to change rates and allowances.',
+    faq: 'Add, reorder, or remove questions. Keep answers direct and honest.',
+};
+
+const humanize = (key: string): string =>
+    sectionNames[key] ??
+    key.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const sections = computed(() =>
+    Object.keys(props.schema).map((key) => ({
+        key,
+        label: humanize(key),
+        description:
+            sectionDescriptions[key] ??
+            `Edit the content used in the ${humanize(key).toLowerCase()} section.`,
+    })),
+);
+
+const seo = computed(() => {
+    const value = content.value.seo;
+
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+
+    const object = value as JsonObject;
+
+    return {
+        title: typeof object.title === 'string' ? object.title : '',
+        description:
+            typeof object.description === 'string' ? object.description : '',
+    };
 });
-const isHome = computed(() => props.pageKey === 'home');
-const isFeatures = computed(() => props.pageKey === 'features');
-const isDownload = computed(() => props.pageKey === 'download');
-const homeContent = computed(() => form.content as HomeContent);
-const featuresContent = computed(() => form.content as FeaturesContent);
-const downloadContent = computed(() => form.content as DownloadContent);
-const faqContent = computed(() => {
-    if (isHome.value) return homeContent.value.faq;
-    if (isFeatures.value) return featuresContent.value.faq;
-    return downloadContent.value.faq;
+
+const status = computed(() => {
+    if (processing.value) {
+        return { label: 'Saving…', className: 'text-blue-700', icon: null };
+    }
+
+    if (recentlySaved.value) {
+        return {
+            label: 'Saved',
+            className: 'text-emerald-700',
+            icon: CheckCircle2,
+        };
+    }
+
+    if (isDirty.value) {
+        return {
+            label: 'Unsaved changes',
+            className: 'text-amber-700',
+            icon: AlertCircle,
+        };
+    }
+
+    return {
+        label: 'All changes saved',
+        className: 'text-slate-500',
+        icon: CheckCircle2,
+    };
 });
+
+const errorMessages = computed(() => [...new Set(Object.values(errors.value))]);
+
+const updateSection = (key: string, value: unknown) => {
+    content.value[key] = value as JsonValue;
+    recentlySaved.value = false;
+};
 
 const submit = () => {
-    form.put(`/dashboard/pages/${props.pageKey}`, { preserveScroll: true });
+    allowNextVisit = true;
+    router.put(
+        `/dashboard/pages/${props.pageKey}`,
+        { content: content.value } as unknown as RequestPayload,
+        {
+            preserveScroll: true,
+            onStart: () => {
+                processing.value = true;
+                errors.value = {};
+            },
+            onError: (serverErrors) => {
+                errors.value = Object.fromEntries(
+                    Object.entries(serverErrors).map(([key, value]) => [
+                        key,
+                        String(value),
+                    ]),
+                );
+            },
+            onSuccess: () => {
+                originalContent.value = JSON.stringify(content.value);
+                recentlySaved.value = true;
+
+                if (savedTimer) {
+                    clearTimeout(savedTimer);
+                }
+
+                savedTimer = setTimeout(() => {
+                    recentlySaved.value = false;
+                }, 3000);
+            },
+            onFinish: () => {
+                processing.value = false;
+            },
+        },
+    );
 };
+
+const switchPage = (event: Event) => {
+    const target = event.target as HTMLSelectElement;
+    const page = target.value;
+
+    if (page === props.pageKey) {
+        return;
+    }
+
+    if (
+        isDirty.value &&
+        !window.confirm('Leave this page and discard your unsaved changes?')
+    ) {
+        target.value = props.pageKey;
+
+        return;
+    }
+
+    allowNextVisit = true;
+    router.visit(`/dashboard/pages/${page}`);
+};
+
+const scrollToSection = (key: string) => {
+    activeSection.value = key;
+    document.getElementById(`section-${key}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+    });
+};
+
+const beforeUnload = (event: BeforeUnloadEvent) => {
+    if (!isDirty.value) {
+        return;
+    }
+
+    event.preventDefault();
+    event.returnValue = '';
+};
+
+onMounted(() => {
+    window.addEventListener('beforeunload', beforeUnload);
+    removeNavigationGuard = router.on('before', () => {
+        if (allowNextVisit) {
+            allowNextVisit = false;
+
+            return true;
+        }
+
+        if (!isDirty.value) {
+            return true;
+        }
+
+        return window.confirm(
+            'Leave this page and discard your unsaved changes?',
+        );
+    });
+});
+onBeforeUnmount(() => {
+    window.removeEventListener('beforeunload', beforeUnload);
+    removeNavigationGuard?.();
+
+    if (savedTimer) {
+        clearTimeout(savedTimer);
+    }
+});
 </script>
 
 <template>
-    <Head :title="`${title} Page Manager`" />
+    <Head :title="`${title} CMS`" />
 
     <form class="space-y-6" @submit.prevent="submit">
-        <div class="flex flex-wrap items-center justify-between gap-4">
-            <div>
-                <h1 class="text-xl font-semibold text-slate-950">
-                    {{ title }}
-                </h1>
-                <p class="mt-1 text-sm text-slate-700">
-                    Manage the public copy and search preview for this page.
-                </p>
-            </div>
-            <div class="flex flex-wrap gap-2">
-                <Button
-                    v-for="page in ['home', 'features', 'download']"
-                    :key="page"
-                    as-child
-                    :variant="pageKey === page ? 'default' : 'outline'"
-                >
-                    <Link :href="`/dashboard/pages/${page}`">
-                        {{ page.charAt(0).toUpperCase() + page.slice(1) }}
-                    </Link>
-                </Button>
-                <Button type="submit" :disabled="form.processing">
-                    <Spinner v-if="form.processing" />
-                    <Save v-else class="size-4" />
-                    Save
-                </Button>
+        <div
+            class="sticky top-0 z-20 -mx-6 border-b border-slate-200 bg-white/95 px-6 py-3 backdrop-blur"
+        >
+            <div
+                class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4"
+            >
+                <div class="flex min-w-0 items-center gap-3">
+                    <span
+                        class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700"
+                    >
+                        <LayoutTemplate class="size-5" />
+                    </span>
+                    <div class="min-w-0">
+                        <h1
+                            class="truncate text-lg font-semibold text-slate-950"
+                        >
+                            Page Content
+                        </h1>
+                        <div
+                            class="mt-0.5 flex items-center gap-1.5 text-xs"
+                            :class="status.className"
+                        >
+                            <component
+                                :is="status.icon"
+                                v-if="status.icon"
+                                class="size-3.5"
+                            />
+                            <Spinner v-else class="size-3.5" />
+                            {{ status.label }}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                    <Button as-child type="button" variant="outline">
+                        <a :href="previewUrl" target="_blank" rel="noreferrer">
+                            <ExternalLink class="size-4" />
+                            View page
+                        </a>
+                    </Button>
+                    <Button type="submit" :disabled="processing || !isDirty">
+                        <Spinner v-if="processing" />
+                        <Save v-else class="size-4" />
+                        Save changes
+                    </Button>
+                </div>
             </div>
         </div>
 
-        <section class="rounded-lg border border-slate-200 bg-white p-5">
-            <h2 class="text-base font-semibold text-slate-950">
-                Search appearance
-            </h2>
-            <p class="mt-1 text-sm text-slate-600">
-                Keep the title specific and the description natural. Canonical,
-                social, and robots tags are generated automatically.
-            </p>
-            <div class="mt-4 grid gap-4">
-                <div class="grid gap-2">
-                    <Label for="seo-title">SEO title</Label>
-                    <Input
-                        id="seo-title"
-                        v-model="form.content.seo.title"
-                        class="h-11"
-                    />
-                </div>
-                <div class="grid gap-2">
-                    <Label for="seo-description">Meta description</Label>
-                    <textarea
-                        id="seo-description"
-                        v-model="form.content.seo.description"
-                        rows="3"
-                        class="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                    />
-                </div>
-            </div>
-        </section>
-
-        <section class="rounded-lg border border-slate-200 bg-white p-5">
-            <h2 class="text-base font-semibold text-slate-950">Hero</h2>
-            <div class="mt-4 grid gap-4 md:grid-cols-2">
-                <div class="grid gap-2">
-                    <Label for="hero-eyebrow">Eyebrow</Label>
-                    <Input
-                        id="hero-eyebrow"
-                        v-model="form.content.hero.eyebrow"
-                        class="h-11"
-                    />
-                </div>
-                <div class="grid gap-2">
-                    <Label for="hero-title">H1 title</Label>
-                    <Input
-                        id="hero-title"
-                        v-model="form.content.hero.title"
-                        class="h-11"
-                    />
-                </div>
-                <div class="grid gap-2 md:col-span-2">
-                    <Label for="hero-intro">Introduction</Label>
-                    <textarea
-                        id="hero-intro"
-                        v-model="form.content.hero.intro"
-                        rows="4"
-                        class="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                    />
-                </div>
-                <template v-if="isHome">
-                    <div class="grid gap-2">
-                        <Label>Online button</Label>
-                        <Input
-                            v-model="homeContent.hero.online_button_label"
-                            class="h-11"
-                        />
-                    </div>
-                    <div class="grid gap-2">
-                        <Label>Desktop button</Label>
-                        <Input
-                            v-model="homeContent.hero.desktop_button_label"
-                            class="h-11"
-                        />
-                    </div>
-                </template>
-            </div>
-        </section>
-
-        <template v-if="isHome">
-            <section class="grid gap-4 md:grid-cols-2">
-                <article
-                    v-for="(path, index) in homeContent.paths"
-                    :key="index"
-                    class="rounded-lg border border-slate-200 bg-white p-5"
+        <div class="mx-auto max-w-7xl">
+            <div
+                class="rounded-xl border border-blue-100 bg-gradient-to-br from-blue-50 to-white p-5"
+            >
+                <div
+                    class="grid gap-4 lg:grid-cols-[minmax(16rem,22rem)_1fr_auto] lg:items-end"
                 >
-                    <h2 class="text-base font-semibold text-slate-950">
-                        Transcription option {{ index + 1 }}
-                    </h2>
-                    <div class="mt-4 grid gap-3">
-                        <Input v-model="path.eyebrow" placeholder="Eyebrow" />
-                        <Input v-model="path.title" placeholder="Title" />
-                        <textarea
-                            v-model="path.body"
-                            rows="4"
-                            class="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                            placeholder="Description"
-                        />
-                        <Input
-                            v-for="(_, bulletIndex) in path.bullets"
-                            :key="bulletIndex"
-                            v-model="path.bullets[bulletIndex]"
-                            placeholder="Benefit"
-                        />
-                        <div class="grid gap-3 sm:grid-cols-2">
-                            <Input
-                                v-model="path.button_label"
-                                placeholder="Button label"
-                            />
-                            <Input
-                                v-model="path.button_url"
-                                placeholder="/destination"
-                            />
-                        </div>
-                    </div>
-                </article>
-            </section>
-
-            <section class="rounded-lg border border-slate-200 bg-white p-5">
-                <h2 class="text-base font-semibold text-slate-950">Workflow</h2>
-                <div class="mt-4 grid gap-3">
-                    <Input v-model="homeContent.workflow.title" />
-                    <textarea
-                        v-model="homeContent.workflow.intro"
-                        rows="3"
-                        class="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                    />
-                    <div class="grid gap-3 md:grid-cols-3">
-                        <article
-                            v-for="(step, index) in homeContent.workflow.steps"
-                            :key="index"
-                            class="grid gap-3 rounded-lg bg-slate-50 p-4"
+                    <div class="grid gap-2">
+                        <label
+                            for="page-picker"
+                            class="text-xs font-semibold tracking-wide text-blue-700 uppercase"
                         >
-                            <Input v-model="step.title" />
-                            <textarea
-                                v-model="step.body"
-                                rows="4"
-                                class="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                            />
-                        </article>
-                    </div>
-                </div>
-            </section>
-
-            <section class="rounded-lg border border-slate-200 bg-white p-5">
-                <h2 class="text-base font-semibold text-slate-950">
-                    Use cases
-                </h2>
-                <div class="mt-4 grid gap-3">
-                    <Input v-model="homeContent.use_cases.title" />
-                    <textarea
-                        v-model="homeContent.use_cases.intro"
-                        rows="3"
-                        class="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                    />
-                    <div class="grid gap-3 md:grid-cols-3">
-                        <article
-                            v-for="(item, index) in homeContent.use_cases.items"
-                            :key="index"
-                            class="grid gap-3 rounded-lg bg-slate-50 p-4"
-                        >
-                            <Input v-model="item.title" />
-                            <textarea
-                                v-model="item.body"
-                                rows="4"
-                                class="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                            />
-                        </article>
-                    </div>
-                </div>
-            </section>
-
-            <section class="rounded-lg border border-slate-200 bg-white p-5">
-                <h2 class="text-base font-semibold text-slate-950">
-                    Voice activity detection
-                </h2>
-                <div class="mt-4 grid gap-3">
-                    <Input v-model="homeContent.vad.eyebrow" />
-                    <Input v-model="homeContent.vad.title" />
-                    <textarea
-                        v-model="homeContent.vad.body"
-                        rows="4"
-                        class="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                    />
-                    <Input v-model="homeContent.vad.note" />
-                </div>
-            </section>
-
-            <section class="rounded-lg border border-slate-200 bg-white p-5">
-                <h2 class="text-base font-semibold text-slate-950">
-                    Final call to action
-                </h2>
-                <div class="mt-4 grid gap-3 md:grid-cols-2">
-                    <Input v-model="homeContent.cta.title" />
-                    <textarea
-                        v-model="homeContent.cta.body"
-                        rows="3"
-                        class="rounded-lg border border-slate-200 px-3 py-2 text-sm md:col-span-2"
-                    />
-                    <Input v-model="homeContent.cta.online_button_label" />
-                    <Input v-model="homeContent.cta.desktop_button_label" />
-                </div>
-            </section>
-        </template>
-
-        <template v-if="isFeatures">
-            <section class="grid gap-4">
-                <article
-                    v-for="(row, index) in featuresContent.feature_rows"
-                    :key="index"
-                    class="rounded-lg border border-slate-200 bg-white p-5"
-                >
-                    <h2 class="text-base font-semibold text-slate-950">
-                        Feature {{ index + 1 }}
-                    </h2>
-                    <div class="mt-4 grid gap-4 md:grid-cols-2">
-                        <Input v-model="row.eyebrow" placeholder="Eyebrow" />
+                            Page to edit
+                        </label>
                         <select
-                            v-model="row.icon"
-                            class="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm"
+                            id="page-picker"
+                            :value="pageKey"
+                            class="h-11 rounded-lg border border-blue-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                            @change="switchPage"
                         >
                             <option
-                                v-for="icon in [
-                                    'Network',
-                                    'Mic',
-                                    'Languages',
-                                    'FileAudio',
-                                    'Sparkles',
-                                    'FileSpreadsheet',
-                                ]"
-                                :key="icon"
-                                :value="icon"
+                                v-for="option in pageOptions"
+                                :key="option.key"
+                                :value="option.key"
                             >
-                                {{ icon }}
+                                {{ option.label }}
                             </option>
                         </select>
-                        <Input
-                            v-model="row.title"
-                            class="md:col-span-2"
-                            placeholder="Title"
-                        />
-                        <textarea
-                            v-model="row.body"
-                            rows="3"
-                            class="rounded-lg border border-slate-200 px-3 py-2 text-sm md:col-span-2"
-                        />
-                        <Input
-                            v-for="(_, bulletIndex) in row.bullets"
-                            :key="bulletIndex"
-                            v-model="row.bullets[bulletIndex]"
-                            placeholder="Benefit"
-                        />
                     </div>
-                </article>
-            </section>
-
-            <section class="rounded-lg border border-slate-200 bg-white p-5">
-                <h2 class="text-base font-semibold text-slate-950">
-                    Online versus desktop
-                </h2>
-                <div class="mt-4 grid gap-3">
-                    <Input v-model="featuresContent.comparison.title" />
-                    <textarea
-                        v-model="featuresContent.comparison.intro"
-                        rows="3"
-                        class="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                    />
-                    <div
-                        v-for="(row, index) in featuresContent.comparison.rows"
-                        :key="index"
-                        class="grid gap-3 rounded-lg bg-slate-50 p-4 md:grid-cols-3"
-                    >
-                        <Input v-model="row.label" placeholder="Category" />
-                        <Input v-model="row.online" placeholder="Online" />
-                        <Input v-model="row.desktop" placeholder="Desktop" />
-                    </div>
-                </div>
-            </section>
-
-            <section class="rounded-lg border border-slate-200 bg-white p-5">
-                <h2 class="text-base font-semibold text-slate-950">
-                    Final call to action
-                </h2>
-                <div class="mt-4 grid gap-3 md:grid-cols-2">
-                    <Input v-model="featuresContent.cta.title" />
-                    <textarea
-                        v-model="featuresContent.cta.body"
-                        rows="3"
-                        class="rounded-lg border border-slate-200 px-3 py-2 text-sm md:col-span-2"
-                    />
-                    <Input v-model="featuresContent.cta.online_button_label" />
-                    <Input v-model="featuresContent.cta.desktop_button_label" />
-                </div>
-            </section>
-        </template>
-
-        <template v-if="isDownload">
-            <section class="rounded-lg border border-slate-200 bg-white p-5">
-                <h2 class="text-base font-semibold text-slate-950">
-                    Download card
-                </h2>
-                <div class="mt-4 grid gap-3 md:grid-cols-2">
-                    <Input v-model="downloadContent.download_card.title" />
-                    <Input
-                        v-model="downloadContent.download_card.button_label"
-                    />
-                    <Input
-                        v-model="downloadContent.download_card.empty_label"
-                    />
-                    <textarea
-                        v-model="downloadContent.download_card.body"
-                        rows="3"
-                        class="rounded-lg border border-slate-200 px-3 py-2 text-sm md:col-span-2"
-                    />
-                </div>
-            </section>
-
-            <section class="grid gap-4 md:grid-cols-2">
-                <article
-                    v-for="(benefit, index) in downloadContent.benefits"
-                    :key="index"
-                    class="rounded-lg border border-slate-200 bg-white p-5"
-                >
-                    <h2 class="text-base font-semibold text-slate-950">
-                        Benefit {{ index + 1 }}
-                    </h2>
-                    <div class="mt-4 grid gap-3">
-                        <Input v-model="benefit.icon" placeholder="Icon name" />
-                        <Input v-model="benefit.title" />
-                        <textarea
-                            v-model="benefit.body"
-                            rows="3"
-                            class="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                        />
-                    </div>
-                </article>
-            </section>
-
-            <section class="rounded-lg border border-slate-200 bg-white p-5">
-                <h2 class="text-base font-semibold text-slate-950">
-                    Whisper models
-                </h2>
-                <div class="mt-4 grid gap-3">
-                    <Input v-model="downloadContent.models.title" />
-                    <textarea
-                        v-model="downloadContent.models.intro"
-                        rows="3"
-                        class="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                    />
-                    <div
-                        v-for="(model, index) in downloadContent.models.items"
-                        :key="index"
-                        class="grid gap-3 rounded-lg bg-slate-50 p-4 md:grid-cols-[1fr_1fr_2fr]"
-                    >
-                        <Input v-model="model.name" placeholder="Model" />
-                        <Input v-model="model.size" placeholder="Size" />
-                        <Input
-                            v-model="model.best_for"
-                            placeholder="Best for"
-                        />
-                    </div>
-                    <Input
-                        v-model="downloadContent.models.note"
-                        placeholder="Accuracy and performance note"
-                    />
-                </div>
-            </section>
-
-            <section class="grid gap-4 md:grid-cols-2">
-                <article
-                    v-for="(requirement, index) in downloadContent.requirements"
-                    :key="index"
-                    class="rounded-lg border border-slate-200 bg-white p-5"
-                >
-                    <h2 class="text-base font-semibold text-slate-950">
-                        Requirement {{ index + 1 }}
-                    </h2>
-                    <div class="mt-4 grid gap-3">
-                        <Input
-                            v-model="requirement.icon"
-                            placeholder="Icon name"
-                        />
-                        <Input v-model="requirement.title" />
-                        <textarea
-                            v-model="requirement.body"
-                            rows="3"
-                            class="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                        />
-                    </div>
-                </article>
-            </section>
-
-            <section class="rounded-lg border border-slate-200 bg-white p-5">
-                <h2 class="text-base font-semibold text-slate-950">
-                    First transcript steps
-                </h2>
-                <div class="mt-4 grid gap-3">
-                    <Input v-model="downloadContent.steps.title" />
-                    <div class="grid gap-3 md:grid-cols-3">
-                        <article
-                            v-for="(step, index) in downloadContent.steps.items"
-                            :key="index"
-                            class="grid gap-3 rounded-lg bg-slate-50 p-4"
+                    <div>
+                        <h2 class="text-xl font-semibold text-slate-950">
+                            {{ title }}
+                        </h2>
+                        <p
+                            class="mt-1 max-w-3xl text-sm leading-6 text-slate-600"
                         >
-                            <Input v-model="step.title" />
-                            <textarea
-                                v-model="step.body"
-                                rows="4"
-                                class="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                            />
-                        </article>
+                            {{ description }}
+                        </p>
                     </div>
+                    <Button
+                        v-if="pageKey === 'blog'"
+                        as-child
+                        type="button"
+                        variant="outline"
+                    >
+                        <a href="/dashboard/blog">
+                            <FilePenLine class="size-4" />
+                            Edit articles
+                        </a>
+                    </Button>
+                    <Button
+                        v-else-if="pageKey === 'pricing'"
+                        as-child
+                        type="button"
+                        variant="outline"
+                    >
+                        <a href="/dashboard/pricing">
+                            <FilePenLine class="size-4" />
+                            Edit rates
+                        </a>
+                    </Button>
                 </div>
-            </section>
-
-            <section class="rounded-lg border border-slate-200 bg-white p-5">
-                <h2 class="text-base font-semibold text-slate-950">
-                    Optional online account
-                </h2>
-                <div class="mt-4 grid gap-3 md:grid-cols-2">
-                    <Input v-model="downloadContent.account.title" />
-                    <Input v-model="downloadContent.account.button_label" />
-                    <textarea
-                        v-model="downloadContent.account.body"
-                        rows="3"
-                        class="rounded-lg border border-slate-200 px-3 py-2 text-sm md:col-span-2"
-                    />
-                    <Input
-                        v-for="(_, index) in downloadContent.account.bullets"
-                        :key="index"
-                        v-model="downloadContent.account.bullets[index]"
-                    />
-                </div>
-            </section>
-        </template>
-
-        <section class="rounded-lg border border-slate-200 bg-white p-5">
-            <h2 class="text-base font-semibold text-slate-950">
-                Frequently asked questions
-            </h2>
-            <div class="mt-4 grid gap-4">
-                <article
-                    v-for="(item, index) in faqContent"
-                    :key="index"
-                    class="grid gap-3 rounded-lg bg-slate-50 p-4"
-                >
-                    <Input v-model="item.question" placeholder="Question" />
-                    <textarea
-                        v-model="item.answer"
-                        rows="3"
-                        class="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                        placeholder="Answer"
-                    />
-                </article>
             </div>
-        </section>
+        </div>
+
+        <div
+            v-if="errorMessages.length"
+            class="mx-auto max-w-7xl rounded-lg border border-red-200 bg-red-50 p-4"
+        >
+            <div class="flex items-start gap-3">
+                <AlertCircle class="mt-0.5 size-5 shrink-0 text-red-600" />
+                <div>
+                    <h2 class="text-sm font-semibold text-red-950">
+                        Some content needs attention
+                    </h2>
+                    <ul
+                        class="mt-2 list-disc space-y-1 pl-5 text-sm text-red-800"
+                    >
+                        <li v-for="message in errorMessages" :key="message">
+                            {{ message }}
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div
+            class="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[15rem_minmax(0,1fr)]"
+        >
+            <aside class="lg:sticky lg:top-24 lg:self-start">
+                <div class="rounded-xl border border-slate-200 bg-white p-3">
+                    <p
+                        class="px-2 pb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase"
+                    >
+                        Page sections
+                    </p>
+                    <nav class="grid gap-1" aria-label="Page sections">
+                        <button
+                            v-for="section in sections"
+                            :key="section.key"
+                            type="button"
+                            class="rounded-lg px-3 py-2 text-left text-sm transition"
+                            :class="
+                                activeSection === section.key
+                                    ? 'bg-blue-50 font-semibold text-blue-800'
+                                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'
+                            "
+                            @click="scrollToSection(section.key)"
+                        >
+                            {{ section.label }}
+                        </button>
+                    </nav>
+                </div>
+            </aside>
+
+            <div class="grid min-w-0 gap-6">
+                <section
+                    v-for="section in sections"
+                    :id="`section-${section.key}`"
+                    :key="section.key"
+                    class="scroll-mt-24 rounded-xl border border-slate-200 bg-white shadow-sm"
+                    @mouseenter="activeSection = section.key"
+                >
+                    <div
+                        class="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4"
+                    >
+                        <div>
+                            <h2 class="text-base font-semibold text-slate-950">
+                                {{ section.label }}
+                            </h2>
+                            <p class="mt-1 text-sm leading-5 text-slate-500">
+                                {{ section.description }}
+                            </p>
+                        </div>
+                        <Search
+                            v-if="section.key === 'seo'"
+                            class="mt-0.5 size-5 shrink-0 text-blue-600"
+                        />
+                    </div>
+
+                    <div v-if="section.key === 'seo' && seo" class="p-5 pb-0">
+                        <div
+                            class="rounded-lg border border-slate-200 bg-slate-50 p-4"
+                        >
+                            <p class="truncate text-xs text-emerald-700">
+                                {{ previewUrl }}
+                            </p>
+                            <p class="mt-1 truncate text-lg text-blue-800">
+                                {{ seo.title }}
+                            </p>
+                            <p
+                                class="mt-1 line-clamp-2 text-sm leading-5 text-slate-600"
+                            >
+                                {{ seo.description }}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="p-5">
+                        <ContentField
+                            :model-value="content[section.key]"
+                            :schema="schema[section.key]"
+                            :field-key="section.key"
+                            :path="`content.${section.key}`"
+                            :errors="errors"
+                            hide-label
+                            @update:model-value="
+                                updateSection(section.key, $event)
+                            "
+                        />
+                    </div>
+                </section>
+            </div>
+        </div>
     </form>
 </template>

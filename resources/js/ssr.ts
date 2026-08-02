@@ -53,6 +53,15 @@ createServer((page) =>
     createInertiaApp({
         page,
         render: renderToString,
+        serverHead: (currentPage) => {
+            const seo = currentPage.props.seo as { head?: unknown } | undefined;
+
+            return Array.isArray(seo?.head)
+                ? seo.head.filter(
+                      (tag): tag is string => typeof tag === 'string',
+                  )
+                : [];
+        },
         resolve: async (name) => {
             const loadPage = pages[`./pages/${name}.vue`];
 
@@ -65,11 +74,7 @@ createServer((page) =>
             return applyDefaultLayout(name, resolvedPage.default);
         },
         title: (title) => {
-            if (!title || title === appName) {
-                return appName;
-            }
-
-            return title.includes('JERVA') ? title : `${title} - ${appName}`;
+            return title || appName;
         },
         setup: ({ App, props, plugin }) =>
             createSSRApp({ render: () => h(App, props) }).use(plugin),

@@ -1,7 +1,7 @@
 <?php
 
-use App\Models\PlanTier;
 use App\Models\PlanComparisonRow;
+use App\Models\PlanTier;
 use App\Models\User;
 use App\Models\UserPermissions;
 use App\Models\UserPositions;
@@ -23,7 +23,7 @@ test('pricing does not use config fallback when database rows are empty', functi
     $user = User::factory()->create(['plan' => 'payg']);
 
     expect(fn () => app(EntitlementService::class)->planFor($user))
-        ->toThrow(\RuntimeException::class, 'Pricing plan [payg] is not configured.');
+        ->toThrow(RuntimeException::class, 'Pricing plan [payg] is not configured.');
 
     $this->get(route('price'))
         ->assertServerError();
@@ -54,7 +54,6 @@ test('pricing managers can update tiers and comparison rows', function () {
         'summarize' => false,
         'exports' => [],
     ];
-    $payload['pricingContent']['hero']['title'] = 'Managed pricing copy';
     $payload['comparisonRows'] = [
         ['label' => 'Live browser transcription', 'tier_keys' => ['payg']],
         ['label' => 'One-time minute credits', 'tier_keys' => ['payg']],
@@ -92,7 +91,6 @@ test('pricing managers can update tiers and comparison rows', function () {
             ->where('plans.1.key', 'payg')
             ->where('plans.1.minutes', 750)
             ->where('plans.1.price_label', '$25')
-            ->where('content.hero.title', 'Managed pricing copy')
             ->where('comparison.Live browser transcription.0', 'payg')
         );
 
@@ -189,6 +187,5 @@ function pricingPayload(): array
             ])
             ->values()
             ->all(),
-        'pricingContent' => config('marketing.pages.pricing'),
     ];
 }

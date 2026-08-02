@@ -15,13 +15,7 @@ class PageContentService
     public function page(string $page): array
     {
         return Cache::rememberForever("page.{$page}.content", function () use ($page): array {
-            $rows = PageContent::query()
-                ->where('page', $page)
-                ->get()
-                ->mapWithKeys(fn (PageContent $content): array => [
-                    $content->section => $this->contentArray($content),
-                ])
-                ->all();
+            $rows = $this->rows($page);
 
             if ($rows === []) {
                 Log::error('CMS page content is missing.', [
@@ -33,6 +27,73 @@ class PageContentService
 
             return $rows;
         });
+    }
+
+    /**
+     * Return database-managed content when present, with a source-controlled
+     * fallback for newly deployed public pages before their production seeder
+     * has run.
+     *
+     * @param  array<string, mixed>  $default
+     * @return array<string, mixed>
+     */
+    public function pageOrDefault(string $page, array $default): array
+    {
+        return Cache::rememberForever(
+            "page.{$page}.content",
+            fn (): array => $this->mergeDefaults($default, $this->rows($page)),
+        );
+    }
+
+    /**
+     * Add newly shipped CMS fields without replacing values already edited in
+     * the database. Lists are preserved; new keys are added to list items when
+     * those items are structured objects.
+     *
+     * @param  array<string|int, mixed>  $defaults
+     * @param  array<string|int, mixed>  $stored
+     * @return array<string|int, mixed>
+     */
+    public function mergeDefaults(array $defaults, array $stored): array
+    {
+        if (array_is_list($defaults)) {
+            if (! array_is_list($stored)) {
+                return $defaults;
+            }
+
+            if ($stored === []) {
+                return $defaults;
+            }
+
+            $itemDefaults = $defaults[0] ?? null;
+
+            if (! is_array($itemDefaults) || array_is_list($itemDefaults)) {
+                return $stored;
+            }
+
+            return array_map(
+                fn (mixed $item): mixed => is_array($item)
+                    ? $this->mergeDefaults($itemDefaults, $item)
+                    : $item,
+                $stored,
+            );
+        }
+
+        $merged = $stored;
+
+        foreach ($defaults as $key => $default) {
+            if (! array_key_exists($key, $stored)) {
+                $merged[$key] = $default;
+
+                continue;
+            }
+
+            if (is_array($default) && is_array($stored[$key])) {
+                $merged[$key] = $this->mergeDefaults($default, $stored[$key]);
+            }
+        }
+
+        return $merged;
     }
 
     /**
@@ -73,5 +134,17 @@ class PageContentService
         }
 
         return $value;
+    }
+
+    /** @return array<string, mixed> */
+    private function rows(string $page): array
+    {
+        return PageContent::query()
+            ->where('page', $page)
+            ->get()
+            ->mapWithKeys(fn (PageContent $content): array => [
+                $content->section => $this->contentArray($content),
+            ])
+            ->all();
     }
 }

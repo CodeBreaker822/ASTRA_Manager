@@ -66,10 +66,16 @@ class BlogPost extends Model
      */
     public function toPublicArray(bool $withBody = false): array
     {
+        $wordCount = str_word_count(strip_tags(self::renderMarkdown($this->body_markdown)));
+
         return array_filter([
             'title' => $this->title,
             'slug' => $this->slug,
             'date' => $this->published_at?->format('Y-m-d') ?? '',
+            'date_iso' => $this->published_at?->toAtomString() ?? '',
+            'updated_date' => $this->updated_at?->format('Y-m-d') ?? '',
+            'updated_date_iso' => $this->updated_at?->toAtomString() ?? '',
+            'reading_minutes' => max(1, (int) ceil($wordCount / 220)),
             'excerpt' => $this->excerpt ?? '',
             'cover' => $this->cover_path ?? '',
             'cover_url' => $this->cover_path ? Storage::disk('public')->url($this->cover_path) : null,

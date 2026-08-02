@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
+/** @property array<int|string, mixed> $content */
 class PageContent extends Model
 {
     protected $fillable = [

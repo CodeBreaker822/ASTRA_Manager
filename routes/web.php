@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/', [MarketingController::class, 'landing'])->name('home');
 Route::get('/sitemap.xml', SitemapController::class)->name('sitemap');
+Route::get('/audio-to-text', [MarketingController::class, 'audioToText'])->name('audio-to-text');
 Route::get('/features', [MarketingController::class, 'features'])->name('features');
 Route::get('/price', [MarketingController::class, 'price'])->name('price');
 Route::get('/blog', [BlogController::class, 'index'])->name('blog.index');
@@ -49,12 +50,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
     });
     Route::get('dashboard/pricing', [DashboardPricingController::class, 'edit'])->middleware('can:cms.manage-pricing')->name('dashboard.pricing.edit');
     Route::put('dashboard/pricing', [DashboardPricingController::class, 'update'])->middleware('can:cms.manage-pricing')->name('dashboard.pricing.update');
-    Route::get('dashboard/pages/home', [DashboardPageController::class, 'home'])->middleware('can:cms.manage-pages')->name('dashboard.pages.home.edit');
-    Route::put('dashboard/pages/home', [DashboardPageController::class, 'updateHome'])->middleware('can:cms.manage-pages')->name('dashboard.pages.home.update');
-    Route::get('dashboard/pages/features', [DashboardPageController::class, 'features'])->middleware('can:cms.manage-pages')->name('dashboard.pages.features.edit');
-    Route::put('dashboard/pages/features', [DashboardPageController::class, 'updateFeatures'])->middleware('can:cms.manage-pages')->name('dashboard.pages.features.update');
-    Route::get('dashboard/pages/download', [DashboardPageController::class, 'download'])->middleware('can:cms.manage-pages')->name('dashboard.pages.download.edit');
-    Route::put('dashboard/pages/download', [DashboardPageController::class, 'updateDownload'])->middleware('can:cms.manage-pages')->name('dashboard.pages.download.update');
+    Route::get('dashboard/pages/{page}', [DashboardPageController::class, 'edit'])
+        ->whereIn('page', ['site', 'home', 'audio_to_text', 'features', 'pricing', 'download', 'blog'])
+        ->middleware('can:cms.manage-pages')
+        ->name('dashboard.pages.edit');
+    Route::put('dashboard/pages/{page}', [DashboardPageController::class, 'update'])
+        ->whereIn('page', ['site', 'home', 'audio_to_text', 'features', 'pricing', 'download', 'blog'])
+        ->middleware('can:cms.manage-pages')
+        ->name('dashboard.pages.update');
 
     Route::get('workspace', [WorkspaceController::class, 'index'])->name('workspace.index');
     Route::post('workspace', [WorkspaceController::class, 'store'])->name('workspace.store');

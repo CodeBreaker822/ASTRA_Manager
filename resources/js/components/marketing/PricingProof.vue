@@ -1,10 +1,13 @@
 <script setup lang="ts">
+import { usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import type { MarketingPricing } from '@/types/marketing';
 
 const props = defineProps<{
     pricing: MarketingPricing;
 }>();
+const page = usePage();
+const copy = computed(() => page.props.marketingSite.pricing_proof);
 
 const money = (value: number | null): string | null => {
     if (!value || value <= 0) {
@@ -22,31 +25,35 @@ const money = (value: number | null): string | null => {
 const facts = computed(() => [
     {
         value: props.pricing.free_minutes_per_day
-            ? `${props.pricing.free_minutes_per_day} min`
-            : 'Free',
+            ? `${props.pricing.free_minutes_per_day} ${copy.value.free_minutes_suffix}`
+            : copy.value.free_value_fallback,
         label: props.pricing.free_minutes_per_day
-            ? 'online every day'
-            : 'daily online allowance',
+            ? copy.value.free_active_label
+            : copy.value.free_fallback_label,
     },
     {
-        value: money(props.pricing.upload_price_per_hour) ?? 'Pay as you go',
+        value:
+            money(props.pricing.upload_price_per_hour) ??
+            copy.value.upload_value_fallback,
         label: props.pricing.upload_price_per_hour
-            ? 'per uploaded audio hour'
-            : 'for extra online use',
+            ? copy.value.upload_active_label
+            : copy.value.upload_fallback_label,
     },
     {
-        value: money(props.pricing.live_price_per_hour) ?? 'No subscription',
+        value:
+            money(props.pricing.live_price_per_hour) ??
+            copy.value.live_value_fallback,
         label: props.pricing.live_price_per_hour
-            ? 'per live audio hour'
-            : 'required',
+            ? copy.value.live_active_label
+            : copy.value.live_fallback_label,
     },
     {
-        value: '99+',
-        label: 'Whisper languages',
+        value: copy.value.languages_value,
+        label: copy.value.languages_label,
     },
     {
-        value: '$0',
-        label: 'Windows desktop app',
+        value: copy.value.desktop_value,
+        label: copy.value.desktop_label,
     },
 ]);
 </script>
@@ -54,7 +61,7 @@ const facts = computed(() => [
 <template>
     <div
         class="grid overflow-hidden rounded-lg border border-blue-100 bg-white shadow-[0_12px_32px_rgba(15,23,42,0.06)] sm:grid-cols-2 lg:grid-cols-5"
-        aria-label="JERVA pricing and product facts"
+        :aria-label="copy.aria_label"
     >
         <div
             v-for="fact in facts"

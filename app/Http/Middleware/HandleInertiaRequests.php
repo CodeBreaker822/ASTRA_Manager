@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Models\User;
 use App\Services\DashboardAccessService;
 use App\Services\EntitlementService;
+use App\Services\PageContentService;
 use App\Services\PayMongoCheckoutService;
 use App\Services\PayMongoWalletTopupReconciler;
 use App\Services\PlanService;
@@ -78,6 +79,10 @@ class HandleInertiaRequests extends Middleware
         return [
             ...parent::share($request),
             'name' => config('app.name'),
+            'marketingSite' => fn () => app(PageContentService::class)->pageOrDefault(
+                'site',
+                config('marketing.pages.site', []),
+            ),
             'auth' => [
                 'user' => $user,
                 'isAdmin' => $canAccessDashboard,

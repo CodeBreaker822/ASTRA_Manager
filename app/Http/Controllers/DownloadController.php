@@ -20,7 +20,7 @@ class DownloadController extends Controller
         PlanService $plans,
         MarketingSeoService $seo,
     ): Response {
-        $content = $pages->page('download');
+        $content = $pages->pageOrDefault('download', config('marketing.pages.download', []));
         $release = $this->latestRelease();
 
         return Inertia::render('marketing/Download', [
@@ -30,7 +30,7 @@ class DownloadController extends Controller
             'seo' => $seo->metadata(
                 $content,
                 route('download'),
-                $seo->downloadStructuredData($release),
+                $seo->downloadStructuredData($release, $content),
             ),
         ]);
     }

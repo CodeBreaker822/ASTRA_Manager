@@ -44,27 +44,11 @@ type ComparisonRow = {
 const props = defineProps<{
     tiers: Tier[];
     comparisonRows: ComparisonRow[];
-    pricingContent: {
-        hero: {
-            eyebrow: string;
-            title: string;
-            intro: string;
-        };
-        faq: Array<{
-            question: string;
-            answer: string;
-        }>;
-    };
 }>();
 
 defineOptions({
     layout: DashboardLayout,
 });
-
-const pricingContent = {
-    hero: { ...props.pricingContent.hero },
-    faq: props.pricingContent.faq.map((item) => ({ ...item })),
-};
 
 const form = useForm({
     tiers: props.tiers.map((tier) => ({
@@ -84,7 +68,6 @@ const form = useForm({
         label: row.label,
         tier_keys: [...row.tier_keys],
     })),
-    pricingContent,
 });
 
 const planKeys: TierKey[] = ['free', 'payg'];
@@ -138,39 +121,6 @@ const submit = () => {
                 Save
             </Button>
         </div>
-
-        <section class="space-y-3">
-            <h2 class="text-sm font-semibold text-slate-950">
-                Public Page Copy
-            </h2>
-            <div class="grid gap-3 md:grid-cols-[14rem_1fr]">
-                <div class="grid gap-1.5">
-                    <Label for="pricing-eyebrow" class="text-xs">Eyebrow</Label>
-                    <Input
-                        id="pricing-eyebrow"
-                        v-model="form.pricingContent.hero.eyebrow"
-                        class="h-9"
-                    />
-                </div>
-                <div class="grid gap-1.5">
-                    <Label for="pricing-title" class="text-xs">Title</Label>
-                    <Input
-                        id="pricing-title"
-                        v-model="form.pricingContent.hero.title"
-                        class="h-9"
-                    />
-                </div>
-                <div class="grid gap-1.5 md:col-span-2">
-                    <Label for="pricing-intro" class="text-xs">Intro</Label>
-                    <textarea
-                        id="pricing-intro"
-                        v-model="form.pricingContent.hero.intro"
-                        rows="3"
-                        class="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                    />
-                </div>
-            </div>
-        </section>
 
         <section class="space-y-3">
             <h2 class="text-sm font-semibold text-slate-950">Credit Packs</h2>
@@ -518,31 +468,6 @@ const submit = () => {
                             </div>
                         </div>
                     </div>
-                </div>
-            </div>
-        </section>
-
-        <section class="space-y-3">
-            <h2 class="text-sm font-semibold text-slate-950">FAQ</h2>
-            <div
-                class="overflow-hidden rounded-md border border-slate-200 bg-white"
-            >
-                <div
-                    v-for="(item, index) in form.pricingContent.faq"
-                    :key="index"
-                    class="grid gap-2 border-b border-slate-200 p-3 last:border-b-0 md:grid-cols-[18rem_1fr]"
-                >
-                    <Input
-                        v-model="item.question"
-                        aria-label="FAQ question"
-                        class="h-9"
-                    />
-                    <textarea
-                        v-model="item.answer"
-                        rows="2"
-                        aria-label="FAQ answer"
-                        class="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                    />
                 </div>
             </div>
         </section>

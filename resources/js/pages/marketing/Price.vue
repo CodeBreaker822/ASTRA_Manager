@@ -29,6 +29,7 @@ type Plan = {
 const props = defineProps<{
     plans: Plan[];
     comparison: Record<string, string[]>;
+    currency: string;
     seo: MarketingSeo;
     content: {
         hero: {
@@ -36,25 +37,44 @@ const props = defineProps<{
             title: string;
             intro: string;
         };
+        plans_ui: {
+            popular_label: string;
+            audio_upload_label: string;
+            live_recording_label: string;
+            polishing_label: string;
+            summarization_label: string;
+            per_hour_suffix: string;
+            per_thousand_characters_suffix: string;
+            button_url: string;
+        };
+        comparison: {
+            title: string;
+            feature_column_label: string;
+            included_label: string;
+            not_included_label: string;
+            not_included_symbol: string;
+        };
         faq: Array<{
             question: string;
             answer: string;
         }>;
+        faq_heading: { title: string };
     };
 }>();
 
 const formatDollars = (amount: number, maximumFractionDigits = 2) => {
     return new Intl.NumberFormat('en-US', {
         style: 'currency',
-        currency: 'USD',
+        currency: props.currency,
         minimumFractionDigits: 2,
         maximumFractionDigits,
     }).format(amount);
 };
 
-const hourlyRate = (amount: number) => `${formatDollars(amount)}/hour`;
+const hourlyRate = (amount: number) =>
+    `${formatDollars(amount)}${props.content.plans_ui.per_hour_suffix}`;
 const perThousandCharactersRate = (amount: number) =>
-    `${formatDollars(amount * 1000, 4)}/1K chars`;
+    `${formatDollars(amount * 1000, 4)}${props.content.plans_ui.per_thousand_characters_suffix}`;
 
 const comparisonRows = computed(() => Object.entries(props.comparison));
 </script>
@@ -108,24 +128,30 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                             v-if="plan.featured"
                             class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-900"
                         >
-                            Popular
+                            {{ content.plans_ui.popular_label }}
                         </span>
                     </div>
 
                     <div class="mt-8 space-y-3">
                         <div v-if="plan.upload_price_per_hour" class="text-sm">
-                            <span class="font-medium">Audio Upload:</span>
+                            <span class="font-medium">{{
+                                content.plans_ui.audio_upload_label
+                            }}</span>
                             {{ hourlyRate(plan.upload_price_per_hour) }}
                         </div>
                         <div v-if="plan.live_price_per_hour" class="text-sm">
-                            <span class="font-medium">Live Recording:</span>
+                            <span class="font-medium">{{
+                                content.plans_ui.live_recording_label
+                            }}</span>
                             {{ hourlyRate(plan.live_price_per_hour) }}
                         </div>
                         <div
                             v-if="plan.polish_price_per_character"
                             class="text-sm"
                         >
-                            <span class="font-medium">Polishing:</span>
+                            <span class="font-medium">{{
+                                content.plans_ui.polishing_label
+                            }}</span>
                             {{
                                 perThousandCharactersRate(
                                     plan.polish_price_per_character,
@@ -136,7 +162,9 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                             v-if="plan.summary_price_per_character"
                             class="text-sm"
                         >
-                            <span class="font-medium">Summarization:</span>
+                            <span class="font-medium">{{
+                                content.plans_ui.summarization_label
+                            }}</span>
                             {{
                                 perThousandCharactersRate(
                                     plan.summary_price_per_character,
@@ -146,7 +174,9 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                     </div>
 
                     <Button as-child class="mt-8 w-full">
-                        <Link href="/register">{{ plan.cta }}</Link>
+                        <Link :href="content.plans_ui.button_url">{{
+                            plan.cta
+                        }}</Link>
                     </Button>
 
                     <div class="mt-8 grid gap-3">
@@ -168,7 +198,7 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                 <h2
                     class="text-3xl font-semibold tracking-tight text-slate-950"
                 >
-                    Compare credit packs
+                    {{ content.comparison.title }}
                 </h2>
                 <div
                     class="mt-8 overflow-hidden rounded-lg border border-slate-200 bg-white"
@@ -177,7 +207,7 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                         class="grid grid-cols-[1.4fr_repeat(2,1fr)] border-b border-slate-200 bg-slate-50"
                     >
                         <div class="p-4 text-sm font-semibold text-slate-950">
-                            Feature
+                            {{ content.comparison.feature_column_label }}
                         </div>
                         <div
                             v-for="plan in plans"
@@ -203,9 +233,18 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                             <Check
                                 v-if="enabledPlans.includes(plan.key)"
                                 class="size-4 text-blue-600"
-                                aria-label="Included"
+                                :aria-label="content.comparison.included_label"
                             />
-                            <span v-else class="text-slate-600">-</span>
+                            <span
+                                v-else
+                                class="text-slate-600"
+                                :aria-label="
+                                    content.comparison.not_included_label
+                                "
+                                >{{
+                                    content.comparison.not_included_symbol
+                                }}</span
+                            >
                         </div>
                     </div>
                 </div>
@@ -217,7 +256,7 @@ const comparisonRows = computed(() => Object.entries(props.comparison));
                 <h2
                     class="text-3xl font-semibold tracking-tight text-slate-950"
                 >
-                    FAQ
+                    {{ content.faq_heading.title }}
                 </h2>
                 <div class="mt-8 grid gap-4">
                     <details

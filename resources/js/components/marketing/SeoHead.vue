@@ -37,7 +37,7 @@ export default defineComponent({
                 }),
                 meta('og:site_name', {
                     property: 'og:site_name',
-                    content: 'JERVA Transcriber',
+                    content: props.seo.site_name,
                 }),
                 meta('og:title', {
                     property: 'og:title',

@@ -2,8 +2,13 @@
 
 namespace App\Services;
 
+use App\Models\BlogPost;
+use Illuminate\Support\Str;
+
 class MarketingSeoService
 {
+    public function __construct(private PageContentService $pages) {}
+
     /**
      * @param  array<string, mixed>  $content
      * @param  array<string, mixed>|null  $structuredData
@@ -12,9 +17,11 @@ class MarketingSeoService
      *     description: string,
      *     canonical_url: string,
      *     image_url: string,
+     *     site_name: string,
      *     type: string,
      *     robots: string,
-     *     structured_data: array<string, mixed>|null
+     *     structured_data: array<string, mixed>|null,
+     *     head: array<int, string>
      * }
      */
     public function metadata(
@@ -24,15 +31,25 @@ class MarketingSeoService
         string $type = 'website',
     ): array {
         $seo = is_array($content['seo'] ?? null) ? $content['seo'] : [];
+        $site = $this->site();
+        $image = trim((string) data_get($site, 'seo.default_image_url', '/JervaLogo.png'));
 
-        return [
-            'title' => trim((string) ($seo['title'] ?? config('app.name', 'JERVA Transcriber'))),
+        $metadata = [
+            'title' => trim((string) ($seo['title'] ?? data_get($site, 'brand.name', config('app.name')))),
             'description' => trim((string) ($seo['description'] ?? '')),
             'canonical_url' => $canonicalUrl,
-            'image_url' => asset('JervaLogo.png'),
+            'image_url' => Str::startsWith($image, ['http://', 'https://'])
+                ? $image
+                : url('/'.ltrim($image, '/')),
+            'site_name' => trim((string) data_get($site, 'seo.site_name', data_get($site, 'brand.name', config('app.name')))),
             'type' => $type,
             'robots' => 'index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1',
             'structured_data' => $structuredData,
+        ];
+
+        return [
+            ...$metadata,
+            'head' => $this->headTags($metadata),
         ];
     }
 
@@ -42,48 +59,201 @@ class MarketingSeoService
      */
     public function homeStructuredData(array $pricing): array
     {
+        $site = $this->site();
+        $schema = is_array($site['schema'] ?? null) ? $site['schema'] : [];
+        $organizationName = (string) ($schema['organization_name'] ?? data_get($site, 'brand.name', config('app.name')));
+        $image = (string) data_get($site, 'seo.default_image_url', '/JervaLogo.png');
+        $logo = Str::startsWith($image, ['http://', 'https://'])
+            ? $image
+            : url('/'.ltrim($image, '/'));
+        $offerDescription = filled($pricing['free_minutes_per_day'])
+            ? str_replace(
+                '{minutes}',
+                (string) $pricing['free_minutes_per_day'],
+                (string) ($schema['free_offer_template'] ?? ''),
+            )
+            : (string) ($schema['free_offer_fallback'] ?? '');
+
         return [
             '@context' => 'https://schema.org',
             '@graph' => [
                 [
                     '@type' => 'Organization',
                     '@id' => route('home').'#organization',
-                    'name' => 'JERVA Transcriber',
+                    'name' => $organizationName,
                     'url' => route('home'),
-                    'logo' => asset('JervaLogo.png'),
+                    'logo' => $logo,
                 ],
                 [
                     '@type' => 'WebSite',
                     '@id' => route('home').'#website',
-                    'name' => 'JERVA Transcriber',
+                    'name' => (string) ($schema['website_name'] ?? $organizationName),
                     'url' => route('home'),
                     'publisher' => ['@id' => route('home').'#organization'],
                 ],
                 [
                     '@type' => 'WebApplication',
                     '@id' => route('home').'#web-application',
-                    'name' => 'JERVA Transcriber',
+                    'name' => (string) ($schema['application_name'] ?? $organizationName),
                     'url' => route('home'),
-                    'applicationCategory' => 'BusinessApplication',
-                    'operatingSystem' => 'Web browser, Windows',
-                    'description' => 'Online and offline audio transcription for meetings, interviews, lectures, podcasts, and voice recordings.',
+                    'applicationCategory' => (string) ($schema['application_category'] ?? ''),
+                    'operatingSystem' => (string) ($schema['application_operating_system'] ?? ''),
+                    'description' => (string) ($schema['home_application_description'] ?? ''),
                     'offers' => [
                         '@type' => 'Offer',
                         'price' => 0,
                         'priceCurrency' => $pricing['currency'],
-                        'description' => $pricing['free_minutes_per_day']
-                            ? "{$pricing['free_minutes_per_day']} online transcription minutes free each day"
-                            : 'Free daily online transcription allowance',
+                        'description' => $offerDescription,
                     ],
-                    'featureList' => [
-                        'Online and offline transcription',
-                        'Multilingual Whisper transcription',
-                        'Voice activity detection',
-                        'Speaker separation',
-                        'Transcript cleanup and summaries',
-                        'TXT, Word, and Excel exports',
-                    ],
+                    'featureList' => array_values((array) ($schema['home_feature_list'] ?? [])),
                     'publisher' => ['@id' => route('home').'#organization'],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $content
+     * @return array<string, mixed>
+     */
+    public function audioToTextStructuredData(array $content): array
+    {
+        $seo = is_array($content['seo'] ?? null) ? $content['seo'] : [];
+        $schema = $this->siteSchema();
+        $breadcrumb = $this->breadcrumbStructuredData(
+            (string) data_get($content, 'schema.breadcrumb_label', ''),
+            route('audio-to-text'),
+        );
+        unset($breadcrumb['@context']);
+
+        $graph = [
+            [
+                '@type' => 'WebPage',
+                '@id' => route('audio-to-text').'#webpage',
+                'url' => route('audio-to-text'),
+                'name' => (string) ($seo['title'] ?? ''),
+                'description' => (string) ($seo['description'] ?? ''),
+                'isPartOf' => ['@id' => route('home').'#website'],
+                'about' => ['@id' => route('audio-to-text').'#application'],
+            ],
+            [
+                '@type' => 'WebApplication',
+                '@id' => route('audio-to-text').'#application',
+                'name' => (string) ($schema['audio_application_name'] ?? ''),
+                'url' => route('audio-to-text'),
+                'applicationCategory' => (string) ($schema['application_category'] ?? ''),
+                'operatingSystem' => (string) ($schema['application_operating_system'] ?? ''),
+                'description' => (string) ($schema['audio_application_description'] ?? ''),
+                'featureList' => array_values((array) ($schema['audio_feature_list'] ?? [])),
+            ],
+            $breadcrumb,
+        ];
+
+        $faq = $this->faqStructuredData($content['faq'] ?? null);
+
+        if ($faq !== null) {
+            $graph[] = $faq;
+        }
+
+        return [
+            '@context' => 'https://schema.org',
+            '@graph' => $graph,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $content
+     * @return array<string, mixed>
+     */
+    public function blogIndexStructuredData(array $content): array
+    {
+        $seo = is_array($content['seo'] ?? null) ? $content['seo'] : [];
+        $breadcrumb = $this->breadcrumbStructuredData(
+            (string) data_get($content, 'schema.breadcrumb_label', ''),
+            route('blog.index'),
+        );
+        unset($breadcrumb['@context']);
+
+        return [
+            '@context' => 'https://schema.org',
+            '@graph' => [
+                [
+                    '@type' => 'CollectionPage',
+                    '@id' => route('blog.index').'#collection',
+                    'url' => route('blog.index'),
+                    'name' => (string) ($seo['title'] ?? ''),
+                    'description' => (string) ($seo['description'] ?? ''),
+                    'isPartOf' => ['@id' => route('home').'#website'],
+                ],
+                $breadcrumb,
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $content
+     * @return array<string, mixed>
+     */
+    public function blogPostStructuredData(BlogPost $post, array $content): array
+    {
+        $url = route('blog.show', ['slug' => $post->slug]);
+        $public = $post->toPublicArray();
+        $cover = (string) ($public['cover_url'] ?? '');
+        $site = $this->site();
+        $schema = $this->siteSchema();
+        $defaultImage = (string) data_get($site, 'seo.default_image_url', '/JervaLogo.png');
+        $defaultImageUrl = Str::startsWith($defaultImage, ['http://', 'https://'])
+            ? $defaultImage
+            : url('/'.ltrim($defaultImage, '/'));
+        $image = filled($cover)
+            ? (Str::startsWith($cover, ['http://', 'https://']) ? $cover : url($cover))
+            : $defaultImageUrl;
+
+        return [
+            '@context' => 'https://schema.org',
+            '@graph' => [
+                [
+                    '@type' => 'BlogPosting',
+                    '@id' => $url.'#article',
+                    'headline' => $post->title,
+                    'description' => (string) ($post->excerpt ?? ''),
+                    'url' => $url,
+                    'mainEntityOfPage' => $url,
+                    'datePublished' => $post->published_at?->toAtomString(),
+                    'dateModified' => $post->updated_at?->toAtomString(),
+                    'image' => $image,
+                    'publisher' => [
+                        '@type' => 'Organization',
+                        'name' => (string) ($schema['organization_name'] ?? data_get($site, 'brand.name', config('app.name'))),
+                        'url' => route('home'),
+                        'logo' => [
+                            '@type' => 'ImageObject',
+                            'url' => $defaultImageUrl,
+                        ],
+                    ],
+                ],
+                [
+                    '@type' => 'BreadcrumbList',
+                    'itemListElement' => [
+                        [
+                            '@type' => 'ListItem',
+                            'position' => 1,
+                            'name' => (string) ($schema['home_breadcrumb_label'] ?? ''),
+                            'item' => route('home'),
+                        ],
+                        [
+                            '@type' => 'ListItem',
+                            'position' => 2,
+                            'name' => (string) data_get($content, 'article.blog_label', ''),
+                            'item' => route('blog.index'),
+                        ],
+                        [
+                            '@type' => 'ListItem',
+                            'position' => 3,
+                            'name' => $post->title,
+                            'item' => $url,
+                        ],
+                    ],
                 ],
             ],
         ];
@@ -94,6 +264,8 @@ class MarketingSeoService
      */
     public function breadcrumbStructuredData(string $name, string $url): array
     {
+        $schema = $this->siteSchema();
+
         return [
             '@context' => 'https://schema.org',
             '@type' => 'BreadcrumbList',
@@ -101,7 +273,7 @@ class MarketingSeoService
                 [
                     '@type' => 'ListItem',
                     'position' => 1,
-                    'name' => 'Home',
+                    'name' => (string) ($schema['home_breadcrumb_label'] ?? ''),
                     'item' => route('home'),
                 ],
                 [
@@ -116,33 +288,29 @@ class MarketingSeoService
 
     /**
      * @param  array{available: bool, platform: string, size: string|null, published_at: string|null, published_at_iso: string|null, download_url: string|null}  $release
+     * @param  array<string, mixed>  $content
      * @return array<string, mixed>
      */
-    public function downloadStructuredData(array $release): array
+    public function downloadStructuredData(array $release, array $content): array
     {
+        $schema = $this->siteSchema();
         $application = [
             '@type' => 'SoftwareApplication',
             '@id' => route('download').'#windows-application',
-            'name' => 'JERVA Transcriber for Windows',
+            'name' => (string) ($schema['download_application_name'] ?? ''),
             'url' => route('download'),
-            'applicationCategory' => 'BusinessApplication',
-            'operatingSystem' => 'Windows',
-            'description' => 'Free offline Whisper transcription for Windows with voice activity detection, speaker separation, transcript cleanup, summaries, and exports.',
+            'applicationCategory' => (string) ($schema['application_category'] ?? ''),
+            'operatingSystem' => $release['platform'],
+            'description' => (string) ($schema['download_application_description'] ?? ''),
             'offers' => [
                 '@type' => 'Offer',
                 'price' => 0,
-                'priceCurrency' => 'USD',
+                'priceCurrency' => (string) ($schema['offer_currency'] ?? ''),
                 'availability' => $release['available']
                     ? 'https://schema.org/InStock'
                     : 'https://schema.org/OutOfStock',
             ],
-            'featureList' => [
-                'Offline Whisper transcription',
-                'Live recording and audio uploads',
-                'Silero voice activity detection',
-                'Speaker separation',
-                'TXT, Word, and Excel exports',
-            ],
+            'featureList' => array_values((array) ($schema['download_feature_list'] ?? [])),
         ];
 
         if ($release['available'] && filled($release['download_url'])) {
@@ -157,7 +325,10 @@ class MarketingSeoService
             $application['fileSize'] = $release['size'];
         }
 
-        $breadcrumb = $this->breadcrumbStructuredData('Download', route('download'));
+        $breadcrumb = $this->breadcrumbStructuredData(
+            (string) data_get($content, 'schema.breadcrumb_label', ''),
+            route('download'),
+        );
         unset($breadcrumb['@context']);
 
         return [
@@ -167,5 +338,100 @@ class MarketingSeoService
                 $breadcrumb,
             ],
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private function site(): array
+    {
+        return $this->pages->pageOrDefault(
+            'site',
+            config('marketing.pages.site', []),
+        );
+    }
+
+    /** @return array<string, mixed> */
+    private function siteSchema(): array
+    {
+        $schema = $this->site()['schema'] ?? [];
+
+        return is_array($schema) ? $schema : [];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function faqStructuredData(mixed $items): ?array
+    {
+        if (! is_array($items)) {
+            return null;
+        }
+
+        $questions = collect($items)
+            ->filter(fn (mixed $item): bool => is_array($item)
+                && filled($item['question'] ?? null)
+                && filled($item['answer'] ?? null))
+            ->map(fn (array $item): array => [
+                '@type' => 'Question',
+                'name' => trim((string) $item['question']),
+                'acceptedAnswer' => [
+                    '@type' => 'Answer',
+                    'text' => trim((string) $item['answer']),
+                ],
+            ])
+            ->values()
+            ->all();
+
+        if ($questions === []) {
+            return null;
+        }
+
+        return [
+            '@type' => 'FAQPage',
+            'mainEntity' => $questions,
+        ];
+    }
+
+    /**
+     * Build the initial document head for installations that do not run the
+     * optional Inertia SSR service. The Vue head manager uses the same keys and
+     * takes over these elements after hydration and client-side navigation.
+     *
+     * @param  array{title: string, description: string, canonical_url: string, image_url: string, site_name: string, type: string, robots: string, structured_data: array<string, mixed>|null}  $metadata
+     * @return array<int, string>
+     */
+    private function headTags(array $metadata): array
+    {
+        $escape = fn (string $value): string => htmlspecialchars(
+            $value,
+            ENT_QUOTES | ENT_SUBSTITUTE,
+            'UTF-8',
+        );
+
+        $tags = [
+            '<title data-inertia="">'.$escape($metadata['title']).'</title>',
+            '<meta data-inertia="description" name="description" content="'.$escape($metadata['description']).'">',
+            '<meta data-inertia="robots" name="robots" content="'.$escape($metadata['robots']).'">',
+            '<link data-inertia="canonical" rel="canonical" href="'.$escape($metadata['canonical_url']).'">',
+            '<meta data-inertia="og:type" property="og:type" content="'.$escape($metadata['type']).'">',
+            '<meta data-inertia="og:site_name" property="og:site_name" content="'.$escape($metadata['site_name']).'">',
+            '<meta data-inertia="og:title" property="og:title" content="'.$escape($metadata['title']).'">',
+            '<meta data-inertia="og:description" property="og:description" content="'.$escape($metadata['description']).'">',
+            '<meta data-inertia="og:url" property="og:url" content="'.$escape($metadata['canonical_url']).'">',
+            '<meta data-inertia="og:image" property="og:image" content="'.$escape($metadata['image_url']).'">',
+            '<meta data-inertia="twitter:card" name="twitter:card" content="summary_large_image">',
+            '<meta data-inertia="twitter:title" name="twitter:title" content="'.$escape($metadata['title']).'">',
+            '<meta data-inertia="twitter:description" name="twitter:description" content="'.$escape($metadata['description']).'">',
+            '<meta data-inertia="twitter:image" name="twitter:image" content="'.$escape($metadata['image_url']).'">',
+        ];
+
+        if ($metadata['structured_data'] !== null) {
+            $json = json_encode(
+                $metadata['structured_data'],
+                JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+            );
+            $tags[] = '<script data-inertia="structured-data" type="application/ld+json">'.$json.'</script>';
+        }
+
+        return $tags;
     }
 }

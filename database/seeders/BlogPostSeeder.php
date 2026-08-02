@@ -18,17 +18,19 @@ class BlogPostSeeder extends Seeder
             [$frontMatter, $markdown] = $this->splitFrontMatter(File::get($path));
             $slug = (string) ($frontMatter['slug'] ?? Str::beforeLast(basename($path), '.md'));
 
-            BlogPost::query()->updateOrCreate(
-                ['slug' => $slug],
-                [
-                    'title' => (string) ($frontMatter['title'] ?? Str::headline($slug)),
-                    'excerpt' => (string) ($frontMatter['excerpt'] ?? ''),
-                    'body_markdown' => $markdown,
-                    'cover_path' => filled($frontMatter['cover'] ?? null) ? (string) $frontMatter['cover'] : null,
-                    'status' => 'published',
-                    'published_at' => filled($frontMatter['date'] ?? null) ? (string) $frontMatter['date'] : now(),
-                ],
-            );
+            if (BlogPost::query()->withTrashed()->where('slug', $slug)->exists()) {
+                continue;
+            }
+
+            BlogPost::query()->create([
+                'slug' => $slug,
+                'title' => (string) ($frontMatter['title'] ?? Str::headline($slug)),
+                'excerpt' => (string) ($frontMatter['excerpt'] ?? ''),
+                'body_markdown' => $markdown,
+                'cover_path' => filled($frontMatter['cover'] ?? null) ? (string) $frontMatter['cover'] : null,
+                'status' => 'published',
+                'published_at' => filled($frontMatter['date'] ?? null) ? (string) $frontMatter['date'] : now(),
+            ]);
         }
     }
 

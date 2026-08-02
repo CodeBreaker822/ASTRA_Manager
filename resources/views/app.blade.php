@@ -4,7 +4,7 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="csrf-token" content="{{ csrf_token() }}">
-        <meta name="application-name" content="JERVA Transcriber">
+        <meta name="application-name" content="{{ data_get($page, 'props.marketingSite.brand.name', config('app.name')) }}">
 
         {{-- Inline script to detect system dark mode preference and apply it immediately --}}
         <script>
@@ -37,7 +37,11 @@
         <script src="{{ asset('js/notification.js') }}" defer></script>
         @vite(['resources/css/app.css', 'resources/js/app.ts'])
         <x-inertia::head>
+@forelse(data_get($page, 'props.seo.head', []) as $tag)
+            {!! $tag !!}
+@empty
             <title>{{ config('app.name', 'JERVA Transcriber') }}</title>
+@endforelse
         </x-inertia::head>
     </head>
     <body class="font-sans antialiased">

@@ -88,7 +88,7 @@ const cmsNavItems = computed<NavItem[]>(() => [
     ...(page.props.auth.canManagePages
         ? [
               {
-                  title: 'Page Manager',
+                  title: 'Page Content',
                   href: '/dashboard/pages/home',
                   icon: FileText,
               },

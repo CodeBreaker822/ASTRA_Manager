@@ -42,10 +42,23 @@ type DownloadContent = {
         intro: string;
     };
     download_card: {
+        badge: string;
         title: string;
         body: string;
         button_label: string;
         empty_label: string;
+        size_unavailable_label: string;
+        date_unavailable_label: string;
+        metadata_separator: string;
+        unavailable_body: string;
+        models_link_label: string;
+        models_link_url: string;
+        requirements_link_label: string;
+        requirements_link_url: string;
+    };
+    benefits_intro: {
+        title: string;
+        intro: string;
     };
     benefits: Array<{
         icon: keyof typeof benefitIconMap;
@@ -55,6 +68,9 @@ type DownloadContent = {
     models: {
         title: string;
         intro: string;
+        name_column: string;
+        size_column: string;
+        best_for_column: string;
         items: Array<{
             name: string;
             size: string;
@@ -67,6 +83,7 @@ type DownloadContent = {
         title: string;
         body: string;
     }>;
+    requirements_intro: { title: string };
     steps: {
         title: string;
         items: Array<{
@@ -79,8 +96,13 @@ type DownloadContent = {
         body: string;
         bullets: string[];
         button_label: string;
+        button_url: string;
+        pricing_link_label: string;
+        pricing_link_url: string;
+        pricing_link_suffix: string;
     };
     faq: FaqItem[];
+    faq_heading: { title: string };
 };
 
 const requirementIconMap = {
@@ -152,7 +174,7 @@ const benefits = computed(() =>
                     <p
                         class="mt-4 text-xs font-semibold tracking-wide text-blue-600 uppercase"
                     >
-                        Free • No subscription • Offline capable
+                        {{ content.download_card.badge }}
                     </p>
                     <h2 class="mt-3 text-2xl font-semibold text-slate-950">
                         {{ content.download_card.title }}
@@ -178,15 +200,24 @@ const benefits = computed(() =>
 
                     <div class="mt-4 text-sm text-slate-600">
                         <template v-if="release.available">
-                            Windows
-                            <span aria-hidden="true"> | </span>
-                            {{ release.size ?? 'size unavailable' }}
-                            <span aria-hidden="true"> | </span>
-                            {{ release.published_at ?? 'date unavailable' }}
+                            {{ release.platform }}
+                            <span aria-hidden="true">
+                                {{ content.download_card.metadata_separator }}
+                            </span>
+                            {{
+                                release.size ??
+                                content.download_card.size_unavailable_label
+                            }}
+                            <span aria-hidden="true">
+                                {{ content.download_card.metadata_separator }}
+                            </span>
+                            {{
+                                release.published_at ??
+                                content.download_card.date_unavailable_label
+                            }}
                         </template>
                         <template v-else>
-                            The desktop release is not available right now.
-                            Online transcription is still available.
+                            {{ content.download_card.unavailable_body }}
                         </template>
                     </div>
 
@@ -195,15 +226,15 @@ const benefits = computed(() =>
                     >
                         <a
                             class="font-medium text-blue-600 hover:text-blue-700"
-                            href="#models"
+                            :href="content.download_card.models_link_url"
                         >
-                            Whisper models
+                            {{ content.download_card.models_link_label }}
                         </a>
                         <a
                             class="font-medium text-blue-600 hover:text-blue-700"
-                            href="#requirements"
+                            :href="content.download_card.requirements_link_url"
                         >
-                            System requirements
+                            {{ content.download_card.requirements_link_label }}
                         </a>
                     </div>
                 </div>
@@ -216,12 +247,10 @@ const benefits = computed(() =>
                     <h2
                         class="text-3xl font-semibold tracking-tight text-slate-950"
                     >
-                        More than a basic Whisper window
+                        {{ content.benefits_intro.title }}
                     </h2>
                     <p class="mt-4 text-base leading-7 text-slate-700">
-                        JERVA brings local speech recognition, audio
-                        preparation, transcript review, and useful exports into
-                        one Windows workspace.
+                        {{ content.benefits_intro.intro }}
                     </p>
                 </div>
                 <div class="mt-10 grid gap-6 md:grid-cols-2">
@@ -263,12 +292,14 @@ const benefits = computed(() =>
                     <table class="w-full min-w-[680px] text-left text-sm">
                         <thead class="bg-blue-50 text-blue-950">
                             <tr>
-                                <th class="px-5 py-4 font-semibold">Model</th>
                                 <th class="px-5 py-4 font-semibold">
-                                    Download
+                                    {{ content.models.name_column }}
                                 </th>
                                 <th class="px-5 py-4 font-semibold">
-                                    A good starting point for
+                                    {{ content.models.size_column }}
+                                </th>
+                                <th class="px-5 py-4 font-semibold">
+                                    {{ content.models.best_for_column }}
                                 </th>
                             </tr>
                         </thead>
@@ -304,7 +335,7 @@ const benefits = computed(() =>
                 <h2
                     class="text-3xl font-semibold tracking-tight text-slate-950"
                 >
-                    System requirements
+                    {{ content.requirements_intro.title }}
                 </h2>
                 <div class="mt-8 grid gap-6 md:grid-cols-2">
                     <article
@@ -380,7 +411,7 @@ const benefits = computed(() =>
                         </div>
                     </div>
                     <Button as-child>
-                        <Link href="/register">{{
+                        <Link :href="content.account.button_url">{{
                             content.account.button_label
                         }}</Link>
                     </Button>
@@ -388,12 +419,12 @@ const benefits = computed(() =>
                 <PricingProof :pricing="pricing" class="mt-8" />
                 <p class="mt-4 text-center text-sm text-blue-900">
                     <Link
-                        href="/price"
+                        :href="content.account.pricing_link_url"
                         class="font-semibold text-blue-700 hover:text-blue-950"
                     >
-                        See current online pricing
+                        {{ content.account.pricing_link_label }}
                     </Link>
-                    for times when you prefer hosted processing.
+                    {{ content.account.pricing_link_suffix }}
                 </p>
             </div>
         </section>
@@ -403,7 +434,7 @@ const benefits = computed(() =>
                 <h2
                     class="text-3xl font-semibold tracking-tight text-slate-950"
                 >
-                    Desktop FAQ
+                    {{ content.faq_heading.title }}
                 </h2>
                 <div class="mt-8 grid gap-4">
                     <details

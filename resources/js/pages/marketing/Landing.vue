@@ -44,7 +44,35 @@ type HomeContent = {
         title: string;
         intro: string;
         online_button_label: string;
+        online_button_url: string;
         desktop_button_label: string;
+        desktop_button_url: string;
+        note: string;
+        note_link_label: string;
+        note_link_url: string;
+    };
+    workspace_preview: {
+        aria_label: string;
+        brand_name: string;
+        workspace_label: string;
+        add_transcript_label: string;
+        recent_label: string;
+        recent_items: string[];
+        transcript_label: string;
+        active_transcript_title: string;
+        processing_label: string;
+        sample_transcript: string[];
+        actions: string[];
+    };
+    pricing_note: {
+        text: string;
+        link_label: string;
+        link_url: string;
+    };
+    paths_intro: {
+        eyebrow: string;
+        title: string;
+        body: string;
     };
     paths: PathCard[];
     workflow: {
@@ -64,11 +92,14 @@ type HomeContent = {
         note: string;
     };
     faq: FaqItem[];
+    faq_heading: { title: string };
     cta: {
         title: string;
         body: string;
         online_button_label: string;
+        online_button_url: string;
         desktop_button_label: string;
+        desktop_button_url: string;
     };
 };
 
@@ -107,26 +138,30 @@ const useCaseIcons = [BriefcaseBusiness, GraduationCap, Podcast];
                     </p>
                     <div class="mt-8 flex flex-col gap-3 sm:flex-row">
                         <Button as-child size="lg">
-                            <Link href="/register">
+                            <Link :href="content.hero.online_button_url">
                                 {{ content.hero.online_button_label }}
                                 <ArrowRight class="size-4" />
                             </Link>
                         </Button>
                         <Button as-child size="lg" variant="outline">
-                            <Link href="/download">
+                            <Link :href="content.hero.desktop_button_url">
                                 <Download class="size-4" />
                                 {{ content.hero.desktop_button_label }}
                             </Link>
                         </Button>
                     </div>
                     <p class="mt-5 text-sm leading-6 text-slate-600">
-                        No required subscription. Use the free Windows app, the
-                        daily online allowance, or pay only for extra hosted
-                        processing.
+                        {{ content.hero.note }}
+                        <Link
+                            :href="content.hero.note_link_url"
+                            class="font-semibold text-blue-600 hover:text-blue-700"
+                        >
+                            {{ content.hero.note_link_label }}
+                        </Link>
                     </p>
                 </div>
 
-                <WorkspacePreview />
+                <WorkspacePreview :content="content.workspace_preview" />
             </div>
         </section>
 
@@ -135,14 +170,13 @@ const useCaseIcons = [BriefcaseBusiness, GraduationCap, Podcast];
             <p
                 class="mx-auto mt-4 max-w-6xl text-center text-sm text-slate-600"
             >
-                Need more than the daily allowance?
+                {{ content.pricing_note.text }}
                 <Link
-                    href="/price"
+                    :href="content.pricing_note.link_url"
                     class="font-semibold text-blue-600 hover:text-blue-700"
                 >
-                    Compare online pricing
+                    {{ content.pricing_note.link_label }}
                 </Link>
-                .
             </p>
         </section>
 
@@ -152,17 +186,15 @@ const useCaseIcons = [BriefcaseBusiness, GraduationCap, Podcast];
                     <p
                         class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
                     >
-                        Choose your workflow
+                        {{ content.paths_intro.eyebrow }}
                     </p>
                     <h2
                         class="mt-3 text-3xl font-semibold tracking-tight text-slate-950"
                     >
-                        Online convenience or free local processing
+                        {{ content.paths_intro.title }}
                     </h2>
                     <p class="mt-4 text-base leading-7 text-slate-700">
-                        You do not have to force every recording through the
-                        same route. Pick the option that makes sense for the
-                        computer and audio in front of you.
+                        {{ content.paths_intro.body }}
                     </p>
                 </div>
 
@@ -304,7 +336,7 @@ const useCaseIcons = [BriefcaseBusiness, GraduationCap, Podcast];
                 <h2
                     class="text-3xl font-semibold tracking-tight text-slate-950"
                 >
-                    JERVA transcription FAQ
+                    {{ content.faq_heading.title }}
                 </h2>
                 <div class="mt-8 grid gap-4">
                     <details
@@ -340,12 +372,12 @@ const useCaseIcons = [BriefcaseBusiness, GraduationCap, Podcast];
                 </div>
                 <div class="flex flex-col gap-3 sm:flex-row">
                     <Button as-child>
-                        <Link href="/register">{{
+                        <Link :href="content.cta.online_button_url">{{
                             content.cta.online_button_label
                         }}</Link>
                     </Button>
                     <Button as-child variant="outline">
-                        <Link href="/download">{{
+                        <Link :href="content.cta.desktop_button_url">{{
                             content.cta.desktop_button_label
                         }}</Link>
                     </Button>

@@ -43,7 +43,7 @@ test('content editors can access only blog dashboard sections', function () {
         ->assertForbidden();
 
     $this->actingAs($user)
-        ->get(route('dashboard.pages.features.edit'))
+        ->get(route('dashboard.pages.edit', ['page' => 'features']))
         ->assertForbidden();
 });
 
@@ -76,7 +76,7 @@ test('super admin bypass can access dashboard sections when enabled', function (
         ->assertOk();
 
     $this->actingAs($user)
-        ->get(route('dashboard.pages.download.edit'))
+        ->get(route('dashboard.pages.edit', ['page' => 'download']))
         ->assertOk();
 });
 

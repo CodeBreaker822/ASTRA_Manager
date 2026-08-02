@@ -77,6 +77,13 @@ const applyDefaultLayout = async (
 };
 
 createInertiaApp({
+    serverHead: (page) => {
+        const seo = page.props.seo as { head?: unknown } | undefined;
+
+        return Array.isArray(seo?.head)
+            ? seo.head.filter((tag): tag is string => typeof tag === 'string')
+            : [];
+    },
     resolve: async (name) => {
         const loadPage = pages[`./pages/${name}.vue`];
 
@@ -89,11 +96,7 @@ createInertiaApp({
         return applyDefaultLayout(name, page.default);
     },
     title: (title) => {
-        if (!title || title === appName) {
-            return appName;
-        }
-
-        return title.includes('JERVA') ? title : `${title} - ${appName}`;
+        return title || appName;
     },
     progress: {
         color: '#2563eb',

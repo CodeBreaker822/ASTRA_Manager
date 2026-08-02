@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\PlanComparisonRow;
 use App\Models\PlanTier;
-use App\Services\PageContentService;
 use App\Services\PlanService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,7 +15,7 @@ use Inertia\Response;
 
 class DashboardPricingController extends Controller
 {
-    public function edit(PlanService $plans, PageContentService $pages): Response
+    public function edit(PlanService $plans): Response
     {
         Gate::authorize('cms.manage-pricing');
 
@@ -28,11 +27,10 @@ class DashboardPricingController extends Controller
                     'tier_keys' => $tierKeys,
                 ])
                 ->values(),
-            'pricingContent' => $pages->page('pricing'),
         ]);
     }
 
-    public function update(Request $request, PlanService $plans, PageContentService $pages): RedirectResponse
+    public function update(Request $request, PlanService $plans): RedirectResponse
     {
         Gate::authorize('cms.manage-pricing');
 
@@ -67,12 +65,6 @@ class DashboardPricingController extends Controller
             'comparisonRows.*.label' => ['required', 'string', 'max:120'],
             'comparisonRows.*.tier_keys' => ['array'],
             'comparisonRows.*.tier_keys.*' => ['string', Rule::in(['free', 'payg'])],
-            'pricingContent.hero.eyebrow' => ['required', 'string', 'max:80'],
-            'pricingContent.hero.title' => ['required', 'string', 'max:180'],
-            'pricingContent.hero.intro' => ['required', 'string', 'max:500'],
-            'pricingContent.faq' => ['array', 'max:6'],
-            'pricingContent.faq.*.question' => ['required', 'string', 'max:180'],
-            'pricingContent.faq.*.answer' => ['required', 'string', 'max:500'],
         ]);
 
         foreach (array_values($validated['tiers']) as $index => $tier) {
@@ -135,7 +127,6 @@ class DashboardPricingController extends Controller
         });
 
         $plans->forget();
-        $pages->save('pricing', $validated['pricingContent'], $request->user()?->id);
 
         return back()->with('success', 'Pricing saved.');
     }

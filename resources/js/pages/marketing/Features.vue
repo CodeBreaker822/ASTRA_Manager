@@ -38,11 +38,28 @@ type FeaturesContent = {
         eyebrow: string;
         title: string;
         intro: string;
+        online_button_label: string;
+        online_button_url: string;
+        desktop_button_label: string;
+        desktop_button_url: string;
+    };
+    feature_visual: {
+        subtitle: string;
+        raw_label: string;
+        cleaned_label: string;
+        export_label: string;
     };
     feature_rows: FeatureRow[];
     comparison: {
         title: string;
         intro: string;
+        label_column: string;
+        online_column: string;
+        desktop_column: string;
+        pricing_note: string;
+        pricing_link_label: string;
+        pricing_link_url: string;
+        pricing_link_suffix: string;
         rows: Array<{
             label: string;
             online: string;
@@ -50,11 +67,14 @@ type FeaturesContent = {
         }>;
     };
     faq: FaqItem[];
+    faq_heading: { title: string };
     cta: {
         title: string;
         body: string;
         online_button_label: string;
+        online_button_url: string;
         desktop_button_label: string;
+        desktop_button_url: string;
     };
 };
 
@@ -104,12 +124,14 @@ const features = computed(() =>
                         </p>
                         <div class="mt-6 flex flex-col gap-3 sm:flex-row">
                             <Button as-child>
-                                <Link href="/register">Start online</Link>
+                                <Link :href="content.hero.online_button_url">
+                                    {{ content.hero.online_button_label }}
+                                </Link>
                             </Button>
                             <Button as-child variant="outline">
-                                <Link href="/download">
+                                <Link :href="content.hero.desktop_button_url">
                                     <Download class="size-4" />
-                                    Download for Windows
+                                    {{ content.hero.desktop_button_label }}
                                 </Link>
                             </Button>
                         </div>
@@ -175,7 +197,7 @@ const features = computed(() =>
                                         {{ feature.title }}
                                     </p>
                                     <p class="text-xs text-blue-900">
-                                        JERVA transcription workflow
+                                        {{ content.feature_visual.subtitle }}
                                     </p>
                                 </div>
                             </div>
@@ -195,19 +217,19 @@ const features = computed(() =>
                                     class="inline-flex h-8 items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 text-xs font-semibold text-blue-900"
                                 >
                                     <FileText class="size-3.5" />
-                                    Raw
+                                    {{ content.feature_visual.raw_label }}
                                 </span>
                                 <span
                                     class="inline-flex h-8 items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 text-xs font-semibold text-blue-900"
                                 >
                                     <Sparkles class="size-3.5" />
-                                    Cleaned
+                                    {{ content.feature_visual.cleaned_label }}
                                 </span>
                                 <span
                                     class="inline-flex h-8 items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 text-xs font-semibold text-blue-900"
                                 >
                                     <Download class="size-3.5" />
-                                    Export
+                                    {{ content.feature_visual.export_label }}
                                 </span>
                             </div>
                         </div>
@@ -235,10 +257,14 @@ const features = computed(() =>
                     <table class="w-full min-w-[700px] text-left text-sm">
                         <thead class="bg-blue-50 text-blue-950">
                             <tr>
-                                <th class="px-5 py-4 font-semibold">Compare</th>
-                                <th class="px-5 py-4 font-semibold">Online</th>
                                 <th class="px-5 py-4 font-semibold">
-                                    Windows desktop
+                                    {{ content.comparison.label_column }}
+                                </th>
+                                <th class="px-5 py-4 font-semibold">
+                                    {{ content.comparison.online_column }}
+                                </th>
+                                <th class="px-5 py-4 font-semibold">
+                                    {{ content.comparison.desktop_column }}
                                 </th>
                             </tr>
                         </thead>
@@ -264,12 +290,13 @@ const features = computed(() =>
                     </table>
                 </div>
                 <p class="mt-5 text-sm leading-6 text-slate-600">
-                    See the current online rates and free allowance on the
+                    {{ content.comparison.pricing_note }}
                     <Link
-                        href="/price"
+                        :href="content.comparison.pricing_link_url"
                         class="font-semibold text-blue-600 hover:text-blue-700"
-                        >Pricing page</Link
-                    >.
+                        >{{ content.comparison.pricing_link_label }}</Link
+                    >
+                    {{ content.comparison.pricing_link_suffix }}
                 </p>
             </div>
         </section>
@@ -279,7 +306,7 @@ const features = computed(() =>
                 <h2
                     class="text-3xl font-semibold tracking-tight text-slate-950"
                 >
-                    Feature FAQ
+                    {{ content.faq_heading.title }}
                 </h2>
                 <div class="mt-8 grid gap-4">
                     <details
@@ -315,12 +342,12 @@ const features = computed(() =>
                 </div>
                 <div class="flex flex-col gap-3 sm:flex-row">
                     <Button as-child>
-                        <Link href="/register">{{
+                        <Link :href="content.cta.online_button_url">{{
                             content.cta.online_button_label
                         }}</Link>
                     </Button>
                     <Button as-child variant="outline">
-                        <Link href="/download">{{
+                        <Link :href="content.cta.desktop_button_url">{{
                             content.cta.desktop_button_label
                         }}</Link>
                     </Button>

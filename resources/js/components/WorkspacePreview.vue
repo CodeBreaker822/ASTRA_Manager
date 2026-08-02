@@ -1,13 +1,31 @@
 <script setup lang="ts">
-import { FileAudio, FileText, Sparkles } from '@lucide/vue';
+import { FileAudio, FileText, Mic, Sparkles, Upload } from '@lucide/vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import { Button } from '@/components/ui/button';
+
+defineProps<{
+    content: {
+        aria_label: string;
+        brand_name: string;
+        workspace_label: string;
+        add_transcript_label: string;
+        recent_label: string;
+        recent_items: string[];
+        transcript_label: string;
+        active_transcript_title: string;
+        processing_label: string;
+        sample_transcript: string[];
+        actions: string[];
+    };
+}>();
+
+const actionIcons = [Mic, Upload, Sparkles, FileText];
 </script>
 
 <template>
     <div
         class="rounded-lg border border-slate-200 bg-white shadow-[0_12px_32px_rgba(15,23,42,0.08)]"
-        aria-label="JERVA workspace preview"
+        :aria-label="content.aria_label"
     >
         <div
             class="grid min-h-[32rem] overflow-hidden rounded-lg md:grid-cols-[13rem_1fr]"
@@ -23,33 +41,36 @@ import { Button } from '@/components/ui/button';
                     </span>
                     <div>
                         <p class="text-sm font-semibold text-slate-950">
-                            JERVA Transcriber
+                            {{ content.brand_name }}
                         </p>
-                        <p class="text-xs text-slate-600">Web workspace</p>
+                        <p class="text-xs text-slate-600">
+                            {{ content.workspace_label }}
+                        </p>
                     </div>
                 </div>
                 <button
                     class="mt-6 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white"
                 >
                     <FileAudio class="size-4" />
-                    Add Transcript
+                    {{ content.add_transcript_label }}
                 </button>
                 <p
                     class="mt-6 text-xs font-semibold tracking-wide text-slate-600 uppercase"
                 >
-                    Recent
+                    {{ content.recent_label }}
                 </p>
                 <div class="mt-3 grid gap-2">
                     <div
-                        class="rounded-lg bg-blue-100 px-3 py-2 text-sm font-medium text-blue-900 shadow-[inset_3px_0_0_#2563eb]"
+                        v-for="(item, index) in content.recent_items"
+                        :key="`${item}-${index}`"
+                        class="rounded-lg px-3 py-2 text-sm"
+                        :class="
+                            index === 0
+                                ? 'bg-blue-100 font-medium text-blue-900 shadow-[inset_3px_0_0_#2563eb]'
+                                : 'text-slate-700'
+                        "
                     >
-                        Client intake call
-                    </div>
-                    <div class="rounded-lg px-3 py-2 text-sm text-slate-700">
-                        Product standup
-                    </div>
-                    <div class="rounded-lg px-3 py-2 text-sm text-slate-700">
-                        Lecture notes
+                        {{ item }}
                     </div>
                 </div>
             </aside>
@@ -62,10 +83,10 @@ import { Button } from '@/components/ui/button';
                         <p
                             class="text-xs font-semibold tracking-wide text-blue-600 uppercase"
                         >
-                            Transcript
+                            {{ content.transcript_label }}
                         </p>
                         <h2 class="text-lg font-semibold text-slate-950">
-                            Client intake call
+                            {{ content.active_transcript_title }}
                         </h2>
                     </div>
                     <Sparkles class="size-5 text-blue-600" />
@@ -76,7 +97,7 @@ import { Button } from '@/components/ui/button';
                         class="rounded-lg border border-blue-100 bg-blue-50 p-4"
                     >
                         <p class="text-sm font-semibold text-blue-950">
-                            Transcribing
+                            {{ content.processing_label }}
                         </p>
                         <div
                             class="mt-3 h-1 overflow-hidden rounded-full bg-blue-100"
@@ -88,19 +109,12 @@ import { Button } from '@/components/ui/button';
                     </div>
                     <div class="mt-6 grid gap-4">
                         <article
+                            v-for="(sample, index) in content.sample_transcript"
+                            :key="index"
                             class="rounded-lg border border-slate-200 bg-white p-4"
                         >
                             <p class="text-sm leading-6 text-slate-700">
-                                We need the final transcript cleaned,
-                                summarized, and exported before the review call.
-                            </p>
-                        </article>
-                        <article
-                            class="rounded-lg border border-slate-200 bg-white p-4"
-                        >
-                            <p class="text-sm leading-6 text-slate-700">
-                                Action items: send the revised scope, confirm
-                                file naming, and prepare the client-ready notes.
+                                {{ sample }}
                             </p>
                         </article>
                     </div>
@@ -110,14 +124,24 @@ import { Button } from '@/components/ui/button';
                     <div
                         class="mx-auto flex max-w-3xl flex-wrap items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-[0_12px_32px_rgba(15,23,42,0.1)]"
                     >
-                        <Button size="sm">Live</Button>
-                        <Button size="sm" variant="outline"
-                            >Upload Audio</Button
+                        <Button
+                            v-for="(action, index) in content.actions"
+                            :key="`${action}-${index}`"
+                            size="sm"
+                            :variant="
+                                index === 0
+                                    ? 'default'
+                                    : index === 1
+                                      ? 'outline'
+                                      : 'ghost'
+                            "
                         >
-                        <Button size="sm" variant="ghost">Polish</Button>
-                        <Button size="sm" variant="ghost">
-                            <FileText class="size-4" />
-                            Export
+                            <component
+                                :is="actionIcons[index]"
+                                v-if="actionIcons[index]"
+                                class="size-4"
+                            />
+                            {{ action }}
                         </Button>
                     </div>
                 </div>
