@@ -8,11 +8,29 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('api_transcription_jobs', function (Blueprint $table) {
-            $table->string('billing_feature', 16)->nullable()->after('request_payload');
-            $table->unsignedInteger('billing_seconds')->default(0)->after('billing_feature');
-            $table->timestamp('billed_at')->nullable()->after('billing_seconds')->index();
-        });
+        if (! Schema::hasColumn('api_transcription_jobs', 'billing_feature')) {
+            Schema::table('api_transcription_jobs', function (Blueprint $table): void {
+                $table->string('billing_feature', 16)->nullable()->after('request_payload');
+            });
+        }
+
+        if (! Schema::hasColumn('api_transcription_jobs', 'billing_seconds')) {
+            Schema::table('api_transcription_jobs', function (Blueprint $table): void {
+                $table->unsignedInteger('billing_seconds')->default(0)->after('billing_feature');
+            });
+        }
+
+        if (! Schema::hasColumn('api_transcription_jobs', 'billed_at')) {
+            Schema::table('api_transcription_jobs', function (Blueprint $table): void {
+                $table->timestamp('billed_at')->nullable()->after('billing_seconds');
+            });
+        }
+
+        if (! Schema::hasIndex('api_transcription_jobs', ['billed_at'])) {
+            Schema::table('api_transcription_jobs', function (Blueprint $table): void {
+                $table->index('billed_at');
+            });
+        }
     }
 
     public function down(): void
