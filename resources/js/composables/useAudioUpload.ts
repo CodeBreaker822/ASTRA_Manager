@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue';
+import { computed, onUnmounted, ref } from 'vue';
 import type { Transcript } from '@/types/workspace';
 
 type UploadClip = {
@@ -27,6 +27,7 @@ type UploadResponse = {
 type UploadRequestError = Error & {
     status?: number;
     serverMessage?: boolean;
+    recoverable?: boolean;
 };
 
 type UploadSession = {
@@ -41,9 +42,26 @@ const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 const UPLOAD_CHUNK_BYTES = 20 * 1024 * 1024;
 const SERVER_AUDIO_CHUNK_MS = 60 * 1000;
 
+// The progress bar spans three real phases. Transport upload and transcription
+// are measurable; server preparation (FFmpeg chunking inside upload/complete)
+// reports nothing, so it creeps within its own slice instead of pinning the
+// whole bar at 99%.
+const UPLOAD_PHASE_WEIGHT = 30;
+const PREPARE_PHASE_WEIGHT = 20;
+const TRANSCRIBE_PHASE_WEIGHT = 50;
+
+// upload/complete runs source chunking synchronously, so an edge proxy can cut
+// the connection long before the server is done. These windows bound how long
+// the client waits for the transcript that request is still producing.
+const RECOVERY_POLL_MS = 4000;
+const RECOVERY_WINDOW_MS = 20 * 60 * 1000;
+const RECOVERY_RECHECK_MS = 60 * 1000;
+
 export const useAudioUpload = (options: {
     csrfToken: () => string;
     projectId: () => number | null;
+    knownTranscriptIds: () => number[];
+    refreshStatus: () => Promise<void>;
     onTranscript: (transcript: Transcript) => void;
     onQueued: () => void;
     onUpgrade: (message: string) => void;
@@ -57,6 +75,7 @@ export const useAudioUpload = (options: {
         | 'Ready'
         | 'Preparing source'
         | 'Uploading source'
+        | 'Preparing on server'
         | 'Queued'
         | 'Processing'
         | 'Pausing'
@@ -68,6 +87,7 @@ export const useAudioUpload = (options: {
         | 'Ready to continue'
     >('Ready');
     const uploadPercent = ref(0);
+    const preparePercent = ref(0);
     const clips = ref<UploadClip[]>([]);
     const selectedFile = ref<File | null>(null);
     const selectedDurationMs = ref(0);
@@ -80,6 +100,13 @@ export const useAudioUpload = (options: {
     const retryable = ref(false);
     const completionNotified = ref(false);
     const queuedTranscriptIds = ref<number[]>([]);
+    const recovering = ref(false);
+    const transcriptIdsBeforeUpload = ref<number[]>([]);
+
+    let prepareTimer: number | null = null;
+    let recoveryTimer: number | null = null;
+    let recoveryDeadline = 0;
+    let recoveryInFlight = false;
 
     const hasProgress = computed(
         () =>
@@ -89,30 +116,22 @@ export const useAudioUpload = (options: {
     const completedCount = computed(
         () => clips.value.filter((clip) => clip.status === 'Complete').length,
     );
-    const progressPercent = computed(() => {
-        if (clips.value.length === 0) {
-            return 0;
-        }
-
-        if (status.value === 'Uploading source') {
-            return uploadPercent.value;
-        }
-
-        if (status.value === 'Queued') {
-            return 0;
-        }
-
-        if (status.value === 'Processing') {
-            return Math.round(
-                (completedCount.value / clips.value.length) * 100,
-            );
-        }
-
-        return Math.round((completedCount.value / clips.value.length) * 100);
-    });
+    const transcribePercent = computed(() =>
+        clips.value.length === 0
+            ? 0
+            : (completedCount.value / clips.value.length) * 100,
+    );
+    const progressPercent = computed(() =>
+        Math.round(
+            (uploadPercent.value * UPLOAD_PHASE_WEIGHT +
+                preparePercent.value * PREPARE_PHASE_WEIGHT +
+                transcribePercent.value * TRANSCRIBE_PHASE_WEIGHT) /
+                100,
+        ),
+    );
     const statusLine = computed(() =>
         status.value === 'Uploading source'
-            ? `Uploading source ${uploadPercent.value}%`
+            ? `Uploading source ${Math.round(uploadPercent.value)}%`
             : status.value,
     );
     const canStart = computed(
@@ -132,7 +151,11 @@ export const useAudioUpload = (options: {
             !retryable.value,
     );
     const canRetry = computed(
-        () => hasSession.value && !inFlight.value && retryable.value,
+        () =>
+            hasSession.value &&
+            !inFlight.value &&
+            !recovering.value &&
+            retryable.value,
     );
     const canCancel = computed(() => inFlight.value || hasProgress.value);
     const isActive = computed(
@@ -169,6 +192,7 @@ export const useAudioUpload = (options: {
 
         retryable.value = false;
         hasSession.value = true;
+        transcriptIdsBeforeUpload.value = options.knownTranscriptIds();
         await sendSource();
     };
 
@@ -196,7 +220,16 @@ export const useAudioUpload = (options: {
     };
 
     const retry = async () => {
-        if (inFlight.value) {
+        if (inFlight.value || recovering.value) {
+            return;
+        }
+
+        // Once every chunk has reached the server the source is already in its
+        // hands, so retrying must never re-upload it. Re-check for the
+        // transcript that upload/complete is producing instead.
+        if (sourceFullyDelivered()) {
+            beginRecovery(RECOVERY_RECHECK_MS);
+
             return;
         }
 
@@ -213,6 +246,8 @@ export const useAudioUpload = (options: {
     const cancel = () => {
         status.value = 'Cancelling';
         pauseRequested.value = false;
+        stopRecovery();
+        stopPrepareCreep();
         currentXhr.value?.abort();
         void cancelQueuedTranscripts();
         clips.value.forEach((clip) => {
@@ -269,6 +304,8 @@ export const useAudioUpload = (options: {
                 return;
             }
 
+            markServerPrepared();
+
             uploadDisplayClips.forEach((clip) => {
                 clip.status = 'Queued';
                 clip.meta = 'Queued for server processing';
@@ -303,6 +340,15 @@ export const useAudioUpload = (options: {
                 return;
             }
 
+            // The source reached the server and upload/complete may still be
+            // running there. Reporting failure now would be wrong, and
+            // re-sending would duplicate the job.
+            if ((error as UploadRequestError).recoverable === true) {
+                beginRecovery(RECOVERY_WINDOW_MS);
+
+                return;
+            }
+
             markFailed(uploadDisplayClips);
             options.onError(
                 error instanceof Error
@@ -326,6 +372,8 @@ export const useAudioUpload = (options: {
             return;
         }
 
+        stopRecovery();
+        markServerPrepared();
         clips.value.forEach((clip) => {
             if (!['Failed', 'Cancelled'].includes(clip.status)) {
                 clip.status = 'Complete';
@@ -338,6 +386,10 @@ export const useAudioUpload = (options: {
     };
 
     const syncTranscripts = (transcripts: Transcript[]) => {
+        if (recovering.value) {
+            adoptRecoveredTranscript(transcripts);
+        }
+
         if (queuedTranscriptIds.value.length === 0) {
             return;
         }
@@ -428,6 +480,31 @@ export const useAudioUpload = (options: {
         }
     };
 
+    // The upload that produced this transcript never got its response back, so
+    // it is identified as the newest upload transcript that did not exist when
+    // this source was submitted.
+    const adoptRecoveredTranscript = (transcripts: Transcript[]) => {
+        const adopted = transcripts
+            .filter(
+                (transcript) =>
+                    transcript.source === 'upload' &&
+                    !transcriptIdsBeforeUpload.value.includes(transcript.id) &&
+                    !queuedTranscriptIds.value.includes(transcript.id),
+            )
+            .sort((first, second) => second.id - first.id)[0];
+
+        if (!adopted) {
+            return;
+        }
+
+        stopRecovery();
+        markServerPrepared();
+        queuedTranscriptIds.value.push(adopted.id);
+        metaLine.value = 'Queued for server processing';
+        options.onTranscript(adopted);
+        options.onQueued();
+    };
+
     const syncServerClips = (
         totalClips: number,
         processedClips: number,
@@ -477,9 +554,7 @@ export const useAudioUpload = (options: {
         }
     };
 
-    const uploadSource = async (
-        projectId: number,
-    ): Promise<UploadResponse> => {
+    const uploadSource = async (projectId: number): Promise<UploadResponse> => {
         const file = selectedFile.value;
 
         if (!file) {
@@ -540,15 +615,17 @@ export const useAudioUpload = (options: {
                 form,
                 (loaded) => {
                     uploadPercent.value = Math.min(
-                        99,
-                        Math.round(
-                            ((uploadedBytes + loaded) / file.size) * 100,
-                        ),
+                        100,
+                        ((uploadedBytes + loaded) / file.size) * 100,
                     );
                     status.value = 'Uploading source';
                 },
             );
             session.nextChunkIndex = chunkIndex + 1;
+            uploadPercent.value = Math.min(
+                100,
+                (Math.min(end, file.size) / file.size) * 100,
+            );
         }
 
         const completeForm = new FormData();
@@ -561,8 +638,8 @@ export const useAudioUpload = (options: {
             );
         }
 
-        uploadPercent.value = 99;
-        status.value = 'Uploading source';
+        uploadPercent.value = 100;
+        beginServerPrepare();
         session.completeAttempts += 1;
         const firstCompleteAttempt = session.completeAttempts === 1;
 
@@ -574,14 +651,19 @@ export const useAudioUpload = (options: {
                 completeForm,
             );
         } catch (error) {
-            // Only a first-attempt definitive rejection proves the server
-            // discarded this session without creating a transcript. Any
-            // other failure is indeterminate (timeout, network, retry), so
-            // the session is kept: retrying it can never duplicate the
-            // source, while a fresh upload id could.
+            // A first-attempt definitive rejection proves the server discarded
+            // this session without creating a transcript, so it is a real
+            // failure. Everything else - a timeout, a dropped connection, or a
+            // later attempt whose session the server already consumed - means
+            // work may still be in flight there.
             if (firstCompleteAttempt && isDefinitiveRejection(error)) {
                 uploadSession.value = null;
+                stopPrepareCreep();
+
+                throw error;
             }
+
+            (error as UploadRequestError).recoverable = true;
 
             throw error;
         }
@@ -625,8 +707,7 @@ export const useAudioUpload = (options: {
                 }
 
                 const error: UploadRequestError = new Error(
-                    payload.message ??
-                        'Audio upload could not be processed.',
+                    payload.message ?? 'Audio upload could not be processed.',
                 );
                 error.status = xhr.status;
                 error.serverMessage = typeof payload.message === 'string';
@@ -638,6 +719,102 @@ export const useAudioUpload = (options: {
                 reject(new Error('Audio upload could not be processed.'));
             xhr.send(form);
         });
+
+    const beginServerPrepare = () => {
+        status.value = 'Preparing on server';
+        metaLine.value =
+            'Preparing audio on the server. This can take a while.';
+        startPrepareCreep();
+    };
+
+    const markServerPrepared = () => {
+        stopPrepareCreep();
+        uploadPercent.value = 100;
+        preparePercent.value = 100;
+    };
+
+    const startPrepareCreep = () => {
+        stopPrepareCreep();
+
+        prepareTimer = window.setInterval(() => {
+            preparePercent.value = Math.min(
+                95,
+                preparePercent.value +
+                    Math.max(0.4, (95 - preparePercent.value) * 0.03),
+            );
+        }, 1000);
+    };
+
+    const stopPrepareCreep = () => {
+        if (prepareTimer === null) {
+            return;
+        }
+
+        window.clearInterval(prepareTimer);
+        prepareTimer = null;
+    };
+
+    const beginRecovery = (windowMs: number) => {
+        stopRecovery();
+        recovering.value = true;
+        recoveryDeadline = Date.now() + windowMs;
+        inFlight.value = false;
+        retryable.value = false;
+        pauseRequested.value = false;
+        status.value = 'Preparing on server';
+        metaLine.value =
+            'Upload finished. Waiting for the server to finish processing.';
+        startPrepareCreep();
+        recoveryTimer = window.setInterval(() => {
+            void recoveryTick();
+        }, RECOVERY_POLL_MS);
+        void recoveryTick();
+    };
+
+    const stopRecovery = () => {
+        recovering.value = false;
+
+        if (recoveryTimer === null) {
+            return;
+        }
+
+        window.clearInterval(recoveryTimer);
+        recoveryTimer = null;
+    };
+
+    const recoveryTick = async () => {
+        if (recoveryInFlight) {
+            return;
+        }
+
+        if (Date.now() > recoveryDeadline) {
+            stopRecovery();
+            stopPrepareCreep();
+            markFailed(
+                clips.value,
+                'The server did not report this upload. It may still be processing, so check your transcripts before uploading again.',
+            );
+
+            return;
+        }
+
+        recoveryInFlight = true;
+
+        try {
+            await options.refreshStatus();
+        } catch {
+            return;
+        } finally {
+            recoveryInFlight = false;
+        }
+    };
+
+    const sourceFullyDelivered = () =>
+        Boolean(
+            uploadSession.value &&
+            uploadSession.value.nextChunkIndex >=
+                uploadSession.value.totalChunks,
+        );
 
     const cancelQueuedTranscripts = async () => {
         const projectId = options.projectId();
@@ -687,7 +864,11 @@ export const useAudioUpload = (options: {
         }
     };
 
-    const markFailed = (batch: UploadClip[]) => {
+    const markFailed = (
+        batch: UploadClip[],
+        message = 'Audio upload could not be processed.',
+    ) => {
+        stopPrepareCreep();
         batch.forEach((clip) => {
             if (clip.status !== 'Complete') {
                 clip.status = 'Failed';
@@ -695,18 +876,21 @@ export const useAudioUpload = (options: {
             }
         });
         status.value = 'Failed';
-        metaLine.value = 'Audio upload could not be processed.';
+        metaLine.value = message;
         inFlight.value = false;
         retryable.value = true;
     };
 
     const resetSession = () => {
         currentXhr.value?.abort();
+        stopRecovery();
+        stopPrepareCreep();
         fileName.value = 'Select an audio file';
         metaLine.value = '';
         durationLabel.value = '--:--';
         status.value = 'Ready';
         uploadPercent.value = 0;
+        preparePercent.value = 0;
         clips.value = [];
         selectedFile.value = null;
         selectedDurationMs.value = 0;
@@ -719,10 +903,16 @@ export const useAudioUpload = (options: {
         retryable.value = false;
         completionNotified.value = false;
         queuedTranscriptIds.value = [];
+        transcriptIdsBeforeUpload.value = [];
     };
 
     const unfinishedClips = () =>
         clips.value.filter((clip) => clip.status !== 'Complete');
+
+    onUnmounted(() => {
+        stopRecovery();
+        stopPrepareCreep();
+    });
 
     return {
         fileName,
@@ -763,10 +953,20 @@ const parseJson = (value: string): UploadResponse => {
     }
 };
 
-const isDefinitiveRejection = (error: unknown): boolean =>
-    error instanceof Error &&
-    (error as UploadRequestError).status === 422 &&
-    (error as UploadRequestError).serverMessage === true;
+// A parsed 4xx body means the application answered deliberately and stopped
+// before creating a transcript: validation, auth, an expired CSRF token, a
+// rejected payload. A 5xx, an edge timeout, or a dropped connection proves
+// nothing about what the server did with the source.
+const isDefinitiveRejection = (error: unknown): boolean => {
+    const status = (error as UploadRequestError).status ?? 0;
+
+    return (
+        error instanceof Error &&
+        status >= 400 &&
+        status < 500 &&
+        (error as UploadRequestError).serverMessage === true
+    );
+};
 
 const makeUploadId = () => {
     if (crypto.randomUUID) {

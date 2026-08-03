@@ -313,11 +313,15 @@ test('completing the same upload session twice creates only one transcript', fun
             ->assertAccepted()
             ->assertJsonPath('transcript.status', 'queued');
 
+        // The frontend treats this exact rejection as proof that the server
+        // already consumed the source, and recovers by locating the transcript
+        // the first request produced instead of uploading again.
         $this->actingAs($user)
             ->postJson(route('workspace.upload.complete', $project), [
                 'upload_id' => $uploadId,
             ])
-            ->assertStatus(422);
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'The upload session was not found.');
     } finally {
         @unlink($chunkPath);
         @unlink($preparedClipPath);

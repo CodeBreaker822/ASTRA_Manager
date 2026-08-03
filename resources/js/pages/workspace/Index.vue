@@ -275,6 +275,10 @@ const { startPolling, stopPolling } = useTranscriptPolling(
 const upload = useAudioUpload({
     csrfToken,
     projectId: () => displayProject.value?.id ?? null,
+    knownTranscriptIds: () =>
+        displayProject.value?.transcripts.map((transcript) => transcript.id) ??
+        [],
+    refreshStatus,
     onTranscript: addTranscriptToLocal,
     onQueued: startPolling,
     onUpgrade: (message) => {

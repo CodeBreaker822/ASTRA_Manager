@@ -32,7 +32,7 @@ const emit = defineEmits<{
 
 <template>
     <div
-        class="pointer-events-none absolute inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 px-3 py-3 lg:px-6 lg:py-4"
+        class="pointer-events-none absolute inset-x-0 bottom-0 px-3 py-3 lg:px-6 lg:py-4"
     >
         <div
             class="pointer-events-auto mx-auto flex w-full max-w-[calc(100%-1rem)] flex-col items-center justify-center gap-3 lg:max-w-[calc(100%-2rem)] lg:gap-4"
