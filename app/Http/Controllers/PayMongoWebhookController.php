@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\BillingTransaction;
-use App\Services\WalletTopupService;
+use App\Services\Billing\WalletTopupService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;

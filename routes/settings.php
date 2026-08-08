@@ -24,8 +24,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->middleware('throttle:10,1')
         ->name('user-password.update');
 
-    Route::view('settings/appearance', 'settings.appearance')->name('appearance.edit');
-
     Route::view('settings/recording', 'settings.recording')->name('recording.edit');
 
     Route::get('settings/billing', [BillingController::class, 'edit'])->name('billing.edit');

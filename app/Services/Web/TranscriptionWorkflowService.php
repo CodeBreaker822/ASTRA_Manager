@@ -4,9 +4,9 @@ namespace App\Services\Web;
 
 use App\Models\Transcript;
 use App\Models\TranscriptProject;
-use App\Services\WebApiTranscriptionClient;
-use App\Services\WebAudioChunkerService;
-use App\Services\WebTranscriptProcessor;
+use App\Services\Transcription\WebApiTranscriptionClient;
+use App\Services\Transcription\WebAudioChunkerService;
+use App\Services\Transcription\WebTranscriptProcessor;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;

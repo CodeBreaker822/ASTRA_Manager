@@ -1,16 +1,18 @@
 <?php
 
+use App\Jobs\ProcessApiTranscriptionJob;
 use App\Models\ApiTranscriptionJob;
 use App\Models\Transcript;
 use App\Models\TranscriptionProviderSetting;
 use App\Models\TranscriptProject;
 use App\Models\User;
-use App\Services\TranscriptExportService;
-use App\Services\WebAudioChunkerService;
+use App\Services\Transcription\TranscriptExportService;
+use App\Services\Transcription\WebAudioChunkerService;
 use App\Support\SummaryMarkdown;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use Symfony\Component\Process\Process;
@@ -121,7 +123,7 @@ test('web upload queues the local async transcribe api job and finalizes from st
     $transcriptId = $upload->json('transcript.id');
     $apiJob = ApiTranscriptionJob::query()->firstOrFail();
 
-    expect($apiJob->request_payload['mode'])->toBe('queue')
+    expect($apiJob->request_payload['mode'])->toBe('queue_worker')
         ->and($apiJob->request_payload['clips'])->toHaveCount(1)
         ->and($apiJob->request_payload['clips'][0]['audio_path'])->not->toBeEmpty()
         ->and($project->transcripts()->whereKey($transcriptId)->firstOrFail()->status)->toBe('queued');
@@ -135,6 +137,59 @@ test('web upload queues the local async transcribe api job and finalizes from st
         ->assertJsonPath('project.transcripts.0.sections.0.text', 'Local async upload transcript.');
 
     Http::assertSent(fn ($request): bool => str_starts_with($request->url(), config('services.deepgram.listen_url')));
+});
+
+test('web upload hands transcription to a queue worker instead of the status poll', function () {
+    $ffmpeg = availableFfmpegBinary();
+
+    if ($ffmpeg === null) {
+        $this->markTestSkipped('FFmpeg is not installed on this machine.');
+    }
+
+    config(['services.ffmpeg.binary' => $ffmpeg]);
+
+    Queue::fake();
+
+    $user = User::factory()->create(['plan' => 'payg']);
+    $project = TranscriptProject::query()->create([
+        'user_id' => $user->id,
+        'title' => 'Queue worker transcript',
+    ]);
+
+    TranscriptionProviderSetting::query()->create([
+        'provider' => 'deepgram',
+        'api_key' => 'deepgram-key',
+        'model' => 'nova-3',
+        'is_enabled' => true,
+        'sort_order' => 0,
+        'metadata' => deepgramRuntimeMetadata(),
+    ]);
+
+    Http::fake();
+
+    $this->actingAs($user)
+        ->postJson(route('workspace.upload', $project), [
+            'audio' => UploadedFile::fake()->createWithContent('clip.wav', wavContent(2)),
+            'server_chunk' => true,
+        ])
+        ->assertAccepted();
+
+    $apiJob = ApiTranscriptionJob::query()->firstOrFail();
+
+    Queue::assertPushed(
+        ProcessApiTranscriptionJob::class,
+        fn (ProcessApiTranscriptionJob $job): bool => $job->transcriptionJobId === $apiJob->id,
+    );
+
+    // The poll reports progress; it must no longer be the thing that does the
+    // transcribing, which is what used to pin the upload dock at 50%.
+    $this->actingAs($user)
+        ->getJson(route('workspace.status', $project))
+        ->assertOk()
+        ->assertJsonPath('project.transcripts.0.status', 'queued');
+
+    expect($apiJob->fresh()->status)->toBe('queued');
+    Http::assertNothingSent();
 });
 
 test('web upload submits server audio chunks in batches of twenty and exposes each completed batch', function () {
@@ -609,7 +664,9 @@ test('web upload completes when transcription provider returns no speech text', 
         ])
         ->assertAccepted();
 
-    expect(ApiTranscriptionJob::query()->firstOrFail()->status)->toBe('queued');
+    // The transient status depends on the queue driver, so assert the handoff
+    // itself rather than whether a worker has already gotten to it.
+    expect(ApiTranscriptionJob::query()->firstOrFail()->request_payload['mode'])->toBe('queue_worker');
 
     $this->actingAs($user)
         ->getJson(route('workspace.status', $project))

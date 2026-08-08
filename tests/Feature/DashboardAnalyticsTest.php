@@ -6,7 +6,7 @@ use App\Models\UsageRecord;
 use App\Models\User;
 use App\Models\UserPermissions;
 use App\Models\UserPositions;
-use App\Services\EntitlementService;
+use App\Services\Billing\EntitlementService;
 use Database\Seeders\PlanTierSeeder;
 use Illuminate\Support\Facades\Cache;
 

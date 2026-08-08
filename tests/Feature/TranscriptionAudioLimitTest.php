@@ -4,7 +4,7 @@ use App\Models\API;
 use App\Models\ApiTranscriptionJob;
 use App\Models\TranscriptionProviderSetting;
 use App\Models\User;
-use App\Services\GroqSpeechToTextService;
+use App\Services\Transcription\GroqSpeechToTextService;
 use App\Services\LicenseKeyService;
 use Database\Seeders\PlanTierSeeder;
 use Illuminate\Contracts\Console\Kernel;

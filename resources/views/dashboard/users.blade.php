@@ -1,6 +1,4 @@
-{{-- $statusOptions, $positionOptions, and $currentUserId come from UserManagerController::index(). --}}
 <x-layouts.dashboard title="User Management">
-    {{-- One Alpine scope drives which row is in edit mode. --}}
     <div class="space-y-4" x-data="{ editingUser: null, editingPosition: null }">
         <div>
             <h1 class="text-xl font-semibold text-slate-950">User Management</h1>
@@ -59,7 +57,6 @@
 
                 @foreach ($users as $user)
                     <div class="border-b px-4 py-4 last:border-b-0">
-                        {{-- Display row --}}
                         <div class="grid gap-3 lg:grid-cols-[1.4fr_170px_120px_120px] lg:items-center lg:gap-4"
                              x-show="editingUser !== {{ $user['id'] }}">
                             <div class="min-w-0">
@@ -92,7 +89,6 @@
                             </div>
                         </div>
 
-                        {{-- Edit row --}}
                         <form
                             method="POST"
                             action="{{ route('dashboard.users.update', $user['id']) }}"

@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Actions\Fortify\AuthenticateUser;
 use App\Http\Controllers\Controller;
 use App\Models\User;
-use App\Services\EntitlementService;
+use App\Services\Billing\EntitlementService;
 use App\Services\LicenseKeyService;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\JsonResponse;

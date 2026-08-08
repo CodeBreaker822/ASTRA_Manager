@@ -1,17 +1,14 @@
-{{-- $primaryTranscript, $showActions, and $hasRaw come from App\Support\WorkspaceView. --}}
 <div class="pointer-events-none absolute inset-x-0 bottom-0 px-3 py-3 lg:px-6 lg:py-4">
     <div class="pointer-events-auto mx-auto flex w-full max-w-[calc(100%-1rem)] flex-col items-center justify-center gap-3 lg:max-w-[calc(100%-2rem)] lg:gap-4">
 
         <input type="file" id="upload-input" class="hidden"
                accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm">
 
-        {{-- Mode chooser --}}
         <div id="mode-choose" class="{{ config('ui.workspace.dock.panel') }} mx-auto" @if ($mode !== 'choose') hidden @endif>
             <button type="button" id="choose-live" class="{{ config('ui.workspace.dock.mode_button') }}">Live</button>
             <button type="button" id="choose-upload" class="{{ config('ui.workspace.dock.mode_button') }}">Upload Audio</button>
         </div>
 
-        {{-- Live capture --}}
         <div id="mode-live" class="{{ config('ui.workspace.dock.panel') }}" @if ($mode !== 'live') hidden @endif>
             <button type="button" id="live-toggle" aria-pressed="false"
                     class="group flex h-12 min-w-32 flex-1 cursor-pointer items-center justify-center gap-3 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition outline-none hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-40 sm:flex-none">
@@ -36,7 +33,6 @@
             </div>
         </div>
 
-        {{-- Upload --}}
         <div id="mode-upload" class="{{ config('ui.workspace.dock.panel') }}" @if ($mode !== 'upload') hidden @endif>
             <button type="button" id="upload-browse"
                     @disabled(! $canUseUpload)
@@ -80,7 +76,6 @@
             </button>
         </div>
 
-        {{-- Transcript actions --}}
         @if ($showActions)
             <div class="order-2 flex w-full flex-wrap items-center justify-center gap-2 rounded-lg border border-blue-100 bg-white p-1.5 shadow-[0_12px_32px_rgba(15,23,42,0.08)] sm:w-fit"
                  data-transcript-id="{{ $primaryTranscript['id'] ?? '' }}">

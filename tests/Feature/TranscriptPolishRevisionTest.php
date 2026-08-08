@@ -3,7 +3,7 @@
 use App\Models\Transcript;
 use App\Models\TranscriptProject;
 use App\Models\User;
-use App\Services\WebTranscriptProcessor;
+use App\Services\Transcription\WebTranscriptProcessor;
 
 test('polish uses the currently displayed polished transcript as its source', function () {
     $user = User::factory()->create();

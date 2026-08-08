@@ -1,5 +1,3 @@
-{{-- `entries` adds page-specific Vite bundles; they load before blade.js so
-     any Alpine.data() they register exists when Alpine.start() runs. --}}
 @props(['title' => null, 'breadcrumbs' => [], 'entries' => []])
 
 <!DOCTYPE html>
@@ -9,7 +7,6 @@
     <title>{{ $title ?? config('app.name', 'JERVA Transcriber') }}</title>
 </head>
 <body class="font-sans antialiased">
-{{-- Sidebar collapse state is persisted in a cookie so it survives navigation. --}}
 <div
     class="flex min-h-svh w-full bg-sidebar"
     x-data="{

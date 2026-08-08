@@ -2,7 +2,7 @@
 
 use App\Exceptions\InsufficientWalletBalanceException;
 use App\Models\User;
-use App\Services\EntitlementService;
+use App\Services\Billing\EntitlementService;
 use App\Services\LicenseKeyService;
 use Database\Seeders\PlanTierSeeder;
 use Illuminate\Support\Facades\Cache;

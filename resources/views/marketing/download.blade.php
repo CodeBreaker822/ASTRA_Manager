@@ -1,7 +1,5 @@
 @include('partials.seo')
 
-{{-- $card is the download_card section, resolved by DownloadController::index(). --}}
-
 <x-layouts.marketing :title="$seo['title']">
     <main>
         <section class="border-b border-slate-200 bg-white py-16 md:py-24">

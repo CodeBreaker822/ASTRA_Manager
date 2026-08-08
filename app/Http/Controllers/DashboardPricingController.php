@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\PlanComparisonRow;
 use App\Models\PlanTier;
 use App\Services\PageContentService;
-use App\Services\PlanService;
+use App\Services\Billing\PlanService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;

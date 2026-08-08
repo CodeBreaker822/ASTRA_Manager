@@ -152,6 +152,54 @@ test('user management edit payload only includes the masked user generated api t
     expect($managed['license']['masked_token'])->toBe('********************_edit');
 });
 
+test('provider sections split the catalog by category and connection state', function () {
+    $this->withoutVite();
+
+    $response = $this->actingAs(createApiSettingsUserWithPermissions(['API-manage_api']))
+        ->get(route('api.manager'))
+        ->assertOk();
+
+    $sections = collect($response->viewData('providerSections'))->keyBy('category');
+
+    expect($sections->keys()->all())->toBe(['transcriber', 'text_fixer']);
+
+    foreach ($sections as $category => $section) {
+        // A provider belongs to exactly one panel, on exactly one side of it.
+        foreach ($section['configured'] as $provider) {
+            expect($provider['category'])->toBe($category)
+                ->and($provider['configured'])->toBeTrue();
+        }
+
+        foreach ($section['available'] as $provider) {
+            expect($provider['category'])->toBe($category)
+                ->and($provider['configured'])->toBeFalse();
+        }
+
+        // The add list is what the modal offers, so it must not repeat a name.
+        $names = array_column($section['available'], 'name');
+        expect($names)->toBe(array_values(array_unique($names)));
+    }
+});
+
+test('every provider option carries the category the add modal filters on', function () {
+    $this->withoutVite();
+
+    $response = $this->actingAs(createApiSettingsUserWithPermissions(['API-manage_api']))
+        ->get(route('api.manager'))
+        ->assertOk();
+
+    // Without data-category on the options and data-add-provider on the button,
+    // the modal cannot narrow the list and shows the whole catalog.
+    $response->assertSee('data-add-provider="transcriber"', false)
+        ->assertSee('data-add-provider="text_fixer"', false);
+
+    $optionCount = substr_count($response->getContent(), 'data-configured=');
+    $categoryCount = substr_count($response->getContent(), 'data-category=');
+
+    expect($optionCount)->toBeGreaterThan(0)
+        ->and($categoryCount)->toBe($optionCount);
+});
+
 function createApiSettingsUserWithPermissions(array $permissions): User
 {
     $position = UserPositions::query()->create([

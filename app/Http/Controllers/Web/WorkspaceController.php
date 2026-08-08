@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use App\Models\TranscriptProject;
-use App\Services\EntitlementService;
+use App\Services\Billing\EntitlementService;
 use App\Services\Web\WorkspacePayloadPresenter;
 use App\Support\Money;
 use App\Support\WorkspaceView;

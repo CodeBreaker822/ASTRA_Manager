@@ -1,6 +1,5 @@
 @props(['title' => null])
 
-{{-- $settingsTabs and $navHome are composed on by AppServiceProvider. --}}
 <x-layouts.app :title="$title">
     <div class="fixed inset-0 z-40 bg-blue-950/30 p-4 sm:p-6">
         <div class="mx-auto flex h-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">

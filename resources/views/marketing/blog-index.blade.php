@@ -1,6 +1,5 @@
 @include('partials.seo')
 
-{{-- $featuredPost, $remainingPosts, and each post's reading_time come from BlogController. --}}
 <x-layouts.marketing :title="$seo['title']">
     <main>
         <section class="border-b border-slate-200 bg-white py-16 md:py-24">

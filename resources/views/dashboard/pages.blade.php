@@ -1,5 +1,3 @@
-{{-- $sections, $seoTitle, and $seoDescription come from DashboardPageController::edit(). --}}
-
 <x-layouts.dashboard :title="$title">
     <form method="POST" action="{{ route('dashboard.pages.update', $pageKey) }}" class="space-y-5">
         @csrf
@@ -15,7 +13,6 @@
             </div>
 
             <div class="flex flex-wrap items-center gap-2">
-                {{-- Switching pages is a plain navigation; warn only if edits are pending. --}}
                 <select
                     aria-label="Choose page"
                     class="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"

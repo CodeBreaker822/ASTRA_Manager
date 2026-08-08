@@ -1,6 +1,5 @@
 @props(['pricing'])
 
-{{-- The facts are assembled by App\Support\PricingProof. --}}
 <div
     aria-label="{{ $site['pricing_proof']['aria_label'] }}"
     {{ $attributes->class('grid overflow-hidden rounded-lg border border-blue-100 bg-white shadow-[0_12px_32px_rgba(15,23,42,0.06)] sm:grid-cols-2 lg:grid-cols-5') }}

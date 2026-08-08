@@ -18,10 +18,10 @@ return [
 
         'variants' => [
             'default' => 'bg-primary text-primary-foreground hover:bg-blue-700',
-            'destructive' => 'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-red-100 dark:bg-destructive/60',
-            'outline' => 'border border-slate-200 bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50',
+            'destructive' => 'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-red-100',
+            'outline' => 'border border-slate-200 bg-background shadow-xs hover:bg-accent hover:text-accent-foreground',
             'secondary' => 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-            'ghost' => 'hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50',
+            'ghost' => 'hover:bg-accent hover:text-accent-foreground',
             'link' => 'text-primary underline-offset-4 hover:underline',
         ],
 
@@ -92,8 +92,8 @@ return [
     ],
 
     'dashboard' => [
-        'input' => 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200',
-        'toggle_track' => "h-5 w-10 rounded-full bg-gray-200 after:absolute after:top-[2px] after:left-[2px] after:size-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-5 dark:bg-gray-600",
+        'input' => 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500',
+        'toggle_track' => "h-5 w-10 rounded-full bg-gray-200 after:absolute after:top-[2px] after:left-[2px] after:size-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:after:translate-x-5",
     ],
 
 ];

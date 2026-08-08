@@ -1,6 +1,5 @@
 @props(['content'])
 
-{{-- Icon sequences live in config/ui.php. --}}
 <div class="rounded-lg border border-slate-200 bg-white shadow-[0_12px_32px_rgba(15,23,42,0.08)]"
      aria-label="{{ $content['aria_label'] }}">
     <div class="grid min-h-[32rem] overflow-hidden rounded-lg md:grid-cols-[13rem_1fr]">

@@ -1,5 +1,3 @@
-{{-- $user comes from ProfileController::edit(). --}}
-
 <x-layouts.settings title="Profile settings">
     <h1 class="sr-only">Profile settings</h1>
 
@@ -31,7 +29,7 @@
                         Your email address is unverified.
                     </p>
                     <button type="submit" form="resend-verification"
-                            class="text-sm text-foreground underline decoration-neutral-300 underline-offset-4 transition-colors duration-300 ease-out hover:decoration-current dark:decoration-neutral-500">
+                            class="text-sm text-foreground underline decoration-neutral-300 underline-offset-4 transition-colors duration-300 ease-out hover:decoration-current">
                         Click here to re-send the verification email.
                     </button>
 
@@ -55,12 +53,11 @@
         @endif
     </div>
 
-    {{-- Delete account --}}
     <div class="space-y-6">
         <x-ui.heading variant="small" title="Delete account" description="Delete your account and all of its resources" />
 
-        <div class="space-y-4 rounded-lg border border-red-100 bg-red-50 p-4 dark:border-red-200/10 dark:bg-red-700/10">
-            <div class="relative space-y-0.5 text-red-600 dark:text-red-100">
+        <div class="space-y-4 rounded-lg border border-red-100 bg-red-50 p-4">
+            <div class="relative space-y-0.5 text-red-600">
                 <p class="font-medium">Warning</p>
                 <p class="text-sm">Please proceed with caution, this cannot be undone.</p>
             </div>

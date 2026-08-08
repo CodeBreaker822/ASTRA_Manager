@@ -1,6 +1,3 @@
-{{-- $primaryTranscript, $hasRaw, $summaryText, and $summaryStatusMessage come from App\Support\WorkspaceView. --}}
-
-{{-- Polish --}}
 <div id="polish-modal" data-modal class="{{ config('ui.workspace.modal.shell') }}">
     <div class="{{ config('ui.workspace.modal.card') }} max-w-lg">
         <h3 class="text-base font-semibold text-slate-950">Polish transcript</h3>
@@ -43,7 +40,6 @@
     </div>
 </div>
 
-{{-- Summary --}}
 <div id="summary-modal" data-modal class="{{ config('ui.workspace.modal.shell') }}">
     <div class="{{ config('ui.workspace.modal.card') }} max-w-2xl">
         <div class="flex items-start justify-between gap-3">
@@ -81,7 +77,6 @@
     </div>
 </div>
 
-{{-- Export --}}
 <div id="export-modal" data-modal class="{{ config('ui.workspace.modal.shell') }}">
     <div class="{{ config('ui.workspace.modal.card') }} max-w-md">
         <h3 class="text-base font-semibold text-slate-950">Export transcript</h3>
@@ -106,7 +101,6 @@
     </div>
 </div>
 
-{{-- Processing log --}}
 <div id="log-modal" data-modal class="{{ config('ui.workspace.modal.shell') }}">
     <div class="{{ config('ui.workspace.modal.card') }} max-w-3xl">
         <div class="flex items-start justify-between gap-3">

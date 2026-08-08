@@ -11,7 +11,7 @@ use App\Models\User;
 use App\Policies\TranscriptPolicy;
 use App\Policies\TranscriptProjectPolicy;
 use App\Services\PageContentService;
-use App\Services\PayMongoWalletTopupReconciler;
+use App\Services\Billing\PayMongoWalletTopupReconciler;
 use App\Support\FlashNotification;
 use App\Support\Nav;
 use Carbon\CarbonImmutable;
@@ -172,18 +172,29 @@ class AppServiceProvider extends ServiceProvider
         $configuredCaBundle = $this->configuredCertificateAuthorityBundle();
 
         if ($configuredCaBundle !== null) {
-            Http::globalOptions([
-                'verify' => $configuredCaBundle,
-            ]);
+            $this->useCertificateAuthorityBundle($configuredCaBundle, 'configured');
 
             return;
         }
 
-        if (defined('CURLOPT_SSL_OPTIONS') && defined('CURLSSLOPT_NATIVE_CA')) {
+        $windowsFallback = $this->windowsFallbackCertificateAuthorityBundle();
+
+        if ($windowsFallback !== null) {
+            $this->useCertificateAuthorityBundle($windowsFallback, 'local_windows_fallback');
+
+            return;
+        }
+
+        if (PHP_OS_FAMILY === 'Windows' && defined('CURLOPT_SSL_OPTIONS') && defined('CURLSSLOPT_NATIVE_CA')) {
             Http::globalOptions([
                 'curl' => [
                     constant('CURLOPT_SSL_OPTIONS') => constant('CURLSSLOPT_NATIVE_CA'),
                 ],
+            ]);
+
+            Log::info('HTTP certificate authority selected.', [
+                'source' => 'windows_native_ca',
+                'ca_bundle' => null,
             ]);
 
             return;
@@ -192,21 +203,50 @@ class AppServiceProvider extends ServiceProvider
         $caBundle = $this->defaultCertificateAuthorityBundle();
 
         if ($caBundle !== null) {
-            Http::globalOptions([
-                'verify' => $caBundle,
-            ]);
+            $this->useCertificateAuthorityBundle($caBundle, 'guzzle_default');
+
+            return;
         }
+
+        Log::warning('No HTTP certificate authority bundle could be resolved.', [
+            'platform' => PHP_OS_FAMILY,
+        ]);
     }
 
     protected function configuredCertificateAuthorityBundle(): ?string
     {
-        foreach ([ini_get('curl.cainfo'), ini_get('openssl.cafile')] as $caBundle) {
+        foreach ([config('services.http.ca_bundle'), ini_get('curl.cainfo'), ini_get('openssl.cafile')] as $caBundle) {
             if (is_string($caBundle) && $caBundle !== '' && is_file($caBundle)) {
                 return $caBundle;
             }
         }
 
         return null;
+    }
+
+    protected function windowsFallbackCertificateAuthorityBundle(): ?string
+    {
+        if (PHP_OS_FAMILY !== 'Windows') {
+            return null;
+        }
+
+        $caBundle = config('services.http.windows_fallback_ca_bundle');
+
+        return is_string($caBundle) && $caBundle !== '' && is_file($caBundle)
+            ? $caBundle
+            : null;
+    }
+
+    protected function useCertificateAuthorityBundle(string $caBundle, string $source): void
+    {
+        Http::globalOptions([
+            'verify' => $caBundle,
+        ]);
+
+        Log::info('HTTP certificate authority selected.', [
+            'source' => $source,
+            'ca_bundle' => $caBundle,
+        ]);
     }
 
     protected function defaultCertificateAuthorityBundle(): ?string

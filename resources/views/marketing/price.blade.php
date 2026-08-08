@@ -1,6 +1,5 @@
 @include('partials.seo')
 
-{{-- $planLabels and each plan's rate strings come from MarketingController::price(). --}}
 <x-layouts.marketing :title="$seo['title']">
     <main>
         <section class="border-b border-slate-200 bg-white py-16 md:py-24">

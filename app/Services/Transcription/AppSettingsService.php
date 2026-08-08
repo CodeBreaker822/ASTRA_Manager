@@ -1,0 +1,1712 @@
+<?php
+
+namespace App\Services\Transcription;
+
+use App\Models\TranscriptionProviderSetting;
+use Illuminate\Contracts\Encryption\DecryptException;
+
+class AppSettingsService
+{
+    private const RUNPOD_API_BASE_URL = 'https://api.runpod.ai/v2';
+
+    public const PUBLIC_PROVIDER_ID = 'jerva_server';
+
+    public const PUBLIC_PROVIDER_NAME = 'JERVA Server';
+
+    public const PUBLIC_MODEL = 'Free-Model-Fast';
+
+    public const PROVIDER_DEEPGRAM = 'deepgram';
+
+    public const PROVIDER_ELEVENLABS = 'elevenlabs';
+
+    public const PROVIDER_SPEECHMATICS = 'speechmatics';
+
+    public const PROVIDER_GEMINI = 'gemini';
+
+    public const PROVIDER_GROQ_TRANSCRIPTION = 'groq_transcription';
+
+    public const PROVIDER_MISTRAL_TRANSCRIPTION = 'mistral_transcription';
+
+    public const PROVIDER_GLADIA = 'gladia';
+
+    public const PROVIDER_ASSEMBLYAI = 'assemblyai';
+
+    public const PROVIDER_AZURE_SPEECH = 'azure_speech';
+
+    public const PROVIDER_GOOGLE_SPEECH = 'google_speech';
+
+    public const PROVIDER_AWS_TRANSCRIBE = 'aws_transcribe';
+
+    public const PROVIDER_RUNPOD = 'runpod';
+
+    public const PROVIDER_GROQ_TEXT_FIXER = 'groq_text_fixer';
+
+    public const PROVIDER_DEEPSEEK = 'deepseek';
+
+    public const PROVIDER_CEREBRAS = 'cerebras';
+
+    public const PROVIDER_MISTRAL = 'mistral';
+
+    public const PROVIDER_OPENROUTER = 'openrouter';
+
+    public const PROVIDER_NVIDIA = 'nvidia';
+
+    public const PROVIDER_CLOUDFLARE = 'cloudflare';
+
+    public const DEEPGRAM_MODEL_NOVA_3 = DeepgramSpeechToTextService::MODEL_NOVA_3;
+
+    public const ELEVENLABS_MODEL_SCRIBE_V2 = ElevenLabsSpeechToTextService::MODEL_SCRIBE_V2;
+
+    public const GEMINI_MODEL_FLASH_LITE = 'gemini-3.1-flash-lite';
+
+    public function providerCards(): array
+    {
+        $definitions = $this->providerDefinitions();
+        $definitionPositions = array_flip(array_keys($definitions));
+        $settings = TranscriptionProviderSetting::query()
+            ->whereIn('provider', array_keys($definitions))
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get()
+            ->groupBy('provider');
+        $cards = [];
+
+        foreach ($definitions as $providerId => $definition) {
+            $providerSettings = $settings->get($providerId, collect());
+            $usedModels = $providerSettings
+                ->map(fn (TranscriptionProviderSetting $setting): string => $this->validModelForDefinition($definition, $setting->model))
+                ->all();
+            $unusedModels = array_values(array_diff($definition['models'], $usedModels));
+            $reusableApiKey = $providerSettings
+                ->map(fn (TranscriptionProviderSetting $setting): ?string => $this->safeApiKey($setting))
+                ->first(fn (?string $apiKey): bool => filled($apiKey));
+
+            foreach ($providerSettings as $setting) {
+                $model = $this->validModelForDefinition($definition, $setting->model);
+                $metadata = $this->metadataWithDefaults($providerId, $setting->metadata ?? []);
+                $apiKey = $this->safeApiKey($setting);
+
+                $selectableModels = array_values(array_unique([
+                    $model,
+                    ...$unusedModels,
+                ]));
+
+                $cards[] = array_merge($definition, [
+                    'endpoint' => $this->endpointFor($providerId, $metadata),
+                    'setting_id' => $setting->id,
+                    'integration_key' => 'setting_'.$setting->id,
+                    'models' => $selectableModels,
+                    'model' => $model,
+                    'model_label' => $definition['model_labels'][$model] ?? $model,
+                    'is_enabled' => $setting->is_enabled,
+                    'configured' => filled($apiKey) && $this->providerHasRequiredMetadata($providerId, $metadata),
+                    'masked_api_key' => $this->maskKey($apiKey),
+                    'has_reusable_api_key' => filled($apiKey),
+                    'metadata' => $metadata,
+                    'sort_order' => $setting->sort_order,
+                ]);
+            }
+
+            if ($unusedModels !== []) {
+                $model = $unusedModels[0];
+                $metadata = $this->metadataWithDefaults($providerId);
+
+                $cards[] = array_merge($definition, [
+                    'endpoint' => $this->endpointFor($providerId, $metadata),
+                    'setting_id' => null,
+                    'integration_key' => 'available_'.$providerId,
+                    'models' => $unusedModels,
+                    'model' => $model,
+                    'model_label' => $definition['model_labels'][$model] ?? $model,
+                    'is_enabled' => true,
+                    'configured' => false,
+                    'masked_api_key' => $this->maskKey($reusableApiKey),
+                    'has_reusable_api_key' => filled($reusableApiKey),
+                    'metadata' => $metadata,
+                    'sort_order' => PHP_INT_MAX,
+                ]);
+            }
+        }
+
+        usort($cards, function (array $left, array $right) use ($definitionPositions): int {
+            if ($left['category'] !== $right['category']) {
+                return $definitionPositions[$left['provider']] <=> $definitionPositions[$right['provider']];
+            }
+
+            return ($left['sort_order'] <=> $right['sort_order'])
+                ?: ($definitionPositions[$left['provider']] <=> $definitionPositions[$right['provider']]);
+        });
+
+        return $cards;
+    }
+
+    public function apiProviderCapabilities(): array
+    {
+        return array_map(function (array $provider): array {
+            $models = array_map(function (string $model) use ($provider): array {
+                $capability = [
+                    'id' => $model,
+                    'label' => $provider['model_labels'][$model] ?? $model,
+                ];
+
+                if ($provider['category'] === 'transcriber') {
+                    $capability['language_code_parameter'] = 'language_code';
+                    $capability['default_language_code'] = $this->defaultLanguageCode($provider['provider'], $model);
+                    $capability['language_code_required'] = $this->languageCodeRequired($provider['provider'], $model);
+                    $capability['accepts_custom_language_code'] = in_array($provider['provider'], [
+                        self::PROVIDER_ELEVENLABS,
+                        self::PROVIDER_GROQ_TRANSCRIPTION,
+                        self::PROVIDER_MISTRAL_TRANSCRIPTION,
+                        self::PROVIDER_GLADIA,
+                        self::PROVIDER_ASSEMBLYAI,
+                        self::PROVIDER_AZURE_SPEECH,
+                        self::PROVIDER_GOOGLE_SPEECH,
+                        self::PROVIDER_AWS_TRANSCRIBE,
+                        self::PROVIDER_RUNPOD,
+                    ], true);
+                    $capability['languages'] = $this->languageOptions($provider['provider'], $model);
+                }
+
+                return $capability;
+            }, $provider['models']);
+
+            return [
+                'provider' => $provider['provider'],
+                'name' => $provider['name'],
+                'purpose' => $provider['purpose'],
+                'category' => $provider['category'],
+                'configured' => $provider['configured'],
+                'enabled' => $provider['is_enabled'],
+                'connected' => $provider['configured'] && $provider['is_enabled'],
+                'sort_order' => $provider['sort_order'],
+                'model' => $provider['model'],
+                'models' => array_values($models),
+            ];
+        }, $this->providerCards());
+    }
+
+    public function publicProviderCapability(string $category): array
+    {
+        $providers = array_values(array_filter(
+            $this->apiProviderCapabilities(),
+            fn (array $provider): bool => $provider['category'] === $category,
+        ));
+        $connectedProviders = array_values(array_filter(
+            $providers,
+            fn (array $provider): bool => $provider['connected'],
+        ));
+        $primaryProvider = $connectedProviders[0] ?? null;
+        $publicModel = [
+            'id' => self::PUBLIC_MODEL,
+            'label' => self::PUBLIC_MODEL,
+        ];
+
+        if ($category === 'transcriber') {
+            $primaryModel = collect($primaryProvider['models'] ?? [])
+                ->firstWhere('id', $primaryProvider['model'] ?? null)
+                ?? (($primaryProvider['models'] ?? [])[0] ?? []);
+
+            foreach ([
+                'language_code_parameter',
+                'default_language_code',
+                'language_code_required',
+                'accepts_custom_language_code',
+                'languages',
+            ] as $field) {
+                if (array_key_exists($field, $primaryModel)) {
+                    $publicModel[$field] = $primaryModel[$field];
+                }
+            }
+
+            $publicModel += [
+                'language_code_parameter' => 'language_code',
+                'default_language_code' => null,
+                'language_code_required' => false,
+                'accepts_custom_language_code' => true,
+                'languages' => [['code' => 'auto', 'label' => 'Automatic detection']],
+            ];
+        }
+
+        return [
+            'provider' => self::PUBLIC_PROVIDER_ID,
+            'name' => self::PUBLIC_PROVIDER_NAME,
+            'purpose' => $category === 'transcriber' ? 'Server-managed speech to text' : 'Server-managed transcript polishing',
+            'category' => $category,
+            'configured' => collect($providers)->contains(fn (array $provider): bool => $provider['configured']),
+            'enabled' => $connectedProviders !== [],
+            'connected' => $connectedProviders !== [],
+            'sort_order' => 0,
+            'model' => self::PUBLIC_MODEL,
+            'models' => [$publicModel],
+        ];
+    }
+
+    public function saveProviderSettings(array $providers): void
+    {
+        foreach ($providers as $provider => $data) {
+            if (! array_key_exists($provider, $this->providerDefinitions())) {
+                continue;
+            }
+
+            $definition = $this->providerDefinitions()[$provider];
+            $apiKey = trim((string) ($data['api_key'] ?? ''));
+            $candidateModel = trim((string) ($data['model'] ?? ''));
+            $discoveredModels = $apiKey !== ''
+                ? $this->discoverProviderModels($provider, $apiKey)['models']
+                : [];
+            $model = in_array($candidateModel, $discoveredModels, true)
+                ? $candidateModel
+                : $this->validModelForDefinition($definition, $candidateModel);
+
+            $values = [
+                'model' => $model,
+                'is_enabled' => isset($data['is_enabled']),
+            ];
+
+            $setting = isset($data['setting_id'])
+                ? TranscriptionProviderSetting::query()
+                    ->whereKey($data['setting_id'])
+                    ->where('provider', $provider)
+                    ->firstOrFail()
+                : new TranscriptionProviderSetting(['provider' => $provider]);
+
+            if (! $setting->exists) {
+                $values['sort_order'] = $this->nextSortOrder($definition['category']);
+            }
+
+            if ($apiKey !== '') {
+                $values['api_key'] = $apiKey;
+            } elseif (! $setting->exists) {
+                $values['api_key'] = $this->existingApiKey($provider);
+            }
+
+            $metadata = is_array($setting->metadata) ? $setting->metadata : [];
+            $metadataJson = trim((string) ($data['metadata_json'] ?? ''));
+
+            if ($metadataJson !== '') {
+                $decodedMetadata = json_decode($metadataJson, true, flags: JSON_THROW_ON_ERROR);
+
+                if (is_array($decodedMetadata)) {
+                    $metadata = array_merge($metadata, $decodedMetadata);
+                }
+            }
+
+            if ($provider === self::PROVIDER_CLOUDFLARE) {
+                $metadata = array_merge($metadata, [
+                    'account_id' => trim((string) ($data['account_id'] ?? $setting->metadata['account_id'] ?? '')),
+                ]);
+            }
+
+            if ($provider === self::PROVIDER_RUNPOD) {
+                $metadata = array_merge($metadata, [
+                    'endpoint_id' => trim((string) ($data['endpoint_id'] ?? $setting->metadata['endpoint_id'] ?? '')),
+                    'runsync_url' => trim((string) ($data['runsync_url'] ?? $setting->metadata['runsync_url'] ?? '')),
+                ]);
+            }
+
+            $values['metadata'] = $metadata;
+            $setting->fill($values)->save();
+        }
+    }
+
+    public function orderedConnectedProviders(string $category): array
+    {
+        $providers = array_values(array_filter(
+            $this->providerCards(),
+            fn (array $provider): bool => $provider['category'] === $category
+                && $provider['configured']
+                && $provider['is_enabled'],
+        ));
+        $settings = TranscriptionProviderSetting::query()
+            ->whereIn('id', array_column($providers, 'setting_id'))
+            ->get()
+            ->keyBy('id');
+
+        return array_map(function (array $provider) use ($settings): array {
+            $setting = $settings->get($provider['setting_id']);
+            $provider['api_key'] = $setting instanceof TranscriptionProviderSetting
+                ? $this->safeApiKey($setting)
+                : null;
+
+            return $provider;
+        }, $providers);
+    }
+
+    public function reorderProviders(string $category, array $settingIds): void
+    {
+        $allowedProviders = $this->providerIdsForCategory($category);
+
+        TranscriptionProviderSetting::query()->getConnection()->transaction(function () use ($allowedProviders, $settingIds): void {
+            foreach (array_values($settingIds) as $sortOrder => $settingId) {
+                TranscriptionProviderSetting::query()
+                    ->whereKey($settingId)
+                    ->whereIn('provider', $allowedProviders)
+                    ->update(['sort_order' => $sortOrder]);
+            }
+        });
+    }
+
+    public function deepgramApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_DEEPGRAM);
+    }
+
+    public function deepgramModel(): string
+    {
+        return self::DEEPGRAM_MODEL_NOVA_3;
+    }
+
+    public function elevenLabsApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_ELEVENLABS);
+    }
+
+    public function elevenLabsModel(): string
+    {
+        return self::ELEVENLABS_MODEL_SCRIBE_V2;
+    }
+
+    public function speechmaticsApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_SPEECHMATICS);
+    }
+
+    public function speechmaticsModel(): string
+    {
+        return $this->validModelForDefinition(
+            $this->providerDefinitions()[self::PROVIDER_SPEECHMATICS],
+            $this->model(self::PROVIDER_SPEECHMATICS, SpeechmaticsSpeechToTextService::MODEL_MELIA_1),
+        );
+    }
+
+    public function geminiApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_GEMINI);
+    }
+
+    public function geminiModel(): string
+    {
+        return $this->providerDefinitionModel(
+            self::PROVIDER_GEMINI,
+            self::GEMINI_MODEL_FLASH_LITE,
+        );
+    }
+
+    public function geminiTimeout(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_GEMINI, 'timeout');
+    }
+
+    public function geminiMaxRetries(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_GEMINI, 'max_retries');
+    }
+
+    public function groqTranscriptionApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_GROQ_TRANSCRIPTION);
+    }
+
+    public function groqTranscriptionModel(): string
+    {
+        return $this->validModelForDefinition(
+            $this->providerDefinitions()[self::PROVIDER_GROQ_TRANSCRIPTION],
+            $this->model(self::PROVIDER_GROQ_TRANSCRIPTION, GroqSpeechToTextService::MODEL_WHISPER_LARGE_V3),
+        );
+    }
+
+    public function groqTextFixerApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_GROQ_TEXT_FIXER);
+    }
+
+    public function groqTextFixerModel(): string
+    {
+        $definition = $this->providerDefinitions()[self::PROVIDER_GROQ_TEXT_FIXER];
+
+        // Use empty string as fallback if no models are available
+        $fallback = ! empty($definition['models']) ? $definition['models'][0] : '';
+
+        return $this->validModelForDefinition(
+            $definition,
+            $this->model(self::PROVIDER_GROQ_TEXT_FIXER, $fallback),
+        );
+    }
+
+    public function groqTimeout(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_GROQ_TEXT_FIXER, 'timeout');
+    }
+
+    public function groqMaxRetries(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_GROQ_TEXT_FIXER, 'max_retries');
+    }
+
+    public function mistralTranscriptionApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_MISTRAL_TRANSCRIPTION);
+    }
+
+    public function mistralTranscriptionModel(): string
+    {
+        return $this->providerDefinitionModel(
+            self::PROVIDER_MISTRAL_TRANSCRIPTION,
+            MistralSpeechToTextService::MODEL_VOXTRAL_MINI_LATEST,
+        );
+    }
+
+    public function deepSeekApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_DEEPSEEK);
+    }
+
+    public function deepSeekModel(): string
+    {
+        return $this->validModelForDefinition(
+            $this->providerDefinitions()[self::PROVIDER_DEEPSEEK],
+            $this->model(self::PROVIDER_DEEPSEEK, DeepSeekTranscriptCleanerService::MODEL_V4_FLASH),
+        );
+    }
+
+    public function deepSeekTimeout(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_DEEPSEEK, 'timeout');
+    }
+
+    public function deepSeekMaxRetries(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_DEEPSEEK, 'max_retries');
+    }
+
+    public function cerebrasApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_CEREBRAS);
+    }
+
+    public function cerebrasModel(): string
+    {
+        return $this->providerDefinitionModel(self::PROVIDER_CEREBRAS, CerebrasTranscriptCleanerService::MODEL_GPT_OSS_120B);
+    }
+
+    public function cerebrasTimeout(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_CEREBRAS, 'timeout');
+    }
+
+    public function cerebrasMaxRetries(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_CEREBRAS, 'max_retries');
+    }
+
+    public function mistralApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_MISTRAL);
+    }
+
+    public function mistralModel(): string
+    {
+        return $this->providerDefinitionModel(self::PROVIDER_MISTRAL, MistralTranscriptCleanerService::MODEL_SMALL_2603);
+    }
+
+    public function mistralTimeout(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_MISTRAL, 'timeout');
+    }
+
+    public function mistralMaxRetries(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_MISTRAL, 'max_retries');
+    }
+
+    public function openRouterApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_OPENROUTER);
+    }
+
+    public function openRouterModel(): string
+    {
+        return $this->providerDefinitionModel(self::PROVIDER_OPENROUTER, OpenRouterTranscriptCleanerService::MODEL_GEMMA_3_12B_FREE);
+    }
+
+    public function openRouterTimeout(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_OPENROUTER, 'timeout');
+    }
+
+    public function openRouterMaxRetries(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_OPENROUTER, 'max_retries');
+    }
+
+    public function nvidiaApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_NVIDIA);
+    }
+
+    public function nvidiaModel(): string
+    {
+        return $this->providerDefinitionModel(
+            self::PROVIDER_NVIDIA,
+            NvidiaTranscriptCleanerService::MODEL_NEMOTRON_3_NANO,
+        );
+    }
+
+    public function nvidiaTimeout(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_NVIDIA, 'timeout');
+    }
+
+    public function nvidiaMaxRetries(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_NVIDIA, 'max_retries');
+    }
+
+    public function cloudflareApiKey(): ?string
+    {
+        return $this->apiKey(self::PROVIDER_CLOUDFLARE);
+    }
+
+    public function cloudflareModel(): string
+    {
+        return $this->providerDefinitionModel(self::PROVIDER_CLOUDFLARE, CloudflareTranscriptCleanerService::MODEL_GLM_4_7_FLASH);
+    }
+
+    public function cloudflareTimeout(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_CLOUDFLARE, 'timeout');
+    }
+
+    public function cloudflareMaxRetries(): int
+    {
+        return $this->providerMetadataInt(self::PROVIDER_CLOUDFLARE, 'max_retries');
+    }
+
+    /**
+     * Fetch every model exposed to a credential that matches the provider's
+     * actual transcription or text-generation API capability.
+     *
+     * @return array{models: array<int, string>, model_labels: array<string, string>}
+     */
+    public function discoverProviderModels(string $provider, ?string $apiKey = null): array
+    {
+        $apiKey = trim((string) $apiKey);
+        $apiKey = $apiKey !== '' ? $apiKey : match ($provider) {
+            self::PROVIDER_GEMINI => trim((string) $this->geminiApiKey()),
+            self::PROVIDER_GROQ_TRANSCRIPTION => trim((string) $this->groqTranscriptionApiKey()),
+            self::PROVIDER_GROQ_TEXT_FIXER => trim((string) $this->groqTextFixerApiKey()),
+            self::PROVIDER_MISTRAL => trim((string) $this->mistralApiKey()),
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => trim((string) $this->mistralTranscriptionApiKey()),
+            self::PROVIDER_NVIDIA => trim((string) $this->nvidiaApiKey()),
+            default => '',
+        };
+
+        if ($apiKey === '') {
+            return ['models' => [], 'model_labels' => []];
+        }
+
+        $models = match ($provider) {
+            self::PROVIDER_GEMINI => (new GeminiModelCatalogService(
+                apiKey: $apiKey,
+                modelsUrl: config('services.gemini.models_url'),
+                timeout: (int) config('services.gemini.timeout', 120),
+            ))->cleanerModelIds(),
+            self::PROVIDER_GROQ_TRANSCRIPTION => (new GroqModelCatalogService(
+                apiKey: $apiKey,
+                modelsUrl: config('services.groq.models_url'),
+                timeout: (int) config('services.groq.timeout', 120),
+            ))->transcriptionModelIds(),
+            self::PROVIDER_GROQ_TEXT_FIXER => (new GroqModelCatalogService(
+                apiKey: $apiKey,
+                modelsUrl: config('services.groq.models_url'),
+                timeout: (int) config('services.groq.timeout', 120),
+            ))->cleanerModelIds(),
+            self::PROVIDER_MISTRAL => (new MistralModelCatalogService(
+                apiKey: $apiKey,
+                modelsUrl: config('services.mistral.models_url'),
+                timeout: (int) config('services.mistral.timeout', 120),
+            ))->cleanerModelIds(),
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => (new MistralModelCatalogService(
+                apiKey: $apiKey,
+                modelsUrl: config('services.mistral.models_url'),
+                timeout: (int) config('services.mistral.timeout', 120),
+            ))->transcriptionModelIds(),
+            self::PROVIDER_NVIDIA => (new NvidiaModelCatalogService(
+                apiKey: $apiKey,
+                modelsUrl: config('services.nvidia.models_url'),
+                timeout: (int) config('services.nvidia.timeout', 120),
+            ))->cleanerModelIds(),
+            default => [],
+        };
+        $models = array_values(array_unique(array_filter(
+            array_map(fn (mixed $model): string => trim((string) $model), $models),
+            fn (string $model): bool => $model !== '',
+        )));
+
+        return [
+            'models' => $models,
+            'model_labels' => array_reduce(
+                $models,
+                fn (array $labels, string $model): array => $labels + [$model => $this->generateModelLabel($model)],
+                [],
+            ),
+        ];
+    }
+
+    public function cloudflareChatCompletionsUrl(?string $accountId = null): string
+    {
+        return $this->providerMetadataString(self::PROVIDER_CLOUDFLARE, 'chat_completions_url');
+    }
+
+    public function cloudflareModelsUrl(?string $accountId = null): string
+    {
+        return $this->providerMetadataString(self::PROVIDER_CLOUDFLARE, 'models_url');
+    }
+
+    public function providerModel(string $provider): string
+    {
+        return match ($provider) {
+            self::PROVIDER_DEEPGRAM => $this->deepgramModel(),
+            self::PROVIDER_ELEVENLABS => $this->elevenLabsModel(),
+            self::PROVIDER_SPEECHMATICS => $this->speechmaticsModel(),
+            self::PROVIDER_GEMINI => $this->geminiModel(),
+            self::PROVIDER_GROQ_TRANSCRIPTION => $this->groqTranscriptionModel(),
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => $this->mistralTranscriptionModel(),
+            self::PROVIDER_GLADIA => GladiaSpeechToTextService::MODEL_SOLARIA,
+            self::PROVIDER_ASSEMBLYAI => $this->providerDefinitionModel(self::PROVIDER_ASSEMBLYAI, AssemblyAiSpeechToTextService::MODEL_UNIVERSAL_2),
+            self::PROVIDER_AZURE_SPEECH => AzureSpeechToTextService::MODEL_FAST_TRANSCRIPTION,
+            self::PROVIDER_GOOGLE_SPEECH => GoogleCloudSpeechToTextService::MODEL_CHIRP_3,
+            self::PROVIDER_AWS_TRANSCRIBE => AwsTranscribeSpeechToTextService::MODEL_STANDARD,
+            self::PROVIDER_RUNPOD => RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR,
+            self::PROVIDER_GROQ_TEXT_FIXER => $this->groqTextFixerModel(),
+            self::PROVIDER_DEEPSEEK => $this->deepSeekModel(),
+            self::PROVIDER_CEREBRAS => $this->cerebrasModel(),
+            self::PROVIDER_MISTRAL => $this->mistralModel(),
+            self::PROVIDER_OPENROUTER => $this->openRouterModel(),
+            self::PROVIDER_NVIDIA => $this->nvidiaModel(),
+            self::PROVIDER_CLOUDFLARE => $this->cloudflareModel(),
+            default => '',
+        };
+    }
+
+    private function apiKey(string $provider): ?string
+    {
+        $setting = TranscriptionProviderSetting::query()
+            ->where('provider', $provider)
+            ->where('is_enabled', true)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->first();
+
+        return $setting instanceof TranscriptionProviderSetting ? $this->safeApiKey($setting) : null;
+    }
+
+    private function existingApiKey(string $provider): ?string
+    {
+        $setting = TranscriptionProviderSetting::query()
+            ->where('provider', $provider)
+            ->whereNotNull('api_key')
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->first();
+
+        $apiKey = $setting instanceof TranscriptionProviderSetting ? $this->safeApiKey($setting) : null;
+
+        return filled($apiKey) ? $apiKey : null;
+    }
+
+    private function providerMetadataString(string $provider, string $key): string
+    {
+        $metadata = $this->firstProviderMetadata($provider);
+        $value = $metadata[$key] ?? null;
+
+        if (! is_string($value) || trim($value) === '') {
+            throw new \RuntimeException("Provider [{$provider}] runtime setting [{$key}] is not configured in API Manager.");
+        }
+
+        return trim($value);
+    }
+
+    private function providerMetadataInt(string $provider, string $key): int
+    {
+        $metadata = $this->firstProviderMetadata($provider);
+        $value = $metadata[$key] ?? null;
+
+        if (! is_numeric($value)) {
+            throw new \RuntimeException("Provider [{$provider}] runtime setting [{$key}] is not configured in API Manager.");
+        }
+
+        return (int) $value;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function firstProviderMetadata(string $provider): array
+    {
+        $setting = TranscriptionProviderSetting::query()
+            ->where('provider', $provider)
+            ->where('is_enabled', true)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->first();
+
+        if (! $setting instanceof TranscriptionProviderSetting || ! is_array($setting->metadata)) {
+            if ($setting instanceof TranscriptionProviderSetting) {
+                return $this->metadataWithDefaults($provider);
+            }
+
+            throw new \RuntimeException("Provider [{$provider}] is not configured in API Manager.");
+        }
+
+        return $this->metadataWithDefaults($provider, $setting->metadata);
+    }
+
+    private function safeApiKey(TranscriptionProviderSetting $setting): ?string
+    {
+        try {
+            return $setting->api_key;
+        } catch (DecryptException) {
+            return null;
+        }
+    }
+
+    private function model(string $provider, string $fallback): string
+    {
+        $setting = TranscriptionProviderSetting::query()
+            ->where('provider', $provider)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->first();
+
+        return $setting?->model ?: $fallback;
+    }
+
+    private function validModelForDefinition(array $definition, mixed $candidate): string
+    {
+        $model = is_string($candidate) && trim($candidate) !== ''
+            ? trim($candidate)
+            : $definition['default_model'];
+
+        if (! in_array($model, $definition['models'], true)) {
+            return $definition['default_model'];
+        }
+
+        return $model;
+    }
+
+    private function providerDefinitions(): array
+    {
+        $geminiTextFixerModels = $this->getGeminiAvailableModels();
+        $groqTranscriptionModels = $this->getGroqAvailableModels(self::PROVIDER_GROQ_TRANSCRIPTION);
+        $groqTextFixerModels = $this->getGroqAvailableModels(self::PROVIDER_GROQ_TEXT_FIXER);
+        $mistralTranscriptionModels = $this->getMistralAvailableModels(self::PROVIDER_MISTRAL_TRANSCRIPTION);
+        $mistralTextFixerModels = $this->getMistralAvailableModels(self::PROVIDER_MISTRAL);
+        $nvidiaTextFixerModels = $this->getNvidiaAvailableModels();
+
+        return [
+            self::PROVIDER_DEEPGRAM => [
+                'provider' => self::PROVIDER_DEEPGRAM,
+                'name' => 'Deepgram',
+                'endpoint' => '',
+                'default_model' => self::DEEPGRAM_MODEL_NOVA_3,
+                'models' => [self::DEEPGRAM_MODEL_NOVA_3],
+                'model_labels' => [
+                    self::DEEPGRAM_MODEL_NOVA_3 => 'Nova-3',
+                ],
+                'api_key_url' => 'https://console.deepgram.com/',
+                'purpose' => 'Speech to text',
+                'category' => 'transcriber',
+            ],
+            self::PROVIDER_ELEVENLABS => [
+                'provider' => self::PROVIDER_ELEVENLABS,
+                'name' => 'ElevenLabs',
+                'endpoint' => '',
+                'default_model' => self::ELEVENLABS_MODEL_SCRIBE_V2,
+                'models' => [self::ELEVENLABS_MODEL_SCRIBE_V2],
+                'model_labels' => [
+                    self::ELEVENLABS_MODEL_SCRIBE_V2 => 'scribe_v2',
+                ],
+                'api_key_url' => 'https://elevenlabs.io/app/settings/api-keys',
+                'purpose' => 'Speech to text',
+                'category' => 'transcriber',
+            ],
+            self::PROVIDER_SPEECHMATICS => [
+                'provider' => self::PROVIDER_SPEECHMATICS,
+                'name' => 'Speechmatics',
+                'endpoint' => '',
+                'default_model' => SpeechmaticsSpeechToTextService::MODEL_MELIA_1,
+                'models' => [SpeechmaticsSpeechToTextService::MODEL_MELIA_1, SpeechmaticsSpeechToTextService::MODEL_ENHANCED],
+                'model_labels' => [
+                    SpeechmaticsSpeechToTextService::MODEL_MELIA_1 => 'melia-1',
+                    SpeechmaticsSpeechToTextService::MODEL_ENHANCED => 'enhanced',
+                ],
+                'api_key_url' => 'https://portal.speechmatics.com/',
+                'purpose' => 'Speech to text',
+                'category' => 'transcriber',
+            ],
+            self::PROVIDER_GROQ_TRANSCRIPTION => [
+                'provider' => self::PROVIDER_GROQ_TRANSCRIPTION,
+                'name' => 'Groq',
+                'endpoint' => '',
+                'default_model' => $groqTranscriptionModels['models'][0] ?? config('services.groq.transcription_model', GroqSpeechToTextService::MODEL_WHISPER_LARGE_V3),
+                'models' => $groqTranscriptionModels['models'],
+                'model_labels' => $groqTranscriptionModels['model_labels'],
+                'api_key_url' => 'https://console.groq.com/keys',
+                'purpose' => 'Speech to text',
+                'category' => 'transcriber',
+            ],
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => [
+                'provider' => self::PROVIDER_MISTRAL_TRANSCRIPTION,
+                'name' => 'Mistral AI',
+                'endpoint' => '',
+                'default_model' => $mistralTranscriptionModels['models'][0] ?? MistralSpeechToTextService::MODEL_VOXTRAL_MINI_LATEST,
+                'models' => $mistralTranscriptionModels['models'],
+                'model_labels' => $mistralTranscriptionModels['model_labels'],
+                'api_key_url' => 'https://console.mistral.ai/api-keys/',
+                'purpose' => 'Speech to text',
+                'category' => 'transcriber',
+            ],
+            self::PROVIDER_GLADIA => [
+                'provider' => self::PROVIDER_GLADIA,
+                'name' => 'Gladia',
+                'endpoint' => '',
+                'default_model' => GladiaSpeechToTextService::MODEL_SOLARIA,
+                'models' => [GladiaSpeechToTextService::MODEL_SOLARIA],
+                'model_labels' => [GladiaSpeechToTextService::MODEL_SOLARIA => 'Solaria'],
+                'api_key_url' => 'https://app.gladia.io/',
+                'purpose' => 'Multilingual speech to text',
+                'category' => 'transcriber',
+            ],
+            self::PROVIDER_ASSEMBLYAI => [
+                'provider' => self::PROVIDER_ASSEMBLYAI,
+                'name' => 'AssemblyAI',
+                'endpoint' => '',
+                'default_model' => AssemblyAiSpeechToTextService::MODEL_UNIVERSAL_2,
+                'models' => [AssemblyAiSpeechToTextService::MODEL_UNIVERSAL_2, AssemblyAiSpeechToTextService::MODEL_UNIVERSAL_3_PRO],
+                'model_labels' => [
+                    AssemblyAiSpeechToTextService::MODEL_UNIVERSAL_2 => 'Universal-2 (99 languages)',
+                    AssemblyAiSpeechToTextService::MODEL_UNIVERSAL_3_PRO => 'Universal-3 Pro (highest accuracy)',
+                ],
+                'api_key_url' => 'https://www.assemblyai.com/dashboard/',
+                'purpose' => 'Speech to text',
+                'category' => 'transcriber',
+            ],
+            self::PROVIDER_AZURE_SPEECH => [
+                'provider' => self::PROVIDER_AZURE_SPEECH,
+                'name' => 'Azure Speech',
+                'endpoint' => 'Azure regional Fast Transcription API',
+                'default_model' => AzureSpeechToTextService::MODEL_FAST_TRANSCRIPTION,
+                'models' => [AzureSpeechToTextService::MODEL_FAST_TRANSCRIPTION],
+                'model_labels' => [AzureSpeechToTextService::MODEL_FAST_TRANSCRIPTION => 'Fast Transcription'],
+                'api_key_url' => 'https://portal.azure.com/',
+                'purpose' => 'Fast speech to text',
+                'category' => 'transcriber',
+                'credential_label' => 'Credentials JSON',
+                'credential_placeholder' => '{"key":"...","region":"eastus"}',
+                'credential_help' => 'Paste JSON containing your Azure Speech key and region.',
+            ],
+            self::PROVIDER_GOOGLE_SPEECH => [
+                'provider' => self::PROVIDER_GOOGLE_SPEECH,
+                'name' => 'Google Cloud Speech-to-Text',
+                'endpoint' => '',
+                'default_model' => GoogleCloudSpeechToTextService::MODEL_CHIRP_3,
+                'models' => [GoogleCloudSpeechToTextService::MODEL_CHIRP_3],
+                'model_labels' => [GoogleCloudSpeechToTextService::MODEL_CHIRP_3 => 'Chirp 3'],
+                'api_key_url' => 'https://console.cloud.google.com/iam-admin/serviceaccounts',
+                'purpose' => 'Multilingual speech to text',
+                'category' => 'transcriber',
+                'credential_label' => 'Service Account JSON',
+                'credential_placeholder' => 'Paste the complete Google service-account JSON',
+                'credential_help' => 'The encrypted credential must include project_id, client_email, and private_key.',
+            ],
+            self::PROVIDER_AWS_TRANSCRIBE => [
+                'provider' => self::PROVIDER_AWS_TRANSCRIBE,
+                'name' => 'Amazon Transcribe',
+                'endpoint' => 'AWS Transcribe and S3',
+                'default_model' => AwsTranscribeSpeechToTextService::MODEL_STANDARD,
+                'models' => [AwsTranscribeSpeechToTextService::MODEL_STANDARD],
+                'model_labels' => [AwsTranscribeSpeechToTextService::MODEL_STANDARD => 'Standard'],
+                'api_key_url' => 'https://console.aws.amazon.com/iam/',
+                'purpose' => 'Batch speech to text',
+                'category' => 'transcriber',
+                'credential_label' => 'Credentials JSON',
+                'credential_placeholder' => '{"access_key_id":"...","secret_access_key":"...","region":"ap-southeast-1","bucket":"..."}',
+                'credential_help' => 'Paste encrypted AWS credentials plus the S3 bucket used for temporary audio.',
+            ],
+            self::PROVIDER_RUNPOD => [
+                'provider' => self::PROVIDER_RUNPOD,
+                'name' => 'RunPod Cebuano/Bisaya Epoch 1',
+                'endpoint' => '',
+                'default_model' => RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR,
+                'models' => [RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR],
+                'model_labels' => [
+                    RunPodSpeechToTextService::MODEL_SERVERLESS_TRANSCRIPTOR => 'Cebuano/Bisaya Epoch 1 CT2',
+                ],
+                'api_key_url' => 'https://console.runpod.io/user/settings',
+                'purpose' => 'Serverless speech to text',
+                'category' => 'transcriber',
+                'credential_label' => 'RunPod API Key',
+                'credential_placeholder' => 'Paste RunPod API key',
+                'credential_help' => 'RunPod Serverless also requires an Endpoint ID or full /runsync URL.',
+                'requires_runpod_endpoint' => true,
+            ],
+            self::PROVIDER_GEMINI => [
+                'provider' => self::PROVIDER_GEMINI,
+                'name' => 'Gemini',
+                'endpoint' => '',
+                'default_model' => $geminiTextFixerModels['models'][0] ?? self::GEMINI_MODEL_FLASH_LITE,
+                'models' => $geminiTextFixerModels['models'],
+                'model_labels' => $geminiTextFixerModels['model_labels'],
+                'api_key_url' => 'https://aistudio.google.com/app/apikey',
+                'purpose' => 'Transcript polishing',
+                'category' => 'text_fixer',
+            ],
+            self::PROVIDER_GROQ_TEXT_FIXER => [
+                'provider' => self::PROVIDER_GROQ_TEXT_FIXER,
+                'name' => 'Groq',
+                'endpoint' => '',
+                'default_model' => $groqTextFixerModels['models'][0] ?? config('services.groq.text_fixer_model', ''),
+                'models' => $groqTextFixerModels['models'],
+                'model_labels' => $groqTextFixerModels['model_labels'],
+                'api_key_url' => 'https://console.groq.com/keys',
+                'purpose' => 'Transcript polishing',
+                'category' => 'text_fixer',
+            ],
+            self::PROVIDER_DEEPSEEK => [
+                'provider' => self::PROVIDER_DEEPSEEK,
+                'name' => 'DeepSeek',
+                'endpoint' => '',
+                'default_model' => DeepSeekTranscriptCleanerService::MODEL_V4_FLASH,
+                'models' => [DeepSeekTranscriptCleanerService::MODEL_V4_FLASH],
+                'model_labels' => [
+                    DeepSeekTranscriptCleanerService::MODEL_V4_FLASH => 'DeepSeek V4 Flash',
+                ],
+                'api_key_url' => 'https://platform.deepseek.com/api_keys',
+                'purpose' => 'Transcript polishing',
+                'category' => 'text_fixer',
+            ],
+            self::PROVIDER_CEREBRAS => [
+                'provider' => self::PROVIDER_CEREBRAS,
+                'name' => 'Cerebras',
+                'endpoint' => '',
+                'default_model' => CerebrasTranscriptCleanerService::MODEL_GPT_OSS_120B,
+                'models' => [CerebrasTranscriptCleanerService::MODEL_GPT_OSS_120B],
+                'model_labels' => [
+                    CerebrasTranscriptCleanerService::MODEL_GPT_OSS_120B => 'GPT-OSS 120B (Low Reasoning)',
+                ],
+                'api_key_url' => 'https://cloud.cerebras.ai/platform/',
+                'purpose' => 'Transcript polishing',
+                'category' => 'text_fixer',
+            ],
+            self::PROVIDER_MISTRAL => [
+                'provider' => self::PROVIDER_MISTRAL,
+                'name' => 'Mistral AI',
+                'endpoint' => '',
+                'default_model' => $mistralTextFixerModels['models'][0] ?? MistralTranscriptCleanerService::MODEL_SMALL_2603,
+                'models' => $mistralTextFixerModels['models'],
+                'model_labels' => $mistralTextFixerModels['model_labels'],
+                'api_key_url' => 'https://console.mistral.ai/api-keys/',
+                'purpose' => 'Transcript polishing',
+                'category' => 'text_fixer',
+            ],
+            self::PROVIDER_OPENROUTER => [
+                'provider' => self::PROVIDER_OPENROUTER,
+                'name' => 'OpenRouter',
+                'endpoint' => '',
+                'default_model' => OpenRouterTranscriptCleanerService::MODEL_GEMMA_3_12B_FREE,
+                'models' => [OpenRouterTranscriptCleanerService::MODEL_GEMMA_3_12B_FREE],
+                'model_labels' => [
+                    OpenRouterTranscriptCleanerService::MODEL_GEMMA_3_12B_FREE => 'Gemma 3 12B (Free)',
+                ],
+                'api_key_url' => 'https://openrouter.ai/settings/keys',
+                'purpose' => 'Transcript polishing',
+                'category' => 'text_fixer',
+            ],
+            self::PROVIDER_NVIDIA => [
+                'provider' => self::PROVIDER_NVIDIA,
+                'name' => 'NVIDIA NIM',
+                'endpoint' => '',
+                'default_model' => $nvidiaTextFixerModels['models'][0] ?? NvidiaTranscriptCleanerService::MODEL_NEMOTRON_3_NANO,
+                'models' => $nvidiaTextFixerModels['models'],
+                'model_labels' => $nvidiaTextFixerModels['model_labels'],
+                'api_key_url' => 'https://build.nvidia.com/settings/api-keys',
+                'purpose' => 'Transcript polishing',
+                'category' => 'text_fixer',
+            ],
+            self::PROVIDER_CLOUDFLARE => [
+                'provider' => self::PROVIDER_CLOUDFLARE,
+                'name' => 'Cloudflare Workers AI',
+                'endpoint' => '',
+                'default_model' => CloudflareTranscriptCleanerService::MODEL_GLM_4_7_FLASH,
+                'models' => [CloudflareTranscriptCleanerService::MODEL_GLM_4_7_FLASH],
+                'model_labels' => [
+                    CloudflareTranscriptCleanerService::MODEL_GLM_4_7_FLASH => 'GLM-4.7 Flash',
+                ],
+                'api_key_url' => 'https://dash.cloudflare.com/profile/api-tokens',
+                'purpose' => 'Transcript polishing (requires Account ID)',
+                'category' => 'text_fixer',
+                'requires_account_id' => true,
+            ],
+        ];
+    }
+
+    private function providerDefinitionModel(string $provider, string $fallback): string
+    {
+        return $this->validModelForDefinition(
+            $this->providerDefinitions()[$provider],
+            $this->model($provider, $fallback),
+        );
+    }
+
+    private function metadataWithDefaults(string $providerId, array $metadata = []): array
+    {
+        $geminiBaseUrl = rtrim((string) config('services.gemini.base_url'), '/');
+        $groqBaseUrl = rtrim((string) config('services.groq.base_url'), '/');
+        $defaults = match ($providerId) {
+            self::PROVIDER_DEEPGRAM => [
+                'listen_url' => config('services.deepgram.listen_url'),
+                'health_url' => config('services.deepgram.projects_url'),
+                'models_url' => config('services.deepgram.models_url'),
+                'timeout' => config('services.deepgram.timeout', 120),
+            ],
+            self::PROVIDER_ELEVENLABS => [
+                'speech_to_text_url' => config('services.elevenlabs.speech_to_text_url'),
+                'user_url' => config('services.elevenlabs.user_url'),
+                'models_url' => config('services.elevenlabs.models_url'),
+                'timeout' => config('services.elevenlabs.timeout', 120),
+            ],
+            self::PROVIDER_SPEECHMATICS => [
+                'base_url' => config('services.speechmatics.base_url'),
+                'timeout' => config('services.speechmatics.timeout', 120),
+                'poll_interval_ms' => config('services.speechmatics.poll_interval_ms', 1000),
+                'max_wait_seconds' => config('services.speechmatics.max_wait_seconds', 300),
+            ],
+            self::PROVIDER_GROQ_TRANSCRIPTION => [
+                'transcription_url' => config('services.groq.transcription_url'),
+                'models_url' => config('services.groq.models_url', $groqBaseUrl.'/models'),
+                'timeout' => config('services.groq.timeout', 120),
+            ],
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => [
+                'transcription_url' => config('services.mistral.transcription_url'),
+                'models_url' => config('services.mistral.models_url'),
+                'timeout' => config('services.mistral.timeout', 120),
+            ],
+            self::PROVIDER_GLADIA => [
+                'base_url' => config('services.gladia.base_url'),
+                'timeout' => config('services.gladia.timeout', 120),
+                'poll_interval_ms' => config('services.gladia.poll_interval_ms', 1000),
+                'max_wait_seconds' => config('services.gladia.max_wait_seconds', 300),
+            ],
+            self::PROVIDER_ASSEMBLYAI => [
+                'base_url' => config('services.assemblyai.base_url'),
+                'timeout' => config('services.assemblyai.timeout', 120),
+                'poll_interval_ms' => config('services.assemblyai.poll_interval_ms', 1000),
+                'max_wait_seconds' => config('services.assemblyai.max_wait_seconds', 300),
+            ],
+            self::PROVIDER_AZURE_SPEECH => [
+                'fast_transcription_url' => config('services.azure_speech.fast_transcription_url'),
+                'timeout' => config('services.azure_speech.timeout', 180),
+            ],
+            self::PROVIDER_GOOGLE_SPEECH => [
+                'base_url' => config('services.google_speech.base_url'),
+                'token_url' => config('services.google_speech.token_url'),
+                'timeout' => config('services.google_speech.timeout', 180),
+            ],
+            self::PROVIDER_AWS_TRANSCRIBE => [
+                'poll_interval_ms' => config('services.aws_transcribe.poll_interval_ms', 1000),
+                'max_wait_seconds' => config('services.aws_transcribe.max_wait_seconds', 300),
+            ],
+            self::PROVIDER_RUNPOD => [
+                'timeout' => config('services.runpod.timeout', 1500),
+            ],
+            self::PROVIDER_GEMINI => [
+                'endpoint_template' => $geminiBaseUrl.'/models/%s:generateContent',
+                'generate_content_url_template' => $geminiBaseUrl.'/models/%s:generateContent',
+                'models_url' => config('services.gemini.models_url', $geminiBaseUrl.'/models'),
+                'timeout' => config('services.gemini.timeout', 120),
+                'max_retries' => config('services.gemini.max_retries', 3),
+            ],
+            self::PROVIDER_GROQ_TEXT_FIXER => [
+                'chat_completions_url' => config('services.groq.chat_completions_url'),
+                'models_url' => config('services.groq.models_url', $groqBaseUrl.'/models'),
+                'timeout' => config('services.groq.timeout', 120),
+                'max_retries' => config('services.groq.max_retries', 3),
+            ],
+            self::PROVIDER_DEEPSEEK => [
+                'chat_completions_url' => config('services.deepseek.chat_completions_url'),
+                'models_url' => config('services.deepseek.models_url'),
+                'timeout' => config('services.deepseek.timeout', 120),
+                'max_retries' => config('services.deepseek.max_retries', 3),
+            ],
+            self::PROVIDER_CEREBRAS => [
+                'chat_completions_url' => config('services.cerebras.chat_completions_url'),
+                'models_url' => config('services.cerebras.models_url'),
+                'timeout' => config('services.cerebras.timeout', 120),
+                'max_retries' => config('services.cerebras.max_retries', 3),
+            ],
+            self::PROVIDER_MISTRAL => [
+                'chat_completions_url' => config('services.mistral.chat_completions_url'),
+                'models_url' => config('services.mistral.models_url'),
+                'timeout' => config('services.mistral.timeout', 120),
+                'max_retries' => config('services.mistral.max_retries', 3),
+            ],
+            self::PROVIDER_OPENROUTER => [
+                'chat_completions_url' => config('services.openrouter.chat_completions_url'),
+                'models_url' => config('services.openrouter.models_url'),
+                'timeout' => config('services.openrouter.timeout', 120),
+                'max_retries' => config('services.openrouter.max_retries', 3),
+            ],
+            self::PROVIDER_NVIDIA => [
+                'chat_completions_url' => config('services.nvidia.chat_completions_url'),
+                'models_url' => config('services.nvidia.models_url'),
+                'timeout' => config('services.nvidia.timeout', 120),
+                'max_retries' => config('services.nvidia.max_retries', 3),
+            ],
+            self::PROVIDER_CLOUDFLARE => [
+                'account_id' => config('services.cloudflare.account_id'),
+                'timeout' => config('services.cloudflare.timeout', 120),
+                'max_retries' => config('services.cloudflare.max_retries', 3),
+            ],
+            default => [],
+        };
+
+        foreach ($defaults as $key => $value) {
+            if (blank($metadata[$key] ?? null) && filled($value)) {
+                $metadata[$key] = $value;
+            }
+        }
+
+        if ($providerId === self::PROVIDER_CLOUDFLARE) {
+            $accountId = trim((string) ($metadata['account_id'] ?? ''));
+
+            if ($accountId !== '') {
+                $accountUrl = rtrim((string) config('services.cloudflare.base_url'), '/')
+                    .'/'.rawurlencode($accountId);
+                $metadata['chat_completions_url'] = filled($metadata['chat_completions_url'] ?? null)
+                    ? $metadata['chat_completions_url']
+                    : $accountUrl.'/ai/v1/chat/completions';
+                $metadata['models_url'] = filled($metadata['models_url'] ?? null)
+                    ? $metadata['models_url']
+                    : $accountUrl.'/ai/models/search';
+            }
+        }
+
+        if ($providerId === self::PROVIDER_RUNPOD) {
+            $metadata['endpoint_id'] = trim((string) ($metadata['endpoint_id'] ?? ''));
+            $metadata['runsync_url'] = trim((string) ($metadata['runsync_url'] ?? ''));
+        }
+
+        return $metadata;
+    }
+
+    private function providerHasRequiredMetadata(string $providerId, array $metadata): bool
+    {
+        $requiredKeys = match ($providerId) {
+            self::PROVIDER_DEEPGRAM => ['listen_url', 'timeout'],
+            self::PROVIDER_ELEVENLABS => ['speech_to_text_url', 'timeout'],
+            self::PROVIDER_SPEECHMATICS => ['base_url', 'timeout', 'poll_interval_ms', 'max_wait_seconds'],
+            self::PROVIDER_GROQ_TRANSCRIPTION => ['transcription_url', 'models_url', 'timeout'],
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => ['transcription_url', 'models_url', 'timeout'],
+            self::PROVIDER_GLADIA => ['base_url', 'timeout', 'poll_interval_ms', 'max_wait_seconds'],
+            self::PROVIDER_ASSEMBLYAI => ['base_url', 'timeout', 'poll_interval_ms', 'max_wait_seconds'],
+            self::PROVIDER_AZURE_SPEECH => ['fast_transcription_url'],
+            self::PROVIDER_GOOGLE_SPEECH => ['base_url', 'token_url'],
+            self::PROVIDER_AWS_TRANSCRIBE => ['poll_interval_ms', 'max_wait_seconds'],
+            self::PROVIDER_RUNPOD => ['timeout'],
+            self::PROVIDER_GEMINI => ['endpoint_template', 'generate_content_url_template', 'models_url', 'timeout', 'max_retries'],
+            self::PROVIDER_GROQ_TEXT_FIXER => ['chat_completions_url', 'models_url', 'timeout', 'max_retries'],
+            self::PROVIDER_DEEPSEEK,
+            self::PROVIDER_CEREBRAS,
+            self::PROVIDER_MISTRAL,
+            self::PROVIDER_OPENROUTER,
+            self::PROVIDER_NVIDIA,
+            self::PROVIDER_CLOUDFLARE => ['chat_completions_url', 'timeout', 'max_retries'],
+            default => [],
+        };
+
+        if ($providerId === self::PROVIDER_RUNPOD
+            && blank($metadata['runsync_url'] ?? null)
+            && blank($metadata['endpoint_id'] ?? null)) {
+            return false;
+        }
+
+        return collect($requiredKeys)->every(fn (string $key): bool => filled($metadata[$key] ?? null));
+    }
+
+    private function endpointFor(string $providerId, array $metadata): string
+    {
+        return match ($providerId) {
+            self::PROVIDER_DEEPGRAM => trim((string) ($metadata['listen_url'] ?? '')),
+            self::PROVIDER_ELEVENLABS => trim((string) ($metadata['speech_to_text_url'] ?? '')),
+            self::PROVIDER_SPEECHMATICS => $this->metadataBaseEndpoint($metadata, '/jobs'),
+            self::PROVIDER_GROQ_TRANSCRIPTION => trim((string) ($metadata['transcription_url'] ?? '')),
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => trim((string) ($metadata['transcription_url'] ?? '')),
+            self::PROVIDER_GLADIA => $this->metadataBaseEndpoint($metadata, '/pre-recorded'),
+            self::PROVIDER_ASSEMBLYAI => $this->metadataBaseEndpoint($metadata, '/transcript'),
+            self::PROVIDER_AZURE_SPEECH => trim((string) ($metadata['fast_transcription_url'] ?? '')),
+            self::PROVIDER_GOOGLE_SPEECH => trim((string) ($metadata['base_url'] ?? '')),
+            self::PROVIDER_AWS_TRANSCRIBE => 'AWS Transcribe and S3',
+            self::PROVIDER_RUNPOD => $this->runPodEndpointUrl($metadata),
+            self::PROVIDER_GEMINI => trim((string) ($metadata['generate_content_url_template'] ?? $metadata['endpoint_template'] ?? '')),
+            self::PROVIDER_GROQ_TEXT_FIXER,
+            self::PROVIDER_DEEPSEEK,
+            self::PROVIDER_CEREBRAS,
+            self::PROVIDER_MISTRAL,
+            self::PROVIDER_OPENROUTER,
+            self::PROVIDER_NVIDIA,
+            self::PROVIDER_CLOUDFLARE => trim((string) ($metadata['chat_completions_url'] ?? '')),
+            default => '',
+        };
+    }
+
+    private function metadataBaseEndpoint(array $metadata, string $path): string
+    {
+        $baseUrl = trim((string) ($metadata['base_url'] ?? ''));
+
+        return $baseUrl === '' ? '' : rtrim($baseUrl, '/').$path;
+    }
+
+    private function runPodEndpointUrl(array $metadata = []): string
+    {
+        $metadata = $this->metadataWithDefaults(self::PROVIDER_RUNPOD, $metadata);
+        $runsyncUrl = trim((string) ($metadata['runsync_url'] ?? ''));
+
+        if ($runsyncUrl !== '') {
+            return $runsyncUrl;
+        }
+
+        $endpointId = trim((string) ($metadata['endpoint_id'] ?? ''));
+
+        return $endpointId === ''
+            ? ''
+            : self::RUNPOD_API_BASE_URL.'/'.$endpointId.'/runsync';
+    }
+
+    private function nextSortOrder(string $category): int
+    {
+        $providerIds = $this->providerIdsForCategory($category);
+
+        return ((int) TranscriptionProviderSetting::query()
+            ->whereIn('provider', $providerIds)
+            ->max('sort_order')) + 1;
+    }
+
+    private function providerIdsForCategory(string $category): array
+    {
+        return array_keys(array_filter(
+            $this->providerDefinitions(),
+            fn (array $definition): bool => $definition['category'] === $category,
+        ));
+    }
+
+    private function maskKey(?string $apiKey): string
+    {
+        if (! is_string($apiKey) || trim($apiKey) === '') {
+            return '';
+        }
+
+        $apiKey = trim($apiKey);
+
+        return str_repeat('*', max(8, strlen($apiKey) - 4)).substr($apiKey, -4);
+    }
+
+    private function defaultLanguageCode(string $provider, string $model): ?string
+    {
+        return match ($provider) {
+            self::PROVIDER_DEEPGRAM => 'multi',
+            self::PROVIDER_ELEVENLABS => null,
+            self::PROVIDER_GROQ_TRANSCRIPTION => null,
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => null,
+            self::PROVIDER_GLADIA, self::PROVIDER_ASSEMBLYAI, self::PROVIDER_AWS_TRANSCRIBE, self::PROVIDER_RUNPOD => 'auto',
+            self::PROVIDER_AZURE_SPEECH, self::PROVIDER_GOOGLE_SPEECH => 'en-US',
+            self::PROVIDER_SPEECHMATICS => $model === SpeechmaticsSpeechToTextService::MODEL_MELIA_1 ? 'multi' : 'auto',
+            default => null,
+        };
+    }
+
+    private function languageOptions(string $provider, string $model): array
+    {
+        return match ($provider) {
+            self::PROVIDER_DEEPGRAM => $this->deepgramNova3Languages(),
+            self::PROVIDER_ELEVENLABS => $this->elevenLabsScribeLanguages(),
+            self::PROVIDER_GROQ_TRANSCRIPTION => [['code' => 'auto', 'label' => 'Automatic detection']],
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => [['code' => 'auto', 'label' => 'Automatic detection']],
+            self::PROVIDER_GLADIA, self::PROVIDER_AWS_TRANSCRIBE => $this->languageRows([
+                'auto' => 'Automatic detection', 'en' => 'English', 'fil' => 'Filipino / Tagalog',
+            ]),
+            self::PROVIDER_RUNPOD => $this->languageRows([
+                'auto' => 'Automatic detection', 'en' => 'English', 'fil' => 'Filipino / Tagalog',
+            ]),
+            self::PROVIDER_ASSEMBLYAI => $model === AssemblyAiSpeechToTextService::MODEL_UNIVERSAL_3_PRO
+                ? $this->languageRows(['auto' => 'Automatic detection', 'en' => 'English', 'es' => 'Spanish', 'de' => 'German', 'fr' => 'French', 'pt' => 'Portuguese', 'it' => 'Italian'])
+                : $this->languageRows(['auto' => 'Automatic detection', 'en' => 'English', 'fil' => 'Filipino / Tagalog']),
+            self::PROVIDER_AZURE_SPEECH, self::PROVIDER_GOOGLE_SPEECH => $this->languageRows([
+                'en-US' => 'English (United States)', 'fil-PH' => 'Filipino (Philippines)',
+            ]),
+            self::PROVIDER_SPEECHMATICS => $model === SpeechmaticsSpeechToTextService::MODEL_MELIA_1
+                ? [['code' => 'multi', 'label' => 'Multilingual']]
+                : $this->speechmaticsEnhancedLanguages(),
+            default => [],
+        };
+    }
+
+    private function languageCodeRequired(string $provider, string $model): bool
+    {
+        return $provider === self::PROVIDER_SPEECHMATICS
+            && $model === SpeechmaticsSpeechToTextService::MODEL_MELIA_1;
+    }
+
+    private function deepgramNova3Languages(): array
+    {
+        return $this->languageRows([
+            'multi' => 'Multilingual',
+            'ar' => 'Arabic',
+            'ar-AE' => 'Arabic (United Arab Emirates)',
+            'ar-SA' => 'Arabic (Saudi Arabia)',
+            'ar-QA' => 'Arabic (Qatar)',
+            'ar-KW' => 'Arabic (Kuwait)',
+            'ar-SY' => 'Arabic (Syria)',
+            'ar-LB' => 'Arabic (Lebanon)',
+            'ar-PS' => 'Arabic (Palestine)',
+            'ar-JO' => 'Arabic (Jordan)',
+            'ar-EG' => 'Arabic (Egypt)',
+            'ar-SD' => 'Arabic (Sudan)',
+            'ar-TD' => 'Arabic (Chad)',
+            'ar-MA' => 'Arabic (Morocco)',
+            'ar-DZ' => 'Arabic (Algeria)',
+            'ar-TN' => 'Arabic (Tunisia)',
+            'ar-IQ' => 'Arabic (Iraq)',
+            'ar-IR' => 'Arabic (Iran)',
+            'be' => 'Belarusian',
+            'bn' => 'Bengali',
+            'bs' => 'Bosnian',
+            'bg' => 'Bulgarian',
+            'ca' => 'Catalan',
+            'zh-HK' => 'Chinese (Cantonese, Traditional)',
+            'zh' => 'Chinese (Mandarin, Simplified)',
+            'zh-CN' => 'Chinese (Mandarin, Simplified China)',
+            'zh-Hans' => 'Chinese (Simplified)',
+            'zh-TW' => 'Chinese (Mandarin, Traditional Taiwan)',
+            'zh-Hant' => 'Chinese (Traditional)',
+            'hr' => 'Croatian',
+            'cs' => 'Czech',
+            'da' => 'Danish',
+            'da-DK' => 'Danish (Denmark)',
+            'nl' => 'Dutch',
+            'en' => 'English',
+            'en-US' => 'English (United States)',
+            'en-AU' => 'English (Australia)',
+            'en-GB' => 'English (United Kingdom)',
+            'en-IN' => 'English (India)',
+            'en-NZ' => 'English (New Zealand)',
+            'et' => 'Estonian',
+            'fi' => 'Finnish',
+            'nl-BE' => 'Flemish',
+            'fr' => 'French',
+            'fr-CA' => 'French (Canada)',
+            'de' => 'German',
+            'de-CH' => 'German (Switzerland)',
+            'el' => 'Greek',
+            'gu' => 'Gujarati',
+            'gu-IN' => 'Gujarati (India)',
+            'he' => 'Hebrew',
+            'hi' => 'Hindi',
+            'hu' => 'Hungarian',
+            'id' => 'Indonesian',
+            'it' => 'Italian',
+            'ja' => 'Japanese',
+            'kn' => 'Kannada',
+            'ko' => 'Korean',
+            'ko-KR' => 'Korean (South Korea)',
+            'lv' => 'Latvian',
+            'lt' => 'Lithuanian',
+            'mk' => 'Macedonian',
+            'ms' => 'Malay',
+            'mr' => 'Marathi',
+            'no' => 'Norwegian',
+            'fa' => 'Persian',
+            'pl' => 'Polish',
+            'pt' => 'Portuguese',
+            'pt-BR' => 'Portuguese (Brazil)',
+            'pt-PT' => 'Portuguese (Portugal)',
+            'ro' => 'Romanian',
+            'ru' => 'Russian',
+            'sr' => 'Serbian',
+            'sk' => 'Slovak',
+            'sl' => 'Slovenian',
+            'es' => 'Spanish',
+            'es-419' => 'Spanish (Latin America)',
+            'sv' => 'Swedish',
+            'sv-SE' => 'Swedish (Sweden)',
+            'tl' => 'Tagalog',
+            'ta' => 'Tamil',
+            'te' => 'Telugu',
+            'th' => 'Thai',
+            'th-TH' => 'Thai (Thailand)',
+            'tr' => 'Turkish',
+            'uk' => 'Ukrainian',
+            'ur' => 'Urdu',
+            'vi' => 'Vietnamese',
+        ]);
+    }
+
+    private function elevenLabsScribeLanguages(): array
+    {
+        return $this->languageRows([
+            'auto' => 'Auto detect',
+            'en' => 'English',
+            'tl' => 'Tagalog / Filipino',
+            'ceb' => 'Cebuano / Bisaya',
+            'es' => 'Spanish',
+            'fr' => 'French',
+            'de' => 'German',
+            'it' => 'Italian',
+            'pt' => 'Portuguese',
+            'nl' => 'Dutch',
+            'pl' => 'Polish',
+            'ru' => 'Russian',
+            'ja' => 'Japanese',
+            'ko' => 'Korean',
+            'zh' => 'Chinese',
+            'hi' => 'Hindi',
+            'ar' => 'Arabic',
+            'id' => 'Indonesian',
+            'ms' => 'Malay',
+            'th' => 'Thai',
+            'vi' => 'Vietnamese',
+            'tr' => 'Turkish',
+            'uk' => 'Ukrainian',
+            'sv' => 'Swedish',
+            'da' => 'Danish',
+            'fi' => 'Finnish',
+            'no' => 'Norwegian',
+            'cs' => 'Czech',
+            'el' => 'Greek',
+            'he' => 'Hebrew',
+            'hu' => 'Hungarian',
+            'ro' => 'Romanian',
+        ]);
+    }
+
+    private function speechmaticsEnhancedLanguages(): array
+    {
+        return $this->languageRows([
+            'auto' => 'Automatic',
+            'ar' => 'Arabic',
+            'ar_en' => 'Arabic and English',
+            'ba' => 'Bashkir',
+            'eu' => 'Basque',
+            'be' => 'Belarusian',
+            'bn' => 'Bengali',
+            'bg' => 'Bulgarian',
+            'yue' => 'Cantonese',
+            'ca' => 'Catalan',
+            'hr' => 'Croatian',
+            'cs' => 'Czech',
+            'da' => 'Danish',
+            'nl' => 'Dutch',
+            'en' => 'English',
+            'eo' => 'Esperanto',
+            'et' => 'Estonian',
+            'fi' => 'Finnish',
+            'fr' => 'French',
+            'gl' => 'Galician',
+            'de' => 'German',
+            'el' => 'Greek',
+            'he' => 'Hebrew',
+            'hi' => 'Hindi',
+            'hu' => 'Hungarian',
+            'id' => 'Indonesian',
+            'ia' => 'Interlingua',
+            'ga' => 'Irish',
+            'it' => 'Italian',
+            'ja' => 'Japanese',
+            'ko' => 'Korean',
+            'lv' => 'Latvian',
+            'lt' => 'Lithuanian',
+            'ms' => 'Malay',
+            'en_ms' => 'Malay and English',
+            'mt' => 'Maltese',
+            'cmn' => 'Mandarin',
+            'cmn_en' => 'Mandarin and English',
+            'cmn_en_ms_ta' => 'Mandarin, Malay, Tamil and English',
+            'mr' => 'Marathi',
+            'mn' => 'Mongolian',
+            'no' => 'Norwegian',
+            'fa' => 'Persian',
+            'pl' => 'Polish',
+            'pt' => 'Portuguese',
+            'ro' => 'Romanian',
+            'ru' => 'Russian',
+            'sk' => 'Slovakian',
+            'sl' => 'Slovenian',
+            'es' => 'Spanish',
+            'sw' => 'Swahili',
+            'sv' => 'Swedish',
+            'tl' => 'Tagalog (Filipino) and English',
+            'ta' => 'Tamil',
+            'en_ta' => 'Tamil and English',
+            'th' => 'Thai',
+            'tr' => 'Turkish',
+            'uk' => 'Ukrainian',
+            'ur' => 'Urdu',
+            'ug' => 'Uyghur',
+            'vi' => 'Vietnamese',
+            'cy' => 'Welsh',
+        ]);
+    }
+
+    private function languageRows(array $languages): array
+    {
+        return array_map(
+            fn (string $code, string $label): array => [
+                'code' => $code,
+                'label' => $label,
+            ],
+            array_keys($languages),
+            $languages,
+        );
+    }
+
+    /**
+     * Dynamically fetch available Groq models for the requested provider.
+     *
+     * @return array{models: array<string>, model_labels: array<string, string>}
+     */
+    private function getGroqAvailableModels(string $providerId): array
+    {
+        $models = $this->discoverProviderModels($providerId)['models'];
+
+        if ($models === []) {
+            $models = $providerId === self::PROVIDER_GROQ_TRANSCRIPTION
+                ? array_values(array_filter((array) config('services.groq.transcription_models', []), 'is_string'))
+                : array_values(array_filter((array) config('services.groq.text_fixer_models', []), 'is_string'));
+        }
+
+        return [
+            'models' => $models,
+            'model_labels' => array_reduce(
+                $models,
+                fn (array $labels, string $model): array => $labels + [$model => $this->generateModelLabel($model)],
+                [],
+            ),
+        ];
+    }
+
+    /**
+     * Fetch Gemini models that support text generation for transcript cleanup.
+     *
+     * @return array{models: array<string>, model_labels: array<string, string>}
+     */
+    private function getGeminiAvailableModels(): array
+    {
+        $models = (new GeminiModelCatalogService(
+            apiKey: $this->geminiApiKey(),
+            modelsUrl: config('services.gemini.models_url'),
+            timeout: (int) config('services.gemini.timeout', 120),
+        ))->cleanerModelIds();
+        $models = array_values(array_unique(array_filter(
+            array_map(fn (mixed $model): string => trim((string) $model), $models),
+            fn (string $model): bool => $model !== '',
+        )));
+
+        if ($models === []) {
+            $models = array_values(array_filter((array) config('services.gemini.models', []), 'is_string'));
+        }
+
+        return [
+            'models' => $models,
+            'model_labels' => array_reduce(
+                $models,
+                fn (array $labels, string $model): array => $labels + [$model => $this->generateModelLabel($model)],
+                [],
+            ),
+        ];
+    }
+
+    /**
+     * Fetch and separate Mistral models by the API surface that can use them.
+     *
+     * @return array{models: array<string>, model_labels: array<string, string>}
+     */
+    private function getMistralAvailableModels(string $providerId): array
+    {
+        $models = match ($providerId) {
+            self::PROVIDER_MISTRAL_TRANSCRIPTION => (new MistralSpeechToTextService)->getAvailableModelIds(),
+            self::PROVIDER_MISTRAL => (new MistralTranscriptCleanerService)->getAvailableModelIds(),
+            default => [],
+        };
+        $fallbackKey = $providerId === self::PROVIDER_MISTRAL_TRANSCRIPTION
+            ? 'services.mistral.transcription_models'
+            : 'services.mistral.text_fixer_models';
+        $models = array_values(array_unique(array_filter(
+            array_map(fn (mixed $model): string => trim((string) $model), $models),
+            fn (string $model): bool => $model !== '',
+        )));
+
+        if ($models === []) {
+            $models = array_values(array_filter((array) config($fallbackKey, []), 'is_string'));
+        }
+
+        return [
+            'models' => $models,
+            'model_labels' => array_reduce(
+                $models,
+                fn (array $labels, string $model): array => $labels + [$model => $this->generateModelLabel($model)],
+                [],
+            ),
+        ];
+    }
+
+    /**
+     * Fetch NVIDIA models that expose general text generation while excluding
+     * speech, retrieval, guardrail, and visual model families.
+     *
+     * @return array{models: array<string>, model_labels: array<string, string>}
+     */
+    private function getNvidiaAvailableModels(): array
+    {
+        $models = (new NvidiaModelCatalogService(
+            apiKey: $this->nvidiaApiKey(),
+            modelsUrl: config('services.nvidia.models_url'),
+            timeout: (int) config('services.nvidia.timeout', 120),
+        ))->cleanerModelIds();
+        $models = array_values(array_unique(array_filter(
+            array_map(fn (mixed $model): string => trim((string) $model), $models),
+            fn (string $model): bool => $model !== '',
+        )));
+
+        if ($models === []) {
+            $models = array_values(array_filter(
+                (array) config('services.nvidia.text_fixer_models', []),
+                'is_string',
+            ));
+        }
+
+        return [
+            'models' => $models,
+            'model_labels' => array_reduce(
+                $models,
+                fn (array $labels, string $model): array => $labels + [$model => $this->generateModelLabel($model)],
+                [],
+            ),
+        ];
+    }
+
+    /**
+     * Generate user-friendly label from model ID
+     */
+    private function generateModelLabel(string $model): string
+    {
+        // Extract meaningful parts from model ID
+        $parts = explode('/', $model);
+        $modelName = end($parts);
+
+        // Convert model ID to readable format
+        $label = str_replace(['-', '_'], ' ', $modelName);
+        $label = ucwords($label);
+
+        return $label;
+    }
+}

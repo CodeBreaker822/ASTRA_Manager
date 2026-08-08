@@ -8,7 +8,6 @@
             description="Choose which audio JERVA captures in this browser"
         />
 
-        {{-- Browser-local preference, same localStorage key the recorder reads. --}}
         <section
             class="rounded-lg border border-blue-200 bg-blue-50/50 p-4 sm:p-5"
             aria-labelledby="capture-screen-audio-title"

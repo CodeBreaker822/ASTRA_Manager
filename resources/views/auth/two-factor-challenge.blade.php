@@ -1,4 +1,3 @@
-{{-- $startInRecovery is composed on by AppServiceProvider. --}}
 <x-layouts.auth
     title="Two-factor authentication"
     x-data="{
@@ -39,7 +38,6 @@
     </x-slot:header>
 
     <div class="space-y-6">
-        {{-- Authenticator code --}}
         <form method="POST" action="{{ route('two-factor.login.store') }}" class="space-y-4" x-show="!recovery"
               @if ($startInRecovery) style="display: none" @endif>
             @csrf
@@ -98,7 +96,6 @@
             </div>
         </form>
 
-        {{-- Recovery code --}}
         <form method="POST" action="{{ route('two-factor.login.store') }}" class="space-y-4" x-cloak x-show="recovery">
             @csrf
             <x-ui.input

@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\MarketingSeoService;
 use App\Services\PageContentService;
-use App\Services\PlanService;
+use App\Services\Billing\PlanService;
 use App\Support\Money;
 use Illuminate\Contracts\View\View;
 

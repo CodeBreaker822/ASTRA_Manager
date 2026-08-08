@@ -60,7 +60,6 @@ class Nav
         return self::mark([
             ['title' => 'Profile', 'href' => route('profile.edit'), 'icon' => 'user-round'],
             ['title' => 'Security', 'href' => route('security.edit'), 'icon' => 'shield-check'],
-            ['title' => 'Appearance', 'href' => route('appearance.edit'), 'icon' => 'palette'],
             ['title' => 'Recording', 'href' => route('recording.edit'), 'icon' => 'mic'],
             ['title' => 'Billing', 'href' => route('billing.edit'), 'icon' => 'credit-card'],
         ]);

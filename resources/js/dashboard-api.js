@@ -59,6 +59,42 @@ const reloadWith = (message) => {
     window.location.reload();
 };
 
+/**
+ * Blade renders every provider as an option. Adding shows only the providers
+ * of the clicked group that are not connected yet; editing pins the select to
+ * the single row being edited. Hidden options are disabled too, so they cannot
+ * be reached with the keyboard.
+ */
+function showProviderOptions(keep) {
+    const $options = $('#providerSelect option');
+
+    $options.each(function () {
+        const visible = keep($(this));
+
+        $(this).prop('hidden', !visible).prop('disabled', !visible);
+    });
+
+    return $options.filter((index, option) => !option.hidden);
+}
+
+/** Copies the selected provider's models out of the blade-rendered source. */
+function showModelsFor(integrationKey) {
+    const $source = $('#providerModelSource').find(
+        `option[data-for="${integrationKey}"]`,
+    );
+
+    if ($source.length === 0) {
+        return;
+    }
+
+    $('#providerModel').empty().append($source.clone());
+
+    const preferred = $source.filter('[data-default="1"]').first().val();
+
+    $('#providerModel').val(preferred ?? $source.first().val());
+    $('#provider-models-message').text('');
+}
+
 $(function () {
     const flash = sessionStorage.getItem('jerva.flash');
 
@@ -168,7 +204,8 @@ $(function () {
         reloadWith(null),
     );
 
-    // Toggle the provider fields that only some providers need.
+    // Toggle the provider fields that only some providers need, and swap in the
+    // model list belonging to the newly selected provider.
     $('#providerSelect')
         .on('change', function () {
             const $selected = $(this).find(':selected');
@@ -181,6 +218,15 @@ $(function () {
                 .toggle(Boolean($selected.data('requires-runpod')));
             $('#load-provider-models').toggle(
                 Boolean($selected.data('discovery')),
+            );
+
+            showModelsFor($selected.val());
+
+            // .data() has already parsed the JSON, so re-encode it for display.
+            const metadata = $selected.data('metadata');
+
+            $('#providerMetadata').val(
+                metadata ? JSON.stringify(metadata, null, 4) : '',
             );
         })
         .trigger('change');
@@ -613,12 +659,42 @@ $(function () {
         }
     });
 
+    // Add offers the providers in this group that are not connected yet.
+    $('[data-add-provider]').on('click', function () {
+        const category = $(this).data('add-provider');
+        const $available = showProviderOptions(
+            ($option) =>
+                $option.data('category') === category &&
+                !$option.data('configured'),
+        );
+
+        if ($available.length === 0) {
+            notify(
+                'All available providers in this group have already been added.',
+                'info',
+            );
+
+            return;
+        }
+
+        $('#provider-form')[0].reset();
+        $('#providerSelect')
+            .prop('disabled', false)
+            .val($available.first().val())
+            .trigger('change');
+        $('#provider-modal-title').text('Add Provider');
+        $('#provider-modal').removeClass('hidden');
+    });
+
     // Edit opens the provider modal pre-filled from the row's data attributes.
     $('[data-edit-provider]').on('click', function () {
         const $row = $(this).closest('[data-provider-row]');
+        const key = $row.data('integration-key');
+
+        showProviderOptions(($option) => $option.val() === key);
 
         $('#providerSelect')
-            .val($row.data('integration-key'))
+            .val(key)
             .prop('disabled', true)
             .trigger('change');
         $('#provider-modal-title').text(`Edit ${$row.data('provider-name')}`);

@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Middleware\CanTranscribe;
-use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\TrackPageVisit;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -19,11 +18,10 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
+        $middleware->encryptCookies(except: ['sidebar_state']);
         $middleware->validateCsrfTokens(except: ['paymongo/webhook']);
 
         $middleware->web(append: [
-            HandleAppearance::class,
             AddLinkHeadersForPreloadedAssets::class,
             TrackPageVisit::class,
         ]);

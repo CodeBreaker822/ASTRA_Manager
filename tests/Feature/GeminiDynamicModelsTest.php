@@ -2,8 +2,8 @@
 
 use App\Models\API;
 use App\Models\TranscriptionProviderSetting;
-use App\Services\AppSettingsService;
-use App\Services\GeminiModelCatalogService;
+use App\Services\Transcription\AppSettingsService;
+use App\Services\Transcription\GeminiModelCatalogService;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 

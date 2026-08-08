@@ -16,9 +16,7 @@
             <span class="sr-only">{{ $heading ?? '' }}</span>
         </a>
 
-        {{-- Attributes land here so a page can scope Alpine over the header too. --}}
         <div {{ $attributes->class('rounded-lg border border-slate-200 bg-white shadow-[0_12px_32px_rgba(15,23,42,0.08)]') }}>
-            {{-- `header` lets a page drive the heading reactively (see two-factor-challenge). --}}
             @isset($header)
                 {{ $header }}
             @else

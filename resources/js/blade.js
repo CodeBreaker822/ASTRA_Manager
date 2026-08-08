@@ -1,34 +1,6 @@
 import focus from '@alpinejs/focus';
 import Alpine from 'alpinejs';
 
-// Theme is applied inline in the layout head to avoid a flash of the wrong
-// palette; this keeps it in sync when the OS preference changes afterwards.
-const applyTheme = (value) => {
-    const dark =
-        value === 'dark' ||
-        (value === 'system' &&
-            window.matchMedia('(prefers-color-scheme: dark)').matches);
-
-    document.documentElement.classList.toggle('dark', dark);
-};
-
-const storedTheme = () => localStorage.getItem('appearance') || 'system';
-
-export const setTheme = (value) => {
-    localStorage.setItem('appearance', value);
-    document.cookie = `appearance=${value};path=/;max-age=${365 * 24 * 60 * 60};SameSite=Lax`;
-    applyTheme(value);
-};
-
-applyTheme(storedTheme());
-
-window
-    .matchMedia('(prefers-color-scheme: dark)')
-    .addEventListener('change', () => applyTheme(storedTheme()));
-
-window.setTheme = setTheme;
-window.storedTheme = storedTheme;
-
 /**
  * Repeatable form list: add, remove, and reorder items while keeping the
  * `name="a[0][b]"` indices contiguous so PHP parses them back as a list.

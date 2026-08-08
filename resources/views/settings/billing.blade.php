@@ -1,4 +1,3 @@
-{{-- $paygRates, $freeTierItems, $paymentMethods, and $walletBalanceLabel come from BillingController::edit(). --}}
 <x-layouts.settings title="Billing">
     <h1 class="sr-only">Billing</h1>
 

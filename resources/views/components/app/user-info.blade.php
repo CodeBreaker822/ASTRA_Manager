@@ -4,7 +4,7 @@
     @if (! empty($user->avatar))
         <img src="{{ $user->avatar }}" alt="{{ $user->email }}" class="aspect-square size-full object-cover">
     @else
-        <span class="flex size-full items-center justify-center rounded-lg bg-neutral-200 text-xs font-medium text-black dark:bg-neutral-700 dark:text-white">
+        <span class="flex size-full items-center justify-center rounded-lg bg-neutral-200 text-xs font-medium text-black">
             {{ $user?->initials() }}
         </span>
     @endif

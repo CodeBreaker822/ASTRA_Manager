@@ -6,7 +6,6 @@
           data-has-pending="{{ $hasPendingWork ? '1' : '' }}">
         <div class="flex min-h-dvh flex-col overflow-y-auto lg:h-screen lg:min-h-0 lg:flex-row lg:overflow-hidden">
 
-            {{-- Sidebar --}}
             <aside class="flex max-h-[48dvh] w-full shrink-0 flex-col border-b border-slate-200 bg-slate-50 lg:max-h-none lg:min-h-0 lg:w-[19rem] lg:border-r lg:border-b-0">
                 <div class="border-b border-slate-200 p-4">
                     <div class="flex h-[72px] items-center gap-3 px-2">
@@ -80,7 +79,6 @@
                 </div>
             </aside>
 
-            {{-- Transcript pane --}}
             <section class="relative flex min-h-[70dvh] min-w-0 flex-1 flex-col bg-white lg:min-h-0">
                 <header class="flex h-[72px] shrink-0 items-center justify-between border-b border-slate-200 px-4 lg:px-6">
                     <div class="min-w-0">
@@ -103,7 +101,6 @@
                             <a href="{{ route('billing.edit') }}" class="shrink-0 font-semibold text-blue-700">View plans</a>
                         </div>
 
-                        {{-- Refreshed in place by polling; markup comes from blade. --}}
                         <div id="transcript-body">
                             @include('workspace.partials.transcript')
                         </div>
@@ -117,7 +114,6 @@
         </div>
     </main>
 
-    {{-- Add transcript --}}
     <div id="create-project-modal" data-modal class="hidden fixed inset-0 z-50 grid place-items-center bg-blue-950/30 p-4">
         <div class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-4 shadow-2xl">
             <h3 class="text-base font-semibold text-slate-950">Add Transcript</h3>
@@ -140,7 +136,6 @@
         </div>
     </div>
 
-    {{-- Delete transcript --}}
     <div id="delete-project-modal" data-modal class="hidden fixed inset-0 z-50 grid place-items-center bg-blue-950/30 p-4">
         <div class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-4 shadow-2xl">
             <h3 id="delete-project-title" class="text-base font-semibold text-slate-950"></h3>

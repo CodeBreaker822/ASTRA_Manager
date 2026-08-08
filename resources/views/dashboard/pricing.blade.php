@@ -1,5 +1,3 @@
-{{-- Field definitions and the padded tiers come from DashboardPricingController::edit(). --}}
-
 <x-layouts.dashboard title="Pricing Manager">
     <form method="POST" action="{{ route('dashboard.pricing.update') }}" class="space-y-5">
         @csrf
@@ -185,7 +183,6 @@
             </div>
         </section>
 
-        {{-- Comparison rows are add/remove, so Alpine owns the list and the indices. --}}
         <section
             class="space-y-3"
             x-data="{

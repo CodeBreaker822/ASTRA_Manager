@@ -4,7 +4,7 @@ use App\Models\TranscriptionApiRequestLog;
 use App\Models\User;
 use App\Models\UserPermissions;
 use App\Models\UserPositions;
-use App\Services\ProviderFallbackLogger;
+use App\Services\Transcription\ProviderFallbackLogger;
 use Illuminate\Support\Str;
 
 test('provider attempt logger records primary and fallback successes', function () {

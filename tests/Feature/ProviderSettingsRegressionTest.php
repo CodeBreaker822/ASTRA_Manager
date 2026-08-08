@@ -5,8 +5,8 @@ use App\Models\Transcript;
 use App\Models\TranscriptionProviderSetting;
 use App\Models\TranscriptProject;
 use App\Models\User;
-use App\Services\AppSettingsService;
-use App\Services\WebTranscriptProcessor;
+use App\Services\Transcription\AppSettingsService;
+use App\Services\Transcription\WebTranscriptProcessor;
 use Illuminate\Support\Facades\Http;
 
 test('existing provider rows remain connected without runtime metadata', function () {

@@ -1,4 +1,3 @@
-{{-- Field metadata is resolved by App\View\Components\Cms\Field. --}}
 @if ($isObject)
     <fieldset @class(['grid gap-4', 'rounded-lg border border-slate-200 bg-white p-4' => $level > 0])>
         @unless ($hideLabel)
@@ -83,8 +82,6 @@
             @endforeach
         </div>
 
-        {{-- Blueprint for new rows. Its fields carry only data-name, so nothing
-             posts until the repeater assigns a real index. --}}
         <template data-repeater-template>
             <div class="rounded-lg border border-slate-200 bg-slate-50 p-3" data-repeater-item>
                 <div class="mb-2 flex items-center justify-between gap-2">

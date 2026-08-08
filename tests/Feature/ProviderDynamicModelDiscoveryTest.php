@@ -4,8 +4,8 @@ use App\Models\TranscriptionProviderSetting;
 use App\Models\User;
 use App\Models\UserPermissions;
 use App\Models\UserPositions;
-use App\Services\AppSettingsService;
-use App\Services\GroqModelCatalogService;
+use App\Services\Transcription\AppSettingsService;
+use App\Services\Transcription\GroqModelCatalogService;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 

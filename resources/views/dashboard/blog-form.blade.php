@@ -1,4 +1,3 @@
-{{-- $isEditing, $pageTitle, and $formAction come from DashboardBlogController. --}}
 <x-layouts.dashboard :title="$pageTitle">
     <form
         method="POST"
@@ -163,7 +162,6 @@
 
                 <div class="rounded-lg border border-slate-200 bg-white p-4">
                     <div class="text-sm font-semibold text-slate-950">Preview</div>
-                    {{-- Rendered markdown from the server-side preview endpoint. --}}
                     <div
                         class="mt-3 max-h-[480px] overflow-auto border-t border-slate-200 pt-3 text-sm leading-6 text-slate-700 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_li]:mt-1 [&_p]:mt-3 [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:pl-5"
                         x-html="preview"

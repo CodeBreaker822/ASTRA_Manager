@@ -1,7 +1,10 @@
 <?php
 
-use App\Http\Controllers\Api\APIController;
-use App\Http\Controllers\Api\TranscriptionController;
+use App\Http\Controllers\Api\TranscriptionController\TranscriptionController;
+use App\Jobs\APIController\ApiDashboardController;
+use App\Jobs\APIController\ApiTokenController;
+use App\Jobs\APIController\TranscriberPackageController;
+use App\Jobs\APIController\TranscriptionProviderController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/runpod/audio/{file}', [TranscriptionController::class, 'temporaryRunPodAudio'])
@@ -11,18 +14,18 @@ Route::get('/runpod/audio/{file}', [TranscriptionController::class, 'temporaryRu
 
 Route::middleware(['auth', 'can:API-manage_api'])->group(function () {
     Route::redirect('/settings/api', '/dashboard/api');
-    Route::get('/dashboard/api', [APIController::class, 'index'])->name('api.manager');
-    Route::get('/dashboard/api/transcription-providers/health', [APIController::class, 'transcriptionProviderHealth'])->name('api.transcription-providers.health');
-    Route::get('/dashboard/api/transcription-providers/logs', [APIController::class, 'transcriptionProviderLogs'])->name('api.transcription-providers.logs');
-    Route::post('/dashboard/api/transcription-providers/models', [APIController::class, 'transcriptionProviderModels'])->name('api.transcription-providers.models');
-    Route::post('/dashboard/api/transcription-providers', [APIController::class, 'updateTranscriptionProviders'])->name('api.transcription-providers.update');
-    Route::post('/dashboard/api/transcription-providers/order', [APIController::class, 'reorderTranscriptionProviders'])->name('api.transcription-providers.order');
-    Route::post('/dashboard/api/transcriber-package', [APIController::class, 'uploadTranscriberPackage'])->name('api.transcriber-package.upload');
-    Route::post('/dashboard/api/transcriber-package/chunk', [APIController::class, 'uploadTranscriberPackageChunk'])->name('api.transcriber-package.chunk');
-    Route::post('/dashboard/api/transcriber-package/complete', [APIController::class, 'completeTranscriberPackageUpload'])->name('api.transcriber-package.complete');
-    Route::post('/dashboard/api/license-key', [APIController::class, 'generateLicenseKey'])->name('api.generate-license-key');
-    Route::put('/api/settings/update-status/{api}', [APIController::class, 'updateStatus'])->name('api.update-status');
-    Route::put('/api/settings/update-method/{api}', [APIController::class, 'updateMethod'])->name('api.update-method');
-    Route::post('/api/settings/store', [APIController::class, 'store'])->name('api.store');
-    Route::delete('/api/settings/{api}', [APIController::class, 'destroy'])->name('api.destroy');
+    Route::get('/dashboard/api', [ApiDashboardController::class, 'index'])->name('api.manager');
+    Route::get('/dashboard/api/transcription-providers/health', [TranscriptionProviderController::class, 'transcriptionProviderHealth'])->name('api.transcription-providers.health');
+    Route::get('/dashboard/api/transcription-providers/logs', [TranscriptionProviderController::class, 'transcriptionProviderLogs'])->name('api.transcription-providers.logs');
+    Route::post('/dashboard/api/transcription-providers/models', [TranscriptionProviderController::class, 'transcriptionProviderModels'])->name('api.transcription-providers.models');
+    Route::post('/dashboard/api/transcription-providers', [TranscriptionProviderController::class, 'updateTranscriptionProviders'])->name('api.transcription-providers.update');
+    Route::post('/dashboard/api/transcription-providers/order', [TranscriptionProviderController::class, 'reorderTranscriptionProviders'])->name('api.transcription-providers.order');
+    Route::post('/dashboard/api/transcriber-package', [TranscriberPackageController::class, 'uploadTranscriberPackage'])->name('api.transcriber-package.upload');
+    Route::post('/dashboard/api/transcriber-package/chunk', [TranscriberPackageController::class, 'uploadTranscriberPackageChunk'])->name('api.transcriber-package.chunk');
+    Route::post('/dashboard/api/transcriber-package/complete', [TranscriberPackageController::class, 'completeTranscriberPackageUpload'])->name('api.transcriber-package.complete');
+    Route::post('/dashboard/api/license-key', [ApiTokenController::class, 'generateLicenseKey'])->name('api.generate-license-key');
+    Route::put('/api/settings/update-status/{api}', [ApiTokenController::class, 'updateStatus'])->name('api.update-status');
+    Route::put('/api/settings/update-method/{api}', [ApiTokenController::class, 'updateMethod'])->name('api.update-method');
+    Route::post('/api/settings/store', [ApiTokenController::class, 'store'])->name('api.store');
+    Route::delete('/api/settings/{api}', [ApiTokenController::class, 'destroy'])->name('api.destroy');
 });

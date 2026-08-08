@@ -1,9 +1,5 @@
 @props(['open' => false])
 
-{{--
-    Alpine dialog. `trigger` opens it; inside the panel, `$dispatch('close-dialog')`
-    or a [data-dialog-close] element closes it.
---}}
 <div
     x-data="{ open: {{ $open ? 'true' : 'false' }} }"
     x-on:close-dialog.stop="open = false"

@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Services\Transcription\AppSettingsService;
+use App\Services\Transcription\ProviderFallbackLogger;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -96,6 +98,12 @@ class ChatbotService
                 $this->providerMetadataInt($provider, 'timeout'),
             ),
             AppSettingsService::PROVIDER_OPENROUTER => $this->chatWithOpenAICompatibleProvider(
+                $provider,
+                $messages,
+                $this->providerMetadataString($provider, 'chat_completions_url'),
+                $this->providerMetadataInt($provider, 'timeout'),
+            ),
+            AppSettingsService::PROVIDER_NVIDIA => $this->chatWithOpenAICompatibleProvider(
                 $provider,
                 $messages,
                 $this->providerMetadataString($provider, 'chat_completions_url'),

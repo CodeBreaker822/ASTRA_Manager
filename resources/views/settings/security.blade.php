@@ -77,7 +77,6 @@
                     </form>
                 </div>
             @elseif ($pendingSetup)
-                {{-- Secret generated but not yet confirmed. --}}
                 <div class="space-y-4 rounded-lg border border-blue-200 bg-blue-50/50 p-5">
                     <div class="flex items-center gap-3">
                         <x-icon name="scan-line" class="size-5 text-blue-600" />
@@ -155,7 +154,6 @@
                         <x-ui.submit variant="destructive">Disable 2FA</x-ui.submit>
                     </form>
 
-                    {{-- Recovery codes --}}
                     <x-ui.card class="w-full">
                         <div class="-mt-2 mb-4">
                             <h2 class="flex gap-3 text-base leading-none font-semibold">

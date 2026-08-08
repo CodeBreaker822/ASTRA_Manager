@@ -1,10 +1,8 @@
-{{-- $navGroups, $navHome, and $authUser are composed on by AppServiceProvider. --}}
 <aside
     class="flex shrink-0 flex-col gap-2 bg-sidebar p-2 text-sidebar-foreground transition-[width] duration-200 ease-linear"
     x-bind:class="collapsed ? 'w-[3.5rem]' : 'w-64'"
     aria-label="Sidebar"
 >
-    {{-- Brand --}}
     <a href="{{ $navHome }}"
        class="flex h-12 items-center gap-2 rounded-lg px-2 hover:bg-sidebar-accent">
         <span class="flex size-8 shrink-0 items-center justify-center rounded-md bg-sidebar-primary/10">
@@ -15,7 +13,6 @@
         </span>
     </a>
 
-    {{-- Navigation --}}
     <nav class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
         @foreach ($navGroups as $label => $items)
             <div class="grid gap-1">
@@ -40,7 +37,6 @@
         @endforeach
     </nav>
 
-    {{-- User menu --}}
     <x-ui.dropdown align="start" width="w-64">
         <x-slot:trigger>
             <button type="button" data-test="sidebar-menu-button"

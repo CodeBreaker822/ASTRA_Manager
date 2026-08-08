@@ -1,6 +1,5 @@
 @include('partials.seo')
 
-{{-- Icon sequences live in config/ui.php. --}}
 <x-layouts.marketing :title="$seo['title']">
     <main>
         <section class="border-b border-slate-200 bg-white">

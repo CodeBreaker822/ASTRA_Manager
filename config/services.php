@@ -1,5 +1,7 @@
 <?php
 
+use App\Services\Transcription\NvidiaTranscriptCleanerService;
+
 return [
 
     /*
@@ -58,6 +60,14 @@ return [
 
     'ffmpeg' => [
         'binary' => env('FFMPEG_BINARY', 'ffmpeg'),
+        'fallback_binary' => env('FFMPEG_FALLBACK_BINARY')
+            ?: dirname(base_path()).DIRECTORY_SEPARATOR.'AITranscriber'.DIRECTORY_SEPARATOR.'ffmpeg'.DIRECTORY_SEPARATOR.'bin'.DIRECTORY_SEPARATOR.'ffmpeg.exe',
+    ],
+
+    'http' => [
+        'ca_bundle' => env('HTTP_CA_BUNDLE'),
+        'windows_fallback_ca_bundle' => env('HTTP_WINDOWS_FALLBACK_CA_BUNDLE')
+            ?: storage_path('app/certs/windows-ca-bundle.pem'),
     ],
 
     'lambda_pdf' => [
@@ -210,6 +220,17 @@ return [
         'models' => ['google/gemma-3-12b-it:free'],
         'timeout' => env('OPENROUTER_TIMEOUT', 120),
         'max_retries' => env('OPENROUTER_MAX_RETRIES', 3),
+    ],
+
+    'nvidia' => [
+        'key' => env('NVIDIA_API_KEY'),
+        'base_url' => env('NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1'),
+        'chat_completions_url' => env('NVIDIA_CHAT_COMPLETIONS_URL', rtrim(env('NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1'), '/').'/chat/completions'),
+        'models_url' => env('NVIDIA_MODELS_URL', rtrim(env('NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1'), '/').'/models'),
+        'text_fixer_model' => env('NVIDIA_TEXT_FIXER_MODEL', NvidiaTranscriptCleanerService::MODEL_NEMOTRON_3_NANO),
+        'text_fixer_models' => array_values(array_filter(explode(',', env('NVIDIA_TEXT_FIXER_MODELS', NvidiaTranscriptCleanerService::MODEL_NEMOTRON_3_NANO)))),
+        'timeout' => env('NVIDIA_TIMEOUT', 120),
+        'max_retries' => env('NVIDIA_MAX_RETRIES', 3),
     ],
 
     'cloudflare' => [

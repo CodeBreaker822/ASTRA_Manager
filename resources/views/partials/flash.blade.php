@@ -1,4 +1,3 @@
-{{-- $notification is composed on by AppServiceProvider. --}}
 @if ($notification)
     <script>
         document.addEventListener('DOMContentLoaded', function () {

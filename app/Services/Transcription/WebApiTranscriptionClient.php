@@ -1,0 +1,283 @@
+<?php
+
+namespace App\Services\Transcription;
+
+use App\Http\Controllers\Api\TranscriptionController\PolishController as ApiPolishController;
+use App\Http\Controllers\Api\TranscriptionController\TranscriptionController as ApiTranscriptionController;
+use App\Jobs\ProcessApiTranscriptionJob;
+use App\Models\ApiTranscriptionJob;
+use App\Models\User;
+use App\Services\LicenseKeyService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+
+class WebApiTranscriptionClient
+{
+    public const MAX_BATCH_CLIPS = 20;
+
+    public const MAX_BATCH_DURATION_MS = 1_200_000;
+
+    public function __construct(
+        private readonly LicenseKeyService $licenses,
+        private readonly ApiTranscriptionController $api,
+        private readonly ApiPolishController $polisher,
+    ) {}
+
+    /**
+     * @param  array<int, array<string, mixed>>  $clips
+     * @return array<string, mixed>
+     */
+    public function transcribe(User $user, array $clips, ?string $languageCode = null, string $billingFeature = 'upload'): array
+    {
+        $license = $this->licenses->provisionForUser($user);
+
+        $response = $this->api->transcribe(
+            $this->transcribeRequest($clips, $license->app_token, $languageCode, 'sync', $billingFeature),
+            app(AppSettingsService::class),
+        );
+        $payload = $this->payload($response);
+
+        if ($response->getStatusCode() >= 400) {
+            Log::error('Web audio sync transcription API request failed.', [
+                'user_id' => $user->id,
+                'status_code' => $response->getStatusCode(),
+                'payload' => $this->logPayload($payload),
+            ]);
+
+            throw new \RuntimeException('Audio upload could not be processed.');
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $clips
+     * @return array<string, mixed>
+     */
+    public function queue(User $user, array $clips, ?string $languageCode = null, string $billingFeature = 'upload'): array
+    {
+        $license = $this->licenses->provisionForUser($user);
+
+        $response = $this->api->transcribe(
+            $this->transcribeRequest($clips, $license->app_token, $languageCode, 'async', $billingFeature),
+            app(AppSettingsService::class),
+        );
+        $payload = $this->payload($response);
+
+        if ($response->getStatusCode() !== 202 || blank($payload['job_id'] ?? null)) {
+            Log::error('Web audio async transcription job creation failed.', [
+                'user_id' => $user->id,
+                'status_code' => $response->getStatusCode(),
+                'payload' => $this->logPayload($payload),
+            ]);
+
+            throw new \RuntimeException('Transcription job could not be created.');
+        }
+
+        $this->dispatchToQueueWorker((string) $payload['job_id'], (string) ($payload['status'] ?? 'queued'));
+
+        return $payload;
+    }
+
+    /**
+     * Hands a freshly created job to a queue worker.
+     *
+     * `queued` is the only status a worker may claim - a RunPod submission
+     * comes back as `processing` and is driven by polling RunPod instead. The
+     * mode marker tells the status endpoint a worker owns this job, so it stops
+     * transcribing inline inside the caller's progress request.
+     */
+    private function dispatchToQueueWorker(string $jobId, string $status): void
+    {
+        if ($status !== 'queued') {
+            return;
+        }
+
+        $job = ApiTranscriptionJob::query()->find($jobId);
+
+        if (! $job || ($job->request_payload['mode'] ?? null) !== 'queue') {
+            return;
+        }
+
+        $job->forceFill([
+            'request_payload' => [
+                ...$job->request_payload,
+                'mode' => 'queue_worker',
+            ],
+        ])->save();
+
+        ProcessApiTranscriptionJob::dispatch($jobId);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function jobStatus(User $user, string $jobId): array
+    {
+        $license = $this->licenses->provisionForUser($user);
+        $response = $this->api->transcriptionJobStatus(
+            Request::create('/api/transcribe/jobs/'.$jobId, 'GET', [], [], [], $this->server($license->app_token)),
+            $jobId,
+        );
+        $payload = $this->payload($response);
+
+        if ($response->getStatusCode() >= 500 && ($payload['status'] ?? null) !== 'failed') {
+            Log::error('Web audio async transcription status request failed.', [
+                'user_id' => $user->id,
+                'job_id' => $jobId,
+                'status_code' => $response->getStatusCode(),
+                'payload' => $this->logPayload($payload),
+            ]);
+
+            throw new \RuntimeException('Audio upload could not be processed.');
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $chunks
+     * @return array<string, mixed>
+     */
+    public function polish(User $user, string $text, array $chunks, string $instruction, string $task = 'polish'): array
+    {
+        $license = $this->licenses->provisionForUser($user);
+        $response = $this->polisher->polish(
+            Request::create('/api/polish', 'POST', [
+                'text' => $text,
+                'chunks' => $chunks,
+                'instruction' => $instruction,
+                'task' => $task,
+            ], [], [], $this->server($license->app_token)),
+            app(AppSettingsService::class),
+        );
+        $payload = $this->payload($response);
+
+        if ($response->getStatusCode() >= 400) {
+            throw new \RuntimeException('Transcript could not be polished.');
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $clips
+     */
+    public function batchIsTooLarge(array $clips): bool
+    {
+        if (count($clips) > self::MAX_BATCH_CLIPS) {
+            return true;
+        }
+
+        $totalDurationMs = 0;
+
+        foreach ($clips as $clip) {
+            $startMs = $clip['clip_start_ms'] ?? null;
+            $endMs = $clip['clip_end_ms'] ?? null;
+
+            if (! is_numeric($startMs) || ! is_numeric($endMs)) {
+                return count($clips) > 1;
+            }
+
+            $durationMs = max(0, (int) $endMs - (int) $startMs);
+
+            if ($durationMs > self::MAX_BATCH_DURATION_MS) {
+                return true;
+            }
+
+            $totalDurationMs += $durationMs;
+        }
+
+        return $totalDurationMs > self::MAX_BATCH_DURATION_MS;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $clips
+     */
+    private function transcribeRequest(array $clips, string $licenseKey, ?string $languageCode, string $responseMode, string $billingFeature): Request
+    {
+        $files = [];
+        $clipIndex = [];
+        $clipStartMs = [];
+        $clipEndMs = [];
+        $languages = [];
+
+        foreach (array_values($clips) as $clip) {
+            $path = (string) ($clip['path'] ?? '');
+            $absolutePath = Storage::disk('local')->path($path);
+
+            if ($path === '' || ! is_file($absolutePath)) {
+                Log::error('Stored web audio clip is not readable before API transcription request.', [
+                    'stored_path' => $path,
+                    'absolute_path' => $absolutePath,
+                    'clip_index' => $clip['clip_index'] ?? null,
+                    'name' => $clip['name'] ?? null,
+                ]);
+
+                throw new \RuntimeException(ServiceUserMessage::audioReadFailed());
+            }
+
+            $files[] = new UploadedFile(
+                $absolutePath,
+                (string) ($clip['name'] ?? basename($path)),
+                mime_content_type($absolutePath) ?: 'application/octet-stream',
+                null,
+                true,
+            );
+            $clipIndex[] = (int) ($clip['clip_index'] ?? count($clipIndex));
+            $clipStartMs[] = (int) ($clip['clip_start_ms'] ?? 0);
+            $clipEndMs[] = (int) ($clip['clip_end_ms'] ?? 0);
+            $languages[] = (string) ($clip['language_code'] ?? $languageCode ?? '');
+        }
+
+        return Request::create('/api/transcribe', 'POST', [
+            'response_mode' => $responseMode,
+            'billing_feature' => $billingFeature === 'live' ? 'live' : 'upload',
+            'clip_index' => $clipIndex,
+            'clip_start_ms' => $clipStartMs,
+            'clip_end_ms' => $clipEndMs,
+            'language_code' => $languages,
+        ], [], [
+            'audio' => $files,
+        ], $this->server($licenseKey));
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function server(string $licenseKey): array
+    {
+        return [
+            'HTTP_ACCEPT' => 'application/json',
+            'HTTP_AUTHORIZATION' => 'Bearer '.$licenseKey,
+            'REMOTE_ADDR' => '127.0.0.1',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function payload(JsonResponse $response): array
+    {
+        $payload = json_decode((string) $response->getContent(), true);
+
+        return is_array($payload) ? $payload : [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function logPayload(array $payload): array
+    {
+        return array_filter([
+            'message' => $payload['message'] ?? null,
+            'status' => $payload['status'] ?? null,
+            'job_id' => $payload['job_id'] ?? null,
+            'errors' => $payload['errors'] ?? null,
+        ], fn (mixed $value): bool => $value !== null && $value !== []);
+    }
+}

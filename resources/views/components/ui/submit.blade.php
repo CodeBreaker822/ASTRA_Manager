@@ -1,13 +1,5 @@
 @props(['variant' => 'default', 'size' => 'default', 'disabled' => false])
 
-{{--
-    Disables itself on submit so a slow POST can't be double-fired.
-
-    Note: never put a Blade directive (@if, @disabled, ...) inside an <x-...>
-    tag. Blade compiles the directive first and the component tag then fails to
-    parse, silently emitting a literal <x-...> and unbalanced PHP. Build the
-    attribute with a plain expression instead.
---}}
 <x-ui.button
     type="submit"
     :variant="$variant"

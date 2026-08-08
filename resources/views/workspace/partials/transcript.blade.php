@@ -1,4 +1,3 @@
-{{-- Rows, failure state, and empty copy are all resolved by App\Support\WorkspaceView. --}}
 @if ($rows !== [])
     @foreach ($rows as $row)
         <article class="w-full border-b border-slate-200 py-2.5 last:border-b-0">

@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Transcript;
-use App\Services\WebTranscriptProcessor;
+use App\Services\Transcription\WebTranscriptProcessor;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 

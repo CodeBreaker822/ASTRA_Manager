@@ -1,6 +1,5 @@
 @include('partials.seo')
 
-{{-- $article and the posts' reading_time come from BlogController::show(). --}}
 <x-layouts.marketing :title="$seo['title']">
     <main>
         <article class="bg-white py-12 md:py-20">
@@ -36,7 +35,6 @@
                          class="mt-10 aspect-video w-full rounded-xl border border-slate-200 object-cover">
                 @endif
 
-                {{-- Post body is sanitised HTML produced by the CMS. --}}
                 <div class="mt-10 border-t border-slate-200 pt-10 text-base leading-7 text-slate-700 [&_a]:font-semibold [&_a]:text-blue-600 [&_a]:underline [&_a]:decoration-blue-200 [&_a]:underline-offset-4 hover:[&_a]:text-blue-700 [&_blockquote]:mt-6 [&_blockquote]:border-l-4 [&_blockquote]:border-blue-200 [&_blockquote]:bg-blue-50 [&_blockquote]:px-5 [&_blockquote]:py-3 [&_blockquote]:text-slate-700 [&_h2]:mt-12 [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2]:text-slate-950 [&_h3]:mt-8 [&_h3]:text-xl [&_h3]:font-semibold [&_h3]:text-slate-950 [&_li]:mt-2 [&_ol]:mt-4 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mt-5 [&_strong]:font-semibold [&_strong]:text-slate-950 [&_ul]:mt-4 [&_ul]:list-disc [&_ul]:pl-6">
                     {!! $post['html'] !!}
                 </div>
