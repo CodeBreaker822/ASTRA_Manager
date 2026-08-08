@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Jobs\APIController;
+namespace App\Http\Controllers\Api\APIController;
 
 use App\Http\Controllers\Controller;
 use App\Services\Api\TranscriberPackageService;

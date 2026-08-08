@@ -2,9 +2,9 @@
 
 namespace App\Traits;
 
-use App\Services\AuditLogService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
 
 trait Gates
@@ -67,9 +67,9 @@ trait Gates
 
         // Proceed with logging (with enhanced metadata)
         try {
-            $auditService = app(AuditLogService::class);
-
-            $auditService->logSecurity('unauthorized_access_attempt', 'User attempted to access restricted route', [
+            Log::warning('Security audit: unauthorized access attempt.', [
+                'event' => 'unauthorized_access_attempt',
+                'description' => 'User attempted to access restricted route',
                 'gate_name' => $gateName,
                 'attempted_url' => $url,
                 'ip_address' => $ipAddress,
@@ -95,7 +95,7 @@ trait Gates
             // Mark as logged for this session
             Session::put($sessionKey, true);
 
-        } catch (\Exception $e) {
+        } catch (\Throwable) {
             // Silent fail - don't let logging errors break the application
             return;
         }

@@ -56,13 +56,18 @@ export function createPolling({ hasWork, refresh, onError }) {
     };
 
     return {
+        // Callers start polling right after doing something that creates work
+        // on the server, so this must not gate on hasWork(): that reads state
+        // from the last refresh, which predates the very work being waited on.
+        // A first tick that finds nothing pending stops the timer itself.
         start() {
-            if (timer !== null || !hasWork()) {
+            if (timer !== null) {
                 return;
             }
 
             failures = 0;
             timer = window.setInterval(() => void tick(), POLL_MS);
+            void tick();
         },
         stop,
     };

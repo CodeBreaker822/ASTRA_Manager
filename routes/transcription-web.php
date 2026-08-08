@@ -1,10 +1,10 @@
 <?php
 
+use App\Http\Controllers\Api\APIController\ApiDashboardController;
+use App\Http\Controllers\Api\APIController\ApiTokenController;
+use App\Http\Controllers\Api\APIController\TranscriberPackageController;
+use App\Http\Controllers\Api\APIController\TranscriptionProviderController;
 use App\Http\Controllers\Api\TranscriptionController\TranscriptionController;
-use App\Jobs\APIController\ApiDashboardController;
-use App\Jobs\APIController\ApiTokenController;
-use App\Jobs\APIController\TranscriberPackageController;
-use App\Jobs\APIController\TranscriptionProviderController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/runpod/audio/{file}', [TranscriptionController::class, 'temporaryRunPodAudio'])
