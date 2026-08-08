@@ -9,6 +9,7 @@
 <body class="font-sans antialiased">
 {{ $slot }}
 
+@include('partials.settings-modal')
 @include('partials.flash')
 @stack('scripts')
 </body>

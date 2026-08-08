@@ -26,6 +26,99 @@ $(function () {
 
     let transcripts = [];
 
+    // --- Sidebar ------------------------------------------------------------
+
+    const sidebarStorageKey = 'jerva.workspace.sidebar-hidden';
+    const desktopSidebar = window.matchMedia('(min-width: 1024px)');
+    const $sidebar = $('#workspace-sidebar');
+    let sidebarVisible = false;
+    let sidebarPreference = readSidebarPreference();
+
+    function readSidebarPreference() {
+        try {
+            const stored = localStorage.getItem(sidebarStorageKey);
+
+            return stored === null ? null : stored === 'true';
+        } catch {
+            return null;
+        }
+    }
+
+    function setSidebarVisible(visible, persist = false) {
+        sidebarVisible = visible;
+
+        $sidebar
+            .prop('hidden', !visible)
+            .toggleClass('hidden', !visible)
+            .toggleClass('flex', visible);
+        $('#workspace-sidebar-toggle')
+            .attr('aria-expanded', String(visible))
+            .attr('aria-label', visible ? 'Hide sidebar' : 'Show sidebar');
+        $('#workspace-sidebar-backdrop').prop(
+            'hidden',
+            !visible || desktopSidebar.matches,
+        );
+        $root[0].style.setProperty(
+            '--workspace-sidebar-width',
+            visible && desktopSidebar.matches ? '19rem' : '0rem',
+        );
+        document.body.classList.toggle(
+            'overflow-hidden',
+            visible && !desktopSidebar.matches,
+        );
+
+        if (persist) {
+            sidebarPreference = !visible;
+
+            try {
+                localStorage.setItem(
+                    sidebarStorageKey,
+                    String(sidebarPreference),
+                );
+            } catch {
+                // The sidebar still toggles when browser storage is unavailable.
+            }
+        }
+    }
+
+    setSidebarVisible(
+        sidebarPreference === null
+            ? desktopSidebar.matches
+            : !sidebarPreference,
+    );
+
+    $('#workspace-sidebar-toggle').on('click', () => {
+        setSidebarVisible(!sidebarVisible, true);
+    });
+
+    $('#workspace-sidebar-backdrop, #workspace-sidebar-close').on(
+        'click',
+        () => {
+            setSidebarVisible(false, true);
+        },
+    );
+
+    desktopSidebar.addEventListener('change', () => {
+        setSidebarVisible(
+            sidebarPreference === null
+                ? desktopSidebar.matches
+                : !sidebarPreference,
+        );
+    });
+
+    // True while the summarize POST is in flight, so a poll landing mid-request
+    // cannot replace the panel under the click.
+    let summaryBusy = false;
+
+    // True while any transcript action is in flight; locks the others.
+    let acting = false;
+
+    // Last action state the server reported, so a repaint can reapply the lock.
+    // Seeded from the page render, otherwise the first click before any poll
+    // would find no state to repaint from and skip the lock. jQuery has already
+    // parsed the JSON off the attribute.
+    let lastActions = $root.data('actions') ?? null;
+
     const showUpgrade = (message) => {
         $('#upgrade-message').text(message);
         $('#upgrade-banner').prop('hidden', !message);
@@ -43,13 +136,73 @@ $(function () {
             dataType: 'json',
             headers: { Accept: 'application/json' },
         }).then((payload) => {
-            // `html` is rendered by blade; the project payload only feeds
-            // upload progress, never markup.
+            // `html` and `summary` are rendered by blade; the project payload
+            // only feeds upload progress, never markup.
             $('#transcript-body').html(payload.html);
+
+            // Never swap the summary panel out from under a click.
+            if (payload.summary && !summaryBusy) {
+                $('#summary-panel').html(payload.summary);
+            }
+
+            paintActions(payload.actions);
             transcripts = payload.project?.transcripts ?? [];
             upload.syncTranscripts(transcripts);
             bindRetry();
         });
+    }
+
+    /**
+     * Paints the polish and summary controls from the server's view of the
+     * job. A queued job keeps its button disabled and spinning until a later
+     * poll reports it finished.
+     *
+     * Called with no argument to repaint from the last known server state,
+     * which is how the acting lock is applied and released.
+     */
+    function paintActions(actions) {
+        if (actions) {
+            lastActions = actions;
+        }
+
+        if (!lastActions) {
+            return;
+        }
+
+        const state = lastActions;
+        const polishing = Boolean(state.polishing);
+        // One action at a time, the way the old dialogs shared `isActing`.
+        const busy = acting || polishing;
+
+        $('#open-polish').prop('disabled', busy);
+        $('#open-polish-label').text(state.polish_label);
+        $('#polish-icon').prop('hidden', polishing);
+        $('#open-polish-spinner').prop('hidden', !polishing);
+
+        $('#polish-submit').prop('disabled', busy || !state.has_raw);
+        $('#polish-submit-label').text(state.polish_label);
+        $('#polish-spinner').prop('hidden', !polishing);
+        $('#polish-replace-note').prop('hidden', !state.has_cleaned_text);
+
+        $('#undo-polish')
+            .prop('hidden', !state.can_undo_polish)
+            .prop('disabled', busy);
+
+        $('#open-summary').prop('disabled', acting);
+        $('#summary-icon').prop('hidden', Boolean(state.summarizing));
+        $('#open-summary-spinner').prop('hidden', !state.summarizing);
+
+        // Lives in the panel the poll replaces, so re-apply the lock each time.
+        $('#summary-create').prop(
+            'disabled',
+            acting || state.summarizing || !state.has_raw,
+        );
+    }
+
+    /** Locks every transcript action while one of them is in flight. */
+    function setActing(active) {
+        acting = active;
+        paintActions();
     }
 
     const hasPendingWork = () =>
@@ -230,6 +383,54 @@ $(function () {
         $('#mode-upload').prop('hidden', mode !== 'upload');
     }
 
+    // --- Dock visibility ----------------------------------------------------
+
+    const dockStorageKey = 'jerva.workspace.controls-hidden';
+    let dockHidden = false;
+
+    function readDockPreference() {
+        try {
+            return localStorage.getItem(dockStorageKey) === 'true';
+        } catch {
+            return false;
+        }
+    }
+
+    function setDockHidden(hidden, persist = false) {
+        dockHidden = hidden;
+
+        $('#workspace-dock-controls').prop('hidden', hidden);
+        $('#workspace-transcript-scroll').css(
+            'padding-bottom',
+            hidden ? '5rem' : '',
+        );
+        $('#workspace-dock-toggle')
+            .attr('aria-expanded', String(!hidden))
+            .attr(
+                'title',
+                hidden ? 'Show workspace controls' : 'Hide workspace controls',
+            );
+        $('#workspace-dock-hide-icon').prop('hidden', hidden);
+        $('#workspace-dock-show-icon').prop('hidden', !hidden);
+        $('#workspace-dock-toggle-label').text(
+            hidden ? 'Show controls' : 'Hide controls',
+        );
+
+        if (persist) {
+            try {
+                localStorage.setItem(dockStorageKey, String(hidden));
+            } catch {
+                // The controls still work when browser storage is unavailable.
+            }
+        }
+    }
+
+    setDockHidden(readDockPreference());
+
+    $('#workspace-dock-toggle').on('click', () => {
+        setDockHidden(!dockHidden, true);
+    });
+
     // --- Transcript actions --------------------------------------------------
 
     const transcriptId = () => $('[data-transcript-id]').data('transcript-id');
@@ -278,14 +479,23 @@ $(function () {
             $('[data-polish-preset].bg-blue-50').data('polish-preset') ??
             'custom';
 
-        $(this).prop('disabled', true);
+        // Stays disabled after the request: refreshStatus paints the queued
+        // job, and only a later poll reporting it finished re-enables it.
+        setActing(true);
+        $('#polish-spinner').prop('hidden', false);
+        $('#polish-submit-label').text('Polishing');
         showUpgrade('');
 
         postAction(actionUrl('polish'), { preset, instruction })
             .done(() => {
                 $('#polish-modal').addClass('hidden');
                 polling.start();
-                void refreshStatus();
+                // The server now reports polish_status=processing, so the
+                // buttons stay down after the lock lifts. Wrapped because
+                // refreshStatus may hand back a native promise.
+                void Promise.resolve(refreshStatus()).finally(() =>
+                    setActing(false),
+                );
             })
             .fail((xhr) => {
                 const payload = xhr.responseJSON ?? {};
@@ -297,12 +507,18 @@ $(function () {
                 } else {
                     notify(message, 'error');
                 }
-            })
-            .always(() => $(this).prop('disabled', false));
+
+                // The job never started, so hand the buttons back.
+                $('#polish-spinner').prop('hidden', true);
+                $('#polish-submit-label').text('Polish');
+                setActing(false);
+            });
     });
 
+    // Undo completes inside the request, so the buttons come straight back.
     $('#undo-polish').on('click', function () {
-        $(this).prop('disabled', true);
+        setActing(true);
+        $('#undo-polish-label').text('Undoing');
 
         postAction(actionUrl('polish/undo'))
             .done((payload) => {
@@ -315,18 +531,33 @@ $(function () {
                     'error',
                 ),
             )
-            .always(() => $(this).prop('disabled', false));
+            .always(() => {
+                $('#undo-polish-label').text('Undo');
+                setActing(false);
+            });
     });
 
-    $('#summary-create').on('click', function () {
-        $(this).prop('disabled', true);
+    // Delegated: refreshStatus replaces #summary-panel, so the button this
+    // fires on is not the one that was in the DOM at load.
+    $(document).on('click', '#summary-create', function () {
+        $(this).prop('disabled', true).text('Summarizing');
+        summaryBusy = true;
+        setActing(true);
         showUpgrade('');
+
+        const release = () => {
+            summaryBusy = false;
+
+            // Repaints the panel with the progress bar and status pill.
+            void Promise.resolve(refreshStatus()).finally(() =>
+                setActing(false),
+            );
+        };
 
         postAction(actionUrl('summarize'))
             .done(() => {
                 polling.start();
-                void refreshStatus();
-                notify('Summary requested.');
+                release();
             })
             .fail((xhr) => {
                 const payload = xhr.responseJSON ?? {};
@@ -339,11 +570,17 @@ $(function () {
                 } else {
                     notify(message, 'error');
                 }
-            })
-            .always(() => $(this).prop('disabled', false));
+
+                release();
+            });
     });
 
     /** Exports stream a file, so the browser download path is used directly. */
+    /**
+     * Builds the file and hands it to the browser. The export finishes within
+     * this request, so the caller restores the button afterwards rather than
+     * waiting on a poll.
+     */
     async function exportTranscript(format, source) {
         const url = `${actionUrl('export')}?format=${format}&source=${source}`;
         const response = await fetch(url, {
@@ -366,25 +603,55 @@ $(function () {
 
         const blob = await response.blob();
         const disposition = response.headers.get('Content-Disposition');
+        const filename =
+            disposition?.match(/filename="?([^"]+)"?/i)?.[1] ??
+            `transcript.${format}`;
         const link = document.createElement('a');
 
         link.href = URL.createObjectURL(blob);
-        link.download =
-            disposition?.match(/filename="?([^"]+)"?/i)?.[1] ??
-            `transcript.${format}`;
+        link.download = filename;
         link.click();
         URL.revokeObjectURL(link.href);
+        notify(`Export download started: ${filename}`);
+    }
+
+    /**
+     * Holds a group of buttons down while one of them runs, and shows the
+     * running label on the one that was clicked.
+     */
+    async function whileExporting($clicked, run) {
+        const label = $clicked.text().trim();
+        const $all = $(
+            '[data-export-transcript], [data-summary-export-format]',
+        );
+
+        $all.prop('disabled', true);
+        $clicked.text('Exporting');
+
+        try {
+            await run();
+        } finally {
+            $clicked.text(label);
+            $all.prop('disabled', false);
+            // The server decides what stays disabled once the panel repaints.
+            void refreshStatus();
+        }
     }
 
     $('[data-export-transcript]').on('click', function () {
-        void exportTranscript(
-            $(this).data('export-transcript'),
-            $('#export-source').val(),
+        void whileExporting($(this), () =>
+            exportTranscript(
+                $(this).data('export-transcript'),
+                $('#export-source').val(),
+            ),
         );
     });
 
-    $('[data-summary-export-format]').on('click', function () {
-        void exportTranscript($(this).data('export-summary'), 'summary');
+    // Delegated for the same reason as #summary-create.
+    $(document).on('click', '[data-summary-export-format]', function () {
+        void whileExporting($(this), () =>
+            exportTranscript($(this).data('summary-export-format'), 'summary'),
+        );
     });
 
     // --- Project delete ------------------------------------------------------
@@ -425,6 +692,10 @@ $(function () {
     $(document).on('keydown', (event) => {
         if (event.key === 'Escape') {
             $('[data-modal]').addClass('hidden');
+
+            if (sidebarVisible && !desktopSidebar.matches) {
+                setSidebarVisible(false, true);
+            }
         }
     });
 

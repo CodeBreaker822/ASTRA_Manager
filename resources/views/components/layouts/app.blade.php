@@ -53,6 +53,7 @@
     </div>
 </div>
 
+@include('partials.settings-modal')
 @include('partials.flash')
 @stack('scripts')
 </body>

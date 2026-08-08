@@ -18,11 +18,21 @@ class ProfileController extends Controller
      */
     public function edit(Request $request): View
     {
-        return view('settings.profile', [
+        return view('settings.profile', $this->panelData($request));
+    }
+
+    /**
+     * The profile panel's data, shared by the page and the settings overlay.
+     *
+     * @return array<string, mixed>
+     */
+    public function panelData(Request $request): array
+    {
+        return [
             'user' => $request->user(),
             'mustVerifyEmail' => $request->user() instanceof MustVerifyEmail,
             'status' => $request->session()->get('status'),
-        ]);
+        ];
     }
 
     /**

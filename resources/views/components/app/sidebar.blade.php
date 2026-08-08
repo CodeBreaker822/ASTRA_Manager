@@ -51,7 +51,7 @@
         </div>
         <div class="-mx-1 my-1 h-px bg-slate-200"></div>
 
-        <a href="{{ route('profile.edit') }}" role="menuitem"
+        <a href="{{ $settingsHref('profile') }}" role="menuitem"
            class="flex w-full cursor-pointer items-center rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground">
             <x-icon name="settings" class="mr-2 size-4" />
             Settings

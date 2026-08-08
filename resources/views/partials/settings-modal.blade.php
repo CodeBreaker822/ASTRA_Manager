@@ -1,0 +1,62 @@
+@if ($settingsTab)
+    <div class="fixed inset-0 z-50 bg-blue-950/30 p-4 sm:p-6" data-settings-overlay>
+        <div class="mx-auto flex h-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+            <header class="flex h-16 shrink-0 items-center justify-between border-b border-blue-200 px-5">
+                <div>
+                    <h2 class="text-lg font-semibold text-black">Settings</h2>
+                    <p class="text-sm text-blue-900">Manage your profile and account settings</p>
+                </div>
+                <a href="{{ $settingsCloseHref }}" aria-label="Close settings"
+                   class="grid size-10 place-items-center rounded-lg border border-blue-200 text-blue-900 transition hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700">
+                    <x-icon name="x" class="size-4" />
+                </a>
+            </header>
+
+            <div class="grid min-h-0 flex-1 lg:grid-cols-[14rem_minmax(0,1fr)]">
+                <aside class="flex min-h-0 flex-col border-b border-blue-200 bg-white p-3 lg:border-r lg:border-b-0">
+                    <nav class="grid gap-1" aria-label="Settings">
+                        @foreach ($settingsTabs as $item)
+                            <a href="{{ $item['href'] }}"
+                               @class([
+                                   'flex h-10 items-center gap-3 rounded-lg px-3 text-sm font-medium text-black transition hover:bg-blue-50 hover:text-blue-700',
+                                   'bg-blue-100 text-blue-800 shadow-[inset_3px_0_0_#2563eb]' => $item['active'],
+                               ])
+                               @if ($item['active']) aria-current="page" @endif>
+                                <x-icon :name="$item['icon']" class="size-4" />
+                                <span>{{ $item['title'] }}</span>
+                            </a>
+                        @endforeach
+                    </nav>
+
+                    <div class="mt-3 border-t border-blue-200 pt-3 lg:mt-auto">
+                        <form method="POST" action="{{ route('logout') }}">
+                            @csrf
+                            <button type="submit" data-test="settings-logout-button"
+                                    class="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-red-700 transition hover:bg-red-50 hover:text-red-800">
+                                <x-icon name="log-out" class="size-4" />
+                                <span>Log out</span>
+                            </button>
+                        </form>
+                    </div>
+                </aside>
+
+                <main class="min-h-0 [scrollbar-gutter:stable] overflow-y-auto px-5 py-5 sm:px-6">
+                    <section class="max-w-5xl space-y-10">
+                        @if ($settingsLocked)
+                            <div class="space-y-4">
+                                <x-ui.heading variant="small" title="Security"
+                                              description="Confirm your password to manage two-factor authentication" />
+                                <p class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                                    Two-factor settings stay hidden until you confirm your password again.
+                                </p>
+                                <x-ui.button :href="route('security.edit')">Confirm password</x-ui.button>
+                            </div>
+                        @else
+                            @include('settings.panels.'.$settingsTab)
+                        @endif
+                    </section>
+                </main>
+            </div>
+        </div>
+    </div>
+@endif

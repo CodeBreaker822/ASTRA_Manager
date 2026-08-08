@@ -38,6 +38,21 @@ class BillingController extends Controller
         PayMongoWalletTopupReconciler $reconciler,
         PlanService $plans,
     ): View {
+        return view('settings.billing', $this->panelData($request, $entitlements, $payMongo, $reconciler, $plans));
+    }
+
+    /**
+     * The billing panel's data, shared by the page and the settings overlay.
+     *
+     * @return array<string, mixed>
+     */
+    public function panelData(
+        Request $request,
+        EntitlementService $entitlements,
+        PayMongoCheckoutService $payMongo,
+        PayMongoWalletTopupReconciler $reconciler,
+        PlanService $plans,
+    ): array {
         $user = $request->user();
         abort_unless($user instanceof User, 403);
 
@@ -47,7 +62,7 @@ class BillingController extends Controller
         $tiers = $plans->tiersForDisplay();
         $paygPlan = collect($tiers)->firstWhere('key', 'payg');
 
-        return view('settings.billing', [
+        return [
             'billing' => [
                 'checkout_available' => $payMongo->isConfiguredForWalletTopup(),
             ],
@@ -72,7 +87,7 @@ class BillingController extends Controller
             'paymentMethods' => collect($payMongo->paymentMethodTypes())
                 ->map(fn (string $method): string => mb_strtoupper(str_replace('_', ' ', $method)))
                 ->implode(', '),
-        ]);
+        ];
     }
 
     public function checkout(Request $request, PayMongoCheckoutService $payMongo): RedirectResponse|SymfonyResponse

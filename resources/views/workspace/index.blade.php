@@ -3,16 +3,23 @@
           data-workspace
           data-project-id="{{ $project['id'] ?? '' }}"
           data-can-use-live="{{ $canUseLive ? '1' : '' }}"
-          data-has-pending="{{ $hasPendingWork ? '1' : '' }}">
+          data-has-pending="{{ $hasPendingWork ? '1' : '' }}"
+          data-actions="{{ json_encode($actions) }}">
         <div class="flex min-h-dvh flex-col overflow-y-auto lg:h-screen lg:min-h-0 lg:flex-row lg:overflow-hidden">
 
-            <aside class="flex max-h-[48dvh] w-full shrink-0 flex-col border-b border-slate-200 bg-slate-50 lg:max-h-none lg:min-h-0 lg:w-[19rem] lg:border-r lg:border-b-0">
+            <aside id="workspace-sidebar" aria-label="Workspace navigation"
+                   class="fixed inset-y-0 left-0 z-50 hidden h-dvh w-[min(19rem,calc(100vw-3rem))] shrink-0 flex-col border-r border-slate-200 bg-slate-50 shadow-2xl lg:static lg:z-auto lg:flex lg:h-auto lg:min-h-0 lg:w-[19rem] lg:shadow-none">
                 <div class="border-b border-slate-200 p-4">
                     <div class="flex h-[72px] items-center gap-3 px-2">
                         <img src="/JervaLogo.png" alt="JERVA Transcriber" class="h-10 w-10 shrink-0 object-contain">
-                        <div class="min-w-0">
+                        <div class="min-w-0 flex-1">
                             <h1 class="text-base font-semibold text-slate-950">JERVA Transcriber</h1>
                         </div>
+                        <button type="button" id="workspace-sidebar-close"
+                                aria-label="Hide workspace navigation"
+                                class="grid size-10 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:outline-none lg:hidden">
+                            <x-icon name="menu" class="size-5" />
+                        </button>
                     </div>
 
                     <button type="button" data-open-modal="#create-project-modal"
@@ -51,7 +58,7 @@
                 </div>
 
                 <div class="border-t border-slate-200 p-4">
-                    <a href="{{ route('billing.edit') }}"
+                    <a href="{{ $settingsHref('billing') }}"
                        aria-label="View free minutes and credit balance"
                        class="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 bg-white text-left transition-colors hover:border-slate-300 hover:bg-slate-50">
                         <div class="min-w-0 px-3 py-2.5">
@@ -71,7 +78,7 @@
                             <p class="truncate text-sm font-semibold text-slate-950">{{ $user->email }}</p>
                             <p class="text-xs text-slate-600">Signed in</p>
                         </div>
-                        <a href="{{ route('profile.edit') }}" aria-label="Settings"
+                        <a href="{{ $settingsHref('profile') }}" aria-label="Settings"
                            class="grid size-10 place-items-center rounded-lg hover:bg-accent hover:text-accent-foreground">
                             <x-icon name="settings" class="size-5" />
                         </a>
@@ -79,14 +86,27 @@
                 </div>
             </aside>
 
+            <button type="button" id="workspace-sidebar-backdrop" hidden
+                    aria-label="Close workspace navigation"
+                    class="fixed inset-0 z-40 bg-blue-950/30 backdrop-blur-[1px] lg:hidden"></button>
+
             <section class="relative flex min-h-[70dvh] min-w-0 flex-1 flex-col bg-white lg:min-h-0">
                 <header class="flex h-[72px] shrink-0 items-center justify-between border-b border-slate-200 px-4 lg:px-6">
-                    <div class="min-w-0">
-                        <p class="text-xs font-semibold tracking-wide text-blue-600 uppercase">Transcript</p>
-                        <h2 class="truncate text-lg font-semibold text-slate-950">{{ $title }}</h2>
+                    <div class="flex min-w-0 items-center gap-3">
+                        <button type="button" id="workspace-sidebar-toggle"
+                                aria-controls="workspace-sidebar" aria-expanded="true"
+                                aria-label="Toggle workspace navigation"
+                                class="grid size-10 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:outline-none">
+                            <x-icon name="menu" class="size-5" />
+                        </button>
+
+                        <div class="min-w-0">
+                            <p class="text-xs font-semibold tracking-wide text-blue-600 uppercase">Transcript</p>
+                            <h2 class="truncate text-lg font-semibold text-slate-950">{{ $title }}</h2>
+                        </div>
                     </div>
                     <div class="flex shrink-0 items-center gap-2">
-                        <a href="{{ route('profile.edit') }}" aria-label="Settings"
+                        <a href="{{ $settingsHref('profile') }}" aria-label="Settings"
                            class="grid size-10 place-items-center rounded-lg border border-slate-200 hover:bg-accent">
                             <x-icon name="settings" class="size-5" />
                         </a>
@@ -94,11 +114,12 @@
                 </header>
 
                 <div class="min-h-0 flex-1 overflow-hidden">
-                    <div class="h-full w-full [scrollbar-gutter:stable] overflow-y-auto px-4 pt-6 pb-40 lg:px-8 lg:pb-32">
+                    <div id="workspace-transcript-scroll"
+                         class="h-full w-full [scrollbar-gutter:stable] overflow-y-auto px-4 pt-6 pb-52 lg:px-8 lg:pb-40">
                         <div id="upgrade-banner" hidden
                              class="mb-4 flex items-center justify-between gap-4 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
                             <span id="upgrade-message"></span>
-                            <a href="{{ route('billing.edit') }}" class="shrink-0 font-semibold text-blue-700">View plans</a>
+                            <a href="{{ $settingsHref('billing') }}" class="shrink-0 font-semibold text-blue-700">View plans</a>
                         </div>
 
                         <div id="transcript-body">

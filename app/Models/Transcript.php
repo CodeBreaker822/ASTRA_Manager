@@ -17,7 +17,7 @@ use Illuminate\Support\Carbon;
  * @property int $duration_seconds
  * @property string|null $raw_text
  * @property string|null $cleaned_text
- * @property array<int, string|null>|null $polish_history
+ * @property array<int, string|null|array{text: string|null, sections: array<string, string|null>}>|null $polish_history
  * @property string|null $summary_text
  * @property string|null $audio_path
  * @property array<int, array<string, mixed>>|null $processing_log
@@ -47,6 +47,11 @@ use Illuminate\Support\Carbon;
 ])]
 class Transcript extends Model
 {
+    /**
+     * `polish_history` holds undo snapshots, newest last. Entries written
+     * before polishing became per-section are a bare string; newer ones also
+     * carry each section's previous text so undo can restore the rows.
+     */
     protected function casts(): array
     {
         return [

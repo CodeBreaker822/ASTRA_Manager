@@ -1,13 +1,23 @@
-<div class="pointer-events-none absolute inset-x-0 bottom-0 px-3 py-3 lg:px-6 lg:py-4">
-    <div class="pointer-events-auto mx-auto flex w-full max-w-[calc(100%-1rem)] flex-col items-center justify-center gap-3 lg:max-w-[calc(100%-2rem)] lg:gap-4">
+<div class="pointer-events-none fixed right-0 bottom-0 left-0 z-30 px-3 py-3 transition-[left] lg:left-[var(--workspace-sidebar-width,19rem)] lg:px-6 lg:py-4">
+    <div class="pointer-events-auto mx-auto flex w-full max-w-[calc(100%-1rem)] flex-col items-center justify-center gap-2 lg:max-w-[calc(100%-2rem)]">
+        <button type="button" id="workspace-dock-toggle"
+                aria-controls="workspace-dock-controls" aria-expanded="true"
+                class="inline-flex h-9 cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 shadow-[0_8px_24px_rgba(15,23,42,0.12)] transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:outline-none">
+            <x-icon name="eye-off" id="workspace-dock-hide-icon" />
+            <x-icon name="eye" id="workspace-dock-show-icon" hidden />
+            <span id="workspace-dock-toggle-label">Hide controls</span>
+        </button>
 
-        <input type="file" id="upload-input" class="hidden"
-               accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm">
+        <div id="workspace-dock-controls"
+             class="flex w-full flex-col items-center justify-center gap-3 lg:gap-4">
 
-        <div id="mode-choose" class="{{ config('ui.workspace.dock.panel') }} mx-auto" @if ($mode !== 'choose') hidden @endif>
-            <button type="button" id="choose-live" class="{{ config('ui.workspace.dock.mode_button') }}">Live</button>
-            <button type="button" id="choose-upload" class="{{ config('ui.workspace.dock.mode_button') }}">Upload Audio</button>
-        </div>
+            <input type="file" id="upload-input" class="hidden"
+                   accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm">
+
+            <div id="mode-choose" class="{{ config('ui.workspace.dock.panel') }} mx-auto" @if ($mode !== 'choose') hidden @endif>
+                <button type="button" id="choose-live" class="{{ config('ui.workspace.dock.mode_button') }}">Live</button>
+                <button type="button" id="choose-upload" class="{{ config('ui.workspace.dock.mode_button') }}">Upload Audio</button>
+            </div>
 
         <div id="mode-live" class="{{ config('ui.workspace.dock.panel') }}" @if ($mode !== 'live') hidden @endif>
             <button type="button" id="live-toggle" aria-pressed="false"
@@ -76,28 +86,40 @@
             </button>
         </div>
 
-        @if ($showActions)
-            <div class="order-2 flex w-full flex-wrap items-center justify-center gap-2 rounded-lg border border-blue-100 bg-white p-1.5 shadow-[0_12px_32px_rgba(15,23,42,0.08)] sm:w-fit"
-                 data-transcript-id="{{ $primaryTranscript['id'] ?? '' }}">
+            @if ($showActions)
+                <div role="toolbar" aria-label="Transcript actions"
+                     class="order-2 flex w-full flex-wrap items-center justify-center gap-2 rounded-lg border border-blue-100 bg-white p-1.5 shadow-[0_12px_32px_rgba(15,23,42,0.08)] sm:w-fit"
+                     data-transcript-id="{{ $primaryTranscript['id'] ?? '' }}">
 
-                <button type="button" data-open-modal="#polish-modal" class="{{ config('ui.workspace.dock.action_primary') }}"
-                        @disabled(! $primaryTranscript || ($primaryTranscript['polish_status'] ?? '') === 'processing')>
-                    <x-icon name="sparkles" />
-                    {{ ($primaryTranscript['polish_status'] ?? '') === 'processing' ? 'Polishing' : 'Polish' }}
+                <button type="button" id="open-polish" data-open-modal="#polish-modal"
+                        class="{{ config('ui.workspace.dock.action_primary') }}"
+                        @disabled(! $primaryTranscript || $actions['polishing'])>
+                    <span id="polish-icon" class="inline-flex" @if ($actions['polishing']) hidden @endif>
+                        <x-icon name="sparkles" />
+                    </span>
+                    <span id="open-polish-spinner" class="inline-flex" @if (! $actions['polishing']) hidden @endif>
+                        <x-ui.spinner />
+                    </span>
+                    <span id="open-polish-label">{{ $actions['polish_label'] }}</span>
                 </button>
 
-                @if ($primaryTranscript && $primaryTranscript['can_undo_polish'])
-                    <button type="button" id="undo-polish" class="{{ config('ui.workspace.dock.action_plain') }}"
-                            @disabled($primaryTranscript['polish_status'] === 'processing')>
-                        <x-icon name="undo-2" />
-                        Undo
-                    </button>
-                @endif
+                <button type="button" id="undo-polish" class="{{ config('ui.workspace.dock.action_plain') }}"
+                        @disabled($actions['polishing'])
+                        @if (! $actions['can_undo_polish']) hidden @endif>
+                    <x-icon name="undo-2" />
+                    <span id="undo-polish-label">Undo</span>
+                </button>
 
-                <button type="button" data-open-modal="#summary-modal" class="{{ config('ui.workspace.dock.action_primary') }}"
+                <button type="button" id="open-summary" data-open-modal="#summary-modal"
+                        class="{{ config('ui.workspace.dock.action_primary') }}"
                         @disabled(! $primaryTranscript)>
-                    <x-icon name="file-text" />
-                    Summary
+                    <span id="summary-icon" class="inline-flex" @if ($actions['summarizing']) hidden @endif>
+                        <x-icon name="file-text" />
+                    </span>
+                    <span id="open-summary-spinner" class="inline-flex" @if (! $actions['summarizing']) hidden @endif>
+                        <x-ui.spinner />
+                    </span>
+                    <span>Summary</span>
                 </button>
 
                 <button type="button" data-open-modal="#export-modal" class="{{ config('ui.workspace.dock.action_plain') }}"
@@ -111,8 +133,9 @@
                     <x-icon name="list-checks" />
                     Log
                 </button>
-            </div>
-        @endif
+                </div>
+            @endif
+        </div>
     </div>
 </div>
 

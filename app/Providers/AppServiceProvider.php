@@ -5,19 +5,28 @@ namespace App\Providers;
 use App\Gates\APIManagerGates;
 use App\Gates\CmsGates;
 use App\Gates\UserGates;
+use App\Http\Controllers\Settings\BillingController;
+use App\Http\Controllers\Settings\ProfileController;
+use App\Http\Controllers\Settings\SecurityController;
+use App\Http\Requests\Settings\TwoFactorAuthenticationRequest;
 use App\Models\Transcript;
 use App\Models\TranscriptProject;
 use App\Models\User;
 use App\Policies\TranscriptPolicy;
 use App\Policies\TranscriptProjectPolicy;
-use App\Services\PageContentService;
+use App\Services\Billing\EntitlementService;
+use App\Services\Billing\PayMongoCheckoutService;
 use App\Services\Billing\PayMongoWalletTopupReconciler;
+use App\Services\Billing\PlanService;
+use App\Services\PageContentService;
 use App\Support\FlashNotification;
 use App\Support\Nav;
+use App\Support\SettingsPanel;
 use Carbon\CarbonImmutable;
 use GuzzleHttp\Utils as GuzzleUtils;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Contracts\View\View as ViewContract;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -58,6 +67,10 @@ class AppServiceProvider extends ServiceProvider
      */
     protected function shareNavigation(): void
     {
+        // Every "Settings" link opens the overlay on the page it was clicked
+        // from, so the URL keeps the current path and only gains the parameter.
+        View::share('settingsHref', fn (string $tab): string => SettingsPanel::href(request(), $tab));
+
         View::composer('components.app.sidebar', function (ViewContract $view): void {
             $user = Auth::user();
 
@@ -73,6 +86,25 @@ class AppServiceProvider extends ServiceProvider
                 'settingsTabs' => Nav::settingsTabs(),
                 'navHome' => Nav::home(Auth::user()),
             ]);
+        });
+
+        // Settings open over the current page, so the panel data has to be
+        // resolved here rather than by whichever controller owns that page.
+        View::composer('partials.settings-modal', function (ViewContract $view): void {
+            $request = request();
+            $tab = SettingsPanel::activeTab($request);
+            $locked = $tab === 'security' && ! SettingsPanel::securityUnlocked($request);
+
+            $view->with([
+                'settingsTab' => $tab,
+                'settingsTabs' => SettingsPanel::tabs($request),
+                'settingsCloseHref' => SettingsPanel::closeHref($request),
+                'settingsLocked' => $locked,
+            ]);
+
+            if ($tab !== null && ! $locked) {
+                $view->with($this->settingsPanelData($tab, $request));
+            }
         });
 
         // $errors only exists inside the web middleware group, so read it from
@@ -113,6 +145,30 @@ class AppServiceProvider extends ServiceProvider
                 config('marketing.pages.site', []),
             )));
         });
+    }
+
+    /**
+     * Asks the owning controller for the open tab's data, so the overlay and
+     * the standalone page always render from the same source.
+     *
+     * @return array<string, mixed>
+     */
+    protected function settingsPanelData(string $tab, Request $request): array
+    {
+        return match ($tab) {
+            'profile' => app(ProfileController::class)->panelData($request),
+            'security' => app(SecurityController::class)->panelData(
+                app(TwoFactorAuthenticationRequest::class),
+            ),
+            'billing' => app(BillingController::class)->panelData(
+                $request,
+                app(EntitlementService::class),
+                app(PayMongoCheckoutService::class),
+                app(PayMongoWalletTopupReconciler::class),
+                app(PlanService::class),
+            ),
+            default => [],
+        };
     }
 
     /**

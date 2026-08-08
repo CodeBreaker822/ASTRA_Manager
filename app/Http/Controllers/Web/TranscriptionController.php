@@ -6,13 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Models\Transcript;
 use App\Models\TranscriptProject;
 use App\Models\User;
-use App\Services\ChunkedUploadService;
 use App\Services\Billing\EntitlementService;
 use App\Services\Billing\PayMongoWalletTopupReconciler;
-use App\Services\Web\TranscriptionWorkflowService;
-use App\Services\Web\TranscriptPayloadPresenter;
+use App\Services\ChunkedUploadService;
 use App\Services\Transcription\WebApiTranscriptionClient;
 use App\Services\Transcription\WebTranscriptProcessor;
+use App\Services\Web\TranscriptionWorkflowService;
+use App\Services\Web\TranscriptPayloadPresenter;
 use App\Support\WorkspaceView;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -283,14 +283,23 @@ class TranscriptionController extends Controller
         ];
 
         $mode = WorkspaceView::mode($presented);
+        $primaryTranscript = WorkspaceView::primaryTranscript($presented, $mode);
+        $actions = WorkspaceView::actionState($primaryTranscript);
 
-        // `html` is the transcript pane rendered by blade so the client never
-        // builds markup. `project` keeps the original response shape.
+        // `html` and `summary` are rendered by blade so the client never builds
+        // markup; `actions` drives the button states. `project` keeps the
+        // original response shape.
         return response()->json([
             'html' => view(
                 'workspace.partials.transcript',
                 WorkspaceView::transcriptPane($presented, $mode),
             )->render(),
+            'summary' => view('workspace.partials.summary-panel', [
+                'actions' => $actions,
+                'summaryText' => (string) ($primaryTranscript['summary_text'] ?? ''),
+                'hasRaw' => WorkspaceView::hasRawText($primaryTranscript),
+            ])->render(),
+            'actions' => $actions,
             'project' => $presented,
             'entitlements' => $entitlements->summaryFor($user),
         ]);

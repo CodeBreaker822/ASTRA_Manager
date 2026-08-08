@@ -22,6 +22,9 @@
             <x-ui.label for="polish-instruction">Instructions</x-ui.label>
             <x-ui.textarea id="polish-instruction" rows="5">{{ config('workspace.polish_presets.'.config('workspace.default_polish_preset').'.instruction') }}</x-ui.textarea>
             <p id="polish-error" class="text-sm font-medium text-destructive" hidden></p>
+            <p id="polish-replace-note" class="text-sm text-slate-600" @if (! $actions['has_cleaned_text']) hidden @endif>
+                Polishing again starts from the version now displayed. You can undo it afterward.
+            </p>
         </div>
 
         @unless ($hasRaw)
@@ -32,9 +35,13 @@
 
         <div class="mt-4 flex justify-end gap-2">
             <button type="button" data-close-modal="#polish-modal" class="{{ config('ui.workspace.modal.cancel') }}">Cancel</button>
-            <button type="button" id="polish-submit" @disabled(! $hasRaw)
-                    class="h-10 cursor-pointer rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
-                Polish
+            <button type="button" id="polish-submit"
+                    @disabled(! $hasRaw || $actions['polishing'])
+                    class="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
+                <span id="polish-spinner" class="inline-flex" @if (! $actions['polishing']) hidden @endif>
+                    <x-ui.spinner />
+                </span>
+                <span id="polish-submit-label">{{ $actions['polishing'] ? 'Polishing' : 'Polish' }}</span>
             </button>
         </div>
     </div>
@@ -42,37 +49,15 @@
 
 <div id="summary-modal" data-modal class="{{ config('ui.workspace.modal.shell') }}">
     <div class="{{ config('ui.workspace.modal.card') }} max-w-2xl">
-        <div class="flex items-start justify-between gap-3">
-            <div>
-                <h3 class="text-base font-semibold text-slate-950">Summary</h3>
-                <p id="summary-status" class="mt-1 text-sm text-slate-600">{{ $summaryStatusMessage }}</p>
-            </div>
+        <div class="flex items-start justify-between gap-3 pb-2">
+            <h3 class="text-base font-semibold text-slate-950">{{ $title }}</h3>
             <button type="button" data-close-modal="#summary-modal" class="text-slate-400 hover:text-slate-600">
                 <x-icon name="x" class="size-5" />
             </button>
         </div>
 
-        <div id="summary-body"
-             class="mt-4 max-h-[50vh] overflow-y-auto rounded-lg border border-blue-100 bg-blue-50/50 p-4 text-sm leading-6 text-slate-800">
-            @if (filled($summaryText))
-                {!! \App\Support\SummaryMarkdown::render($summaryText) !!}
-            @else
-                <p class="text-blue-900">No summary has been created for this project.</p>
-            @endif
-        </div>
-
-        <div class="mt-4 flex flex-wrap justify-end gap-2">
-            <button type="button" id="summary-create" @disabled(! $hasRaw || $primaryTranscript['summary_status'] === 'processing')
-                    class="h-10 cursor-pointer rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
-                {{ $primaryTranscript['summary_status'] === 'processing' ? 'Summarizing' : 'Create summary' }}
-            </button>
-            @foreach (config('workspace.export_formats') as $format => $label)
-                <button type="button" data-summary-export-format="{{ $format }}"
-                        @disabled(blank($summaryText))
-                        class="h-10 cursor-pointer rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50">
-                    {{ $label }}
-                </button>
-            @endforeach
+        <div id="summary-panel">
+            @include('workspace.partials.summary-panel')
         </div>
     </div>
 </div>

@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\Transcription\TranscriptExportService;
 use App\Services\Transcription\WebAudioChunkerService;
 use App\Support\SummaryMarkdown;
+use App\Support\WorkspaceView;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
@@ -694,21 +695,32 @@ test('workspace summary modal follows the jerva summary design surface', functio
         ->toContain('text-blue-900')
         ->toContain('No summary has been created for this project.');
 
-    $modals = File::get(resource_path('views/workspace/partials/action-modals.blade.php'));
+    // The summary body is its own partial now so the status poll can swap it.
+    $panel = File::get(resource_path('views/workspace/partials/summary-panel.blade.php'));
 
-    expect($modals)
+    expect($panel)
         ->toContain('SummaryMarkdown::render')
         ->toContain('data-summary-export-format')
         ->toContain('No summary has been created for this project.')
         // The summary modal offers formats only; no source picker or icons.
         ->not->toContain('summary_source');
 
+    expect(File::get(resource_path('views/workspace/partials/action-modals.blade.php')))
+        ->toContain("@include('workspace.partials.summary-panel')")
+        ->not->toContain('summary_source');
+
     // The overlay tint is a shared token now, so assert it where it lives.
     expect(config('ui.workspace.modal.shell'))->toContain('bg-blue-950/30');
 
-    $exportModal = str($modals)->after('{{-- Export --}}')->before('{{-- Processing log --}}')->toString();
+    // The export modal picks a source; the summary modal must not offer one.
+    $exportModal = str(File::get(resource_path('views/workspace/partials/action-modals.blade.php')))
+        ->after('id="export-modal"')
+        ->before('id="log-modal"')
+        ->toString();
 
-    expect($exportModal)->not->toContain('summary_source');
+    expect($exportModal)
+        ->toContain('export-source')
+        ->and($panel)->not->toContain('export-source');
 });
 
 test('transcript exports follow the jerva desktop document layout', function () {
@@ -935,3 +947,86 @@ function availableFfmpegBinary(): ?string
 
     return $process->isSuccessful() ? $binary : null;
 }
+
+test('polish and summary controls reflect the job state the server reports', function () {
+    $idle = [
+        'raw_text' => 'Some spoken words.',
+        'cleaned_text' => '',
+        'summary_text' => '',
+        'sections' => [],
+        'polish_status' => 'idle',
+        'summary_status' => 'idle',
+        'summary_error_message' => null,
+        'can_undo_polish' => false,
+    ];
+
+    $render = function (array $transcript): string {
+        return view('workspace.partials.summary-panel', [
+            'actions' => WorkspaceView::actionState($transcript),
+            'summaryText' => (string) $transcript['summary_text'],
+            'hasRaw' => WorkspaceView::hasRawText($transcript),
+        ])->render();
+    };
+
+    // A queued summary must show the progress bar and hold its button down.
+    $summarizing = $render([...$idle, 'summary_status' => 'processing']);
+
+    expect($summarizing)
+        ->toContain('animate-pulse')
+        ->toContain('Summarizing')
+        ->toContain('being prepared')
+        ->and($summarizing)->toMatch('/id="summary-create"[^>]*\sdisabled(?![:\w-])/');
+
+    // A finished summary renders its markdown and frees the export buttons.
+    $complete = $render([
+        ...$idle,
+        'summary_status' => 'complete',
+        'summary_text' => "# Points\n\n- One\n- Two",
+    ]);
+
+    expect($complete)
+        ->toContain('Replace summary')
+        ->toContain('<ul')
+        ->not->toContain('animate-pulse')
+        ->and($complete)->not->toMatch('/data-summary-export-format="txt"[^>]*\sdisabled(?![:\w-])/');
+
+    // A failure surfaces the reason instead of staying silent.
+    expect($render([
+        ...$idle,
+        'summary_status' => 'failed',
+        'summary_error_message' => 'The transcript could not be summarized.',
+    ]))->toContain('Failed')->toContain('could not be summarized');
+
+    // Polishing disables its button and offers undo once a polish exists.
+    expect(WorkspaceView::actionState([...$idle, 'polish_status' => 'processing']))
+        ->toMatchArray(['polishing' => true, 'polish_label' => 'Polishing']);
+
+    expect(WorkspaceView::actionState([...$idle, 'cleaned_text' => 'x', 'can_undo_polish' => true]))
+        ->toMatchArray(['polishing' => false, 'can_undo_polish' => true, 'has_cleaned_text' => true]);
+});
+
+test('the status poll returns the summary panel so a queued job updates in place', function () {
+    $user = User::factory()->create();
+    $project = TranscriptProject::query()->create([
+        'user_id' => $user->id,
+        'title' => 'Poll target',
+    ]);
+    Transcript::query()->create([
+        'project_id' => $project->id,
+        'source' => 'upload',
+        'status' => 'completed',
+        'duration_seconds' => 30,
+        'raw_text' => 'Some spoken words.',
+        'summary_status' => 'processing',
+    ]);
+
+    $response = $this->actingAs($user)
+        ->getJson(route('workspace.status', $project))
+        ->assertOk()
+        ->assertJsonPath('actions.summarizing', true)
+        ->assertJsonPath('actions.summary_status_label', 'Summarizing…');
+
+    expect($response->json('summary'))
+        ->toContain('animate-pulse')
+        ->toContain('being prepared');
+});

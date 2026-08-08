@@ -17,6 +17,16 @@ class SecurityController extends Controller
      */
     public function edit(TwoFactorAuthenticationRequest $request): View
     {
+        return view('settings.security', $this->panelData($request));
+    }
+
+    /**
+     * The security panel's data, shared by the page and the settings overlay.
+     *
+     * @return array<string, mixed>
+     */
+    public function panelData(TwoFactorAuthenticationRequest $request): array
+    {
         $props = [
             'canManageTwoFactor' => Features::canManageTwoFactorAuthentication(),
             'passwordRules' => Password::defaults()->toPasswordRulesString(),
@@ -49,7 +59,7 @@ class SecurityController extends Controller
             }
         }
 
-        return view('settings.security', $props);
+        return $props;
     }
 
     /**

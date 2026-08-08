@@ -176,29 +176,23 @@ class WorkspaceView
                 continue;
             }
 
-            $cleaned = trim((string) ($transcript['cleaned_text'] ?? ''));
-
-            if ($cleaned !== '') {
-                $first = $sections[0] ?? null;
-                $last = $sections === [] ? null : $sections[array_key_last($sections)];
-
-                $rows[] = [
-                    'range' => $first && $last
-                        ? self::timecode($first['started_at_ms'] ?? null).'-'.self::timecode($last['ended_at_ms'] ?? null)
-                        : '',
-                    'text' => $cleaned,
-                ];
-
-                continue;
-            }
-
+            // Sections win over the joined text so a polished transcript keeps
+            // one row per recorded minute instead of collapsing into a block.
             if ($sections !== []) {
                 foreach ($sections as $section) {
                     $rows[] = [
                         'range' => self::sectionRange($section),
-                        'text' => (string) ($section['cleaned_text'] ?? $section['text'] ?? ''),
+                        'text' => (string) ($section['cleaned_text'] ?: $section['text'] ?? ''),
                     ];
                 }
+
+                continue;
+            }
+
+            $cleaned = trim((string) ($transcript['cleaned_text'] ?? ''));
+
+            if ($cleaned !== '') {
+                $rows[] = ['range' => '', 'text' => $cleaned];
 
                 continue;
             }
@@ -265,20 +259,40 @@ class WorkspaceView
     }
 
     /**
-     * Status line shown at the top of the summary modal.
+     * Everything the polish and summary controls need to paint themselves.
+     * Recomputed on every status poll so a job that finishes in the background
+     * re-enables its buttons without a page load.
      *
      * @param  array<string, mixed>|null  $transcript
+     * @return array{polishing: bool, summarizing: bool, has_raw: bool, polish_label: string, can_undo_polish: bool, has_cleaned_text: bool, has_summary: bool, summary_status: string, summary_status_label: string, summary_button_label: string, summary_error: string}
      */
-    public static function summaryStatusMessage(?array $transcript): string
+    public static function actionState(?array $transcript): array
     {
-        $fallback = 'No summary has been created for this project.';
+        $summaryStatus = (string) ($transcript['summary_status'] ?? '');
+        $polishing = ($transcript['polish_status'] ?? null) === 'processing';
+        $summarizing = $summaryStatus === 'processing';
+        $hasSummary = trim((string) ($transcript['summary_text'] ?? '')) !== '';
 
-        return match ($transcript['summary_status'] ?? null) {
-            'processing' => 'Creating the summary…',
-            'complete' => 'Summary ready.',
-            'failed' => (string) ($transcript['summary_error_message'] ?: 'The transcript could not be summarized.'),
-            default => $fallback,
-        };
+        return [
+            'polishing' => $polishing,
+            'summarizing' => $summarizing,
+            'has_raw' => self::hasRawText($transcript),
+            'polish_label' => $polishing ? 'Polishing' : 'Polish',
+            'can_undo_polish' => (bool) ($transcript['can_undo_polish'] ?? false),
+            'has_cleaned_text' => trim((string) ($transcript['cleaned_text'] ?? '')) !== '',
+            'has_summary' => $hasSummary,
+            'summary_status' => $summaryStatus,
+            'summary_status_label' => match ($summaryStatus) {
+                'processing' => 'Summarizing…',
+                'complete' => 'Complete',
+                'failed' => 'Failed',
+                default => 'Ready',
+            },
+            'summary_button_label' => $hasSummary ? 'Replace summary' : 'Summarize',
+            'summary_error' => $summarizing
+                ? ''
+                : (string) ($transcript['summary_error_message'] ?? ''),
+        ];
     }
 
     /**

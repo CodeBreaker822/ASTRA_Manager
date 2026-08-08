@@ -100,7 +100,7 @@ class WorkspaceController extends Controller
             'showActions' => WorkspaceView::showActions($project, $mode),
             'hasRaw' => WorkspaceView::hasRawText($primaryTranscript),
             'summaryText' => (string) ($primaryTranscript['summary_text'] ?? ''),
-            'summaryStatusMessage' => WorkspaceView::summaryStatusMessage($primaryTranscript),
+            'actions' => WorkspaceView::actionState($primaryTranscript),
             'creditBalance' => Money::format($summary['usage']['wallet_balance_cents'] / 100, 'USD', 2, 2),
             'canUseUpload' => (bool) ($features['upload'] ?? false) && $project !== null,
             'canUseLive' => (bool) ($features['live'] ?? false) && $project !== null,

@@ -157,14 +157,26 @@ TEXT;
             throw new \RuntimeException('Transcript owner could not be resolved.');
         }
 
-        $result = $this->transcriptionClient->polish($user, $text, [], $instruction, 'polish');
-        $cleaned = trim((string) ($result['text'] ?? ''));
+        // Polishing section by section keeps every timestamp range intact. The
+        // API is told not to merge or re-split chunks, so what comes back lines
+        // up one-to-one with what went out.
+        $chunks = $this->polishChunks($transcript);
 
-        if ($cleaned === '') {
+        $result = $this->transcriptionClient->polish($user, $text, $chunks, $instruction, 'polish');
+
+        $polishedSections = $chunks === []
+            ? []
+            : $this->polishedSectionText($result);
+
+        $cleaned = $polishedSections === []
+            ? trim((string) ($result['text'] ?? ''))
+            : implode("\n\n", $polishedSections);
+
+        if (trim($cleaned) === '') {
             throw new \RuntimeException('Transcript could not be polished.');
         }
 
-        DB::transaction(function () use ($transcript, $user, $cleaned, $text): void {
+        DB::transaction(function () use ($transcript, $user, $cleaned, $text, $polishedSections): void {
             $lockedTranscript = Transcript::query()
                 ->whereKey($transcript->id)
                 ->lockForUpdate()
@@ -174,8 +186,25 @@ TEXT;
                 return;
             }
 
+            $sections = $lockedTranscript->sections()->orderBy('position')->get();
+
+            // The undo snapshot has to cover the sections too, now that they
+            // carry their own polished text.
             $history = array_values($lockedTranscript->polish_history ?? []);
-            $history[] = $lockedTranscript->cleaned_text;
+            $history[] = [
+                'text' => $lockedTranscript->cleaned_text,
+                'sections' => $sections
+                    ->mapWithKeys(fn (TranscriptSection $section): array => [
+                        (string) $section->id => $section->cleaned_text,
+                    ])
+                    ->all(),
+            ];
+
+            foreach ($sections as $section) {
+                if (array_key_exists($section->id, $polishedSections)) {
+                    $section->forceFill(['cleaned_text' => $polishedSections[$section->id]])->save();
+                }
+            }
 
             $lockedTranscript->forceFill([
                 'cleaned_text' => $cleaned,
@@ -189,6 +218,76 @@ TEXT;
         });
 
         return $cleaned;
+    }
+
+    /**
+     * One chunk per section, carrying the range so the provider can keep the
+     * timing wording consistent. Empty sections are skipped.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function polishChunks(Transcript $transcript): array
+    {
+        return $transcript->sections()
+            ->orderBy('position')
+            ->get()
+            ->map(fn (TranscriptSection $section): array => [
+                'audio_chunk_id' => $section->id,
+                'range_label' => self::rangeLabel($section->started_at_ms, $section->ended_at_ms),
+                'text' => (string) ($section->cleaned_text ?: $section->text),
+                'timestamps' => $section->speaker_timestamps ?? [],
+            ])
+            ->filter(fn (array $chunk): bool => trim($chunk['text']) !== '')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Maps the polished chunks back onto their section ids.
+     *
+     * @param  array<string, mixed>  $result
+     * @return array<int, string>
+     */
+    private function polishedSectionText(array $result): array
+    {
+        $chunks = $result['chunks'] ?? null;
+
+        if (! is_array($chunks)) {
+            return [];
+        }
+
+        $bySection = [];
+
+        foreach ($chunks as $chunk) {
+            if (! is_array($chunk)) {
+                continue;
+            }
+
+            $sectionId = (int) ($chunk['audio_chunk_id'] ?? 0);
+            $text = trim((string) ($chunk['text'] ?? ''));
+
+            if ($sectionId > 0 && $text !== '') {
+                $bySection[$sectionId] = $text;
+            }
+        }
+
+        return $bySection;
+    }
+
+    private static function rangeLabel(?int $startedAtMs, ?int $endedAtMs): ?string
+    {
+        if ($startedAtMs === null && $endedAtMs === null) {
+            return null;
+        }
+
+        $stamp = function (?int $ms): string {
+            $seconds = max(0, intdiv((int) $ms, 1000));
+
+            return str_pad((string) intdiv($seconds, 60), 2, '0', STR_PAD_LEFT)
+                .':'.str_pad((string) ($seconds % 60), 2, '0', STR_PAD_LEFT);
+        };
+
+        return $stamp($startedAtMs).'-'.$stamp($endedAtMs);
     }
 
     public function undoPolish(Transcript $transcript): Transcript
@@ -208,7 +307,19 @@ TEXT;
             }
 
             $history = array_values($lockedTranscript->polish_history ?? []);
-            $previous = $history === [] ? null : array_pop($history);
+            $entry = $history === [] ? null : array_pop($history);
+
+            // Snapshots taken before per-section polishing are a bare string.
+            $previous = is_array($entry) ? $entry['text'] : $entry;
+            $previousSections = is_array($entry) ? $entry['sections'] : [];
+
+            foreach ($lockedTranscript->sections()->get() as $section) {
+                if (array_key_exists((string) $section->id, $previousSections)) {
+                    $section->forceFill([
+                        'cleaned_text' => $previousSections[(string) $section->id],
+                    ])->save();
+                }
+            }
 
             $lockedTranscript->forceFill([
                 'cleaned_text' => filled($previous) ? (string) $previous : null,
