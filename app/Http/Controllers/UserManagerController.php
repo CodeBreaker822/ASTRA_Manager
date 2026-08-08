@@ -7,23 +7,30 @@ use App\Models\UserPermissions;
 use App\Models\UserPositions;
 use App\Services\LicenseKeyService;
 use App\Traits\Gates;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
-use Inertia\Inertia;
-use Inertia\Response;
 
 class UserManagerController extends Controller
 {
     use Gates;
 
-    public function index(): Response
+    /** Account states a manager can assign, keyed by stored value. */
+    private const STATUS_OPTIONS = [
+        'active' => 'Active',
+        'banned' => 'Banned',
+        'deactivated' => 'Deactivated',
+    ];
+
+    public function index(): View
     {
         Gate::authorize('user.manage-users');
 
-        return Inertia::render('dashboard/Users', [
+        return view('dashboard.users', [
             'users' => User::query()
                 ->with([
                     'position:id,position_name',
@@ -44,6 +51,13 @@ class UserManagerController extends Controller
                     'permissions' => $position->permissions->pluck('permission_name')->values(),
                 ]),
             'gates' => $this->getAllGates(),
+            'statusOptions' => self::STATUS_OPTIONS,
+            'positionOptions' => UserPositions::query()
+                ->orderBy('position_name')
+                ->pluck('position_name', 'id')
+                ->prepend('No position', '')
+                ->all(),
+            'currentUserId' => Auth::id(),
         ]);
     }
 

@@ -9,7 +9,6 @@ use App\Models\UserPositions;
 use App\Services\EntitlementService;
 use Database\Seeders\PlanTierSeeder;
 use Illuminate\Support\Facades\Cache;
-use Inertia\Testing\AssertableInertia;
 
 beforeEach(function () {
     $this->seed(PlanTierSeeder::class);
@@ -62,19 +61,19 @@ test('dashboard reconciles paid credits against refundable balances and tracked 
 
     $this->withoutVite();
 
-    $this->actingAs($manager)
+    $response = $this->actingAs($manager)
         ->get(route('dashboard', ['days' => 7]))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('dashboard/Index')
-            ->where('analytics.days', 7)
-            ->where('analytics.sales.paid_topups_cents', 10_000)
-            ->where('analytics.sales.refundable_balance_cents', 4_000)
-            ->where('analytics.sales.realized_credits_cents', 6_000)
-            ->where('analytics.sales.tracked_charges_cents', 6_000)
-            ->where('analytics.sales.pending_topups_cents', 2_500)
-            ->where('analytics.popular_pages.0.path', '/')
-            ->where('analytics.popular_pages.0.human_visits', 10));
+        ->assertViewIs('dashboard.index');
+
+    expectViewPath($response, 'analytics.days')->toBe(7);
+    expectViewPath($response, 'analytics.sales.paid_topups_cents')->toBe(10_000);
+    expectViewPath($response, 'analytics.sales.refundable_balance_cents')->toBe(4_000);
+    expectViewPath($response, 'analytics.sales.realized_credits_cents')->toBe(6_000);
+    expectViewPath($response, 'analytics.sales.tracked_charges_cents')->toBe(6_000);
+    expectViewPath($response, 'analytics.sales.pending_topups_cents')->toBe(2_500);
+    expectViewPath($response, 'analytics.popular_pages.0.path')->toBe('/');
+    expectViewPath($response, 'analytics.popular_pages.0.human_visits')->toBe(10);
 
     $this->assertDatabaseHas(PageVisitDailyStat::class, [
         'route_name' => 'dashboard',
@@ -148,8 +147,7 @@ test('users without analytics permission do not receive or export sensitive figu
     $this->actingAs($editor)
         ->get(route('dashboard'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->where('analytics', null));
+        ->assertViewHas('analytics', null);
 
     $this->actingAs($editor)
         ->get(route('dashboard.analytics.users.export'))

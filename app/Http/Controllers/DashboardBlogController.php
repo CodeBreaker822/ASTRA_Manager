@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\BlogPost;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -10,16 +11,14 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
-use Inertia\Inertia;
-use Inertia\Response;
 
 class DashboardBlogController extends Controller
 {
-    public function index(): Response
+    public function index(): View
     {
         Gate::authorize('cms.manage-blog');
 
-        return Inertia::render('dashboard/Blog', [
+        return view('dashboard.blog', [
             'posts' => BlogPost::query()
                 ->with('author:id,name')
                 ->latest()
@@ -28,13 +27,16 @@ class DashboardBlogController extends Controller
         ]);
     }
 
-    public function create(): Response
+    public function create(): View
     {
         Gate::authorize('cms.manage-blog');
 
-        return Inertia::render('dashboard/BlogForm', [
+        return view('dashboard.blog-form', [
             'post' => null,
             'previewHtml' => '',
+            'isEditing' => false,
+            'pageTitle' => 'New post',
+            'formAction' => route('dashboard.blog.store'),
         ]);
     }
 
@@ -54,13 +56,16 @@ class DashboardBlogController extends Controller
         return redirect()->route('dashboard.blog.index')->with('success', 'Post saved.');
     }
 
-    public function edit(BlogPost $post): Response
+    public function edit(BlogPost $post): View
     {
         Gate::authorize('cms.manage-blog');
 
-        return Inertia::render('dashboard/BlogForm', [
+        return view('dashboard.blog-form', [
             'post' => $post->load('author:id,name')->toDashboardArray(),
             'previewHtml' => BlogPost::renderMarkdown($post->body_markdown),
+            'isEditing' => true,
+            'pageTitle' => 'Edit post',
+            'formAction' => route('dashboard.blog.update', $post->id),
         ]);
     }
 

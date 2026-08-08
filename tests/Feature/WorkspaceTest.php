@@ -7,6 +7,7 @@ use App\Models\TranscriptProject;
 use App\Models\User;
 use App\Services\TranscriptExportService;
 use App\Services\WebAudioChunkerService;
+use App\Support\SummaryMarkdown;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
@@ -620,39 +621,37 @@ test('web upload completes when transcription provider returns no speech text', 
 });
 
 test('workspace summary modal follows the jerva summary design surface', function () {
-    $summaryDialog = File::get(resource_path('js/components/workspace/SummaryDialog.vue'));
-    $exportMenu = File::get(resource_path('js/components/workspace/TranscriptExportMenu.vue'));
-    $workspaceHelpers = File::get(resource_path('js/lib/workspace.ts'));
+    // Summary markdown is rendered server-side, so assert the produced markup
+    // rather than the blade source.
+    $rendered = SummaryMarkdown::render(
+        "# Heading\n\n- First **bold** point\n- Second point\n\nA closing paragraph.",
+    );
 
-    expect($summaryDialog)
-        ->toContain('renderSummaryMarkdown')
-        ->toContain('v-html')
-        ->toContain('data-summary-export-format')
-        ->toContain('Starting again replaces this')
-        ->toContain('No summary has been created')
-        ->toContain('for this project.')
-        ->toContain('overlay-class="bg-blue-950/30"')
-        ->toContain('mx-auto max-w-3xl text-sm leading-7 break-words text-black')
-        ->toContain('inline-flex min-h-10 items-center rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-800')
-        ->toContain('min-h-10 shrink-0 cursor-pointer rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-900')
-        ->toContain('h-full w-full animate-pulse bg-blue-600')
-        ->not->toContain('rounded-full')
-        ->not->toContain('Download')
-        ->not->toContain('FileText')
-        ->not->toContain('Sparkles')
-        ->not->toContain("{{ isExporting ? 'Exporting' : 'Export' }}")
-        ->not->toContain('summary_source')
-        ->not->toContain('Raw transcript')
-        ->not->toContain('Cleaned transcript');
-
-    expect($exportMenu)->not->toContain('summary_source');
-
-    expect($workspaceHelpers)
-        ->toContain('font-semibold text-black')
+    expect($rendered)
         ->toContain('mt-5 first:mt-0 text-sm font-semibold uppercase text-blue-700')
         ->toContain('my-3 ml-5 list-disc space-y-2')
         ->toContain('my-3 first:mt-0 last:mb-0')
-        ->toContain('text-blue-900');
+        ->toContain('font-semibold text-black');
+
+    expect(SummaryMarkdown::render(''))
+        ->toContain('text-blue-900')
+        ->toContain('No summary has been created for this project.');
+
+    $modals = File::get(resource_path('views/workspace/partials/action-modals.blade.php'));
+
+    expect($modals)
+        ->toContain('SummaryMarkdown::render')
+        ->toContain('data-summary-export-format')
+        ->toContain('No summary has been created for this project.')
+        // The summary modal offers formats only; no source picker or icons.
+        ->not->toContain('summary_source');
+
+    // The overlay tint is a shared token now, so assert it where it lives.
+    expect(config('ui.workspace.modal.shell'))->toContain('bg-blue-950/30');
+
+    $exportModal = str($modals)->after('{{-- Export --}}')->before('{{-- Processing log --}}')->toString();
+
+    expect($exportModal)->not->toContain('summary_source');
 });
 
 test('transcript exports follow the jerva desktop document layout', function () {

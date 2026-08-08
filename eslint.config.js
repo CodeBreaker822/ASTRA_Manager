@@ -1,8 +1,7 @@
+import js from '@eslint/js';
 import stylistic from '@stylistic/eslint-plugin';
-import { defineConfigWithVueTs, vueTsConfigs } from '@vue/eslint-config-typescript';
 import prettier from 'eslint-config-prettier/flat';
 import importPlugin from 'eslint-plugin-import';
-import vue from 'eslint-plugin-vue';
 
 const controlStatements = [
     'if',
@@ -14,39 +13,48 @@ const controlStatements = [
     'try',
     'throw',
 ];
-const paddingAroundControl = [
-    ...controlStatements.flatMap((stmt) => [
-        { blankLine: 'always', prev: '*', next: stmt },
-        { blankLine: 'always', prev: stmt, next: '*' },
-    ]),
-];
+const paddingAroundControl = controlStatements.flatMap((stmt) => [
+    { blankLine: 'always', prev: '*', next: stmt },
+    { blankLine: 'always', prev: stmt, next: '*' },
+]);
 
-export default defineConfigWithVueTs(
-    vue.configs['flat/essential'],
-    vueTsConfigs.recommended,
+export default [
+    js.configs.recommended,
     {
-        plugins: {
-            import: importPlugin,
-        },
-        settings: {
-            'import/resolver': {
-                typescript: {
-                    alwaysTryTypes: true,
-                    project: './tsconfig.json',
-                },
-                node: true,
+        files: ['resources/js/**/*.js'],
+        languageOptions: {
+            ecmaVersion: 'latest',
+            sourceType: 'module',
+            globals: {
+                // jQuery is served from public/js, Alpine from the bundle.
+                $: 'readonly',
+                Alpine: 'readonly',
+                window: 'readonly',
+                document: 'readonly',
+                navigator: 'readonly',
+                localStorage: 'readonly',
+                sessionStorage: 'readonly',
+                crypto: 'readonly',
+                fetch: 'readonly',
+                console: 'readonly',
+                FormData: 'readonly',
+                File: 'readonly',
+                Blob: 'readonly',
+                URL: 'readonly',
+                URLSearchParams: 'readonly',
+                XMLHttpRequest: 'readonly',
+                MediaRecorder: 'readonly',
+                DOMException: 'readonly',
+                Promise: 'readonly',
+                Intl: 'readonly',
             },
         },
+        plugins: {
+            import: importPlugin,
+            '@stylistic': stylistic,
+        },
         rules: {
-            'vue/multi-word-component-names': 'off',
-            '@typescript-eslint/no-explicit-any': 'off',
-            '@typescript-eslint/consistent-type-imports': [
-                'error',
-                {
-                    prefer: 'type-imports',
-                    fixStyle: 'separate-type-imports',
-                },
-            ],
+            curly: ['error', 'all'],
             'import/order': [
                 'error',
                 {
@@ -54,17 +62,6 @@ export default defineConfigWithVueTs(
                     alphabetize: { order: 'asc', caseInsensitive: true },
                 },
             ],
-            'import/consistent-type-specifier-style': [
-                'error',
-                'prefer-top-level',
-            ],
-        },
-    },
-    {
-        plugins: {
-            '@stylistic': stylistic,
-        },
-        rules: {
             '@stylistic/brace-style': ['error', '1tbs', { allowSingleLine: false }],
             '@stylistic/padding-line-between-statements': [
                 'error',
@@ -73,27 +70,17 @@ export default defineConfigWithVueTs(
         },
     },
     {
+        // Flat config needs globs, not bare directory names.
         ignores: [
-            'vendor',
-            'node_modules',
-            'public',
-            'bootstrap/ssr',
-            'tailwind.config.js',
-            'vite.config.ts',
-            'resources/js/actions/**',
-            'resources/js/components/ui/*',
-            'resources/js/routes/**',
-            'resources/js/wayfinder/**',
+            'vendor/**',
+            'node_modules/**',
+            'public/**',
+            'storage/**',
+            'bootstrap/**',
+            // Node-side diagnostic scripts, not browser code.
+            'scripts/**',
+            'vite.config.js',
         ],
     },
     prettier,
-    {
-        plugins: {
-            '@stylistic': stylistic,
-        },
-        rules: {
-            curly: ['error', 'all'],
-            '@stylistic/brace-style': ['error', '1tbs', { allowSingleLine: false }],
-        },
-    },
-);
+];

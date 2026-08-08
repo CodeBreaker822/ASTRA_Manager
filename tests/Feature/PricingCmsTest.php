@@ -1,14 +1,13 @@
 <?php
 
-use App\Models\PlanTier;
 use App\Models\PlanComparisonRow;
+use App\Models\PlanTier;
 use App\Models\User;
 use App\Models\UserPermissions;
 use App\Models\UserPositions;
 use App\Services\EntitlementService;
 use Database\Seeders\PlanTierSeeder;
 use Illuminate\Support\Facades\Cache;
-use Inertia\Testing\AssertableInertia;
 
 beforeEach(function () {
     Cache::flush();
@@ -23,7 +22,7 @@ test('pricing does not use config fallback when database rows are empty', functi
     $user = User::factory()->create(['plan' => 'payg']);
 
     expect(fn () => app(EntitlementService::class)->planFor($user))
-        ->toThrow(\RuntimeException::class, 'Pricing plan [payg] is not configured.');
+        ->toThrow(RuntimeException::class, 'Pricing plan [payg] is not configured.');
 
     $this->get(route('price'))
         ->assertServerError();
@@ -85,31 +84,29 @@ test('pricing managers can update tiers and comparison rows', function () {
 
     expect(app(EntitlementService::class)->planFor($proUser)['minutes'])->toBe(750);
 
-    $this->get(route('price'))
+    $price = $this->get(route('price'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('marketing/Price')
-            ->where('plans.1.key', 'payg')
-            ->where('plans.1.minutes', 750)
-            ->where('plans.1.price_label', '$25')
-            ->where('content.hero.title', 'Managed pricing copy')
-            ->where('comparison.Live browser transcription.0', 'payg')
-        );
+        ->assertViewIs('marketing.price');
 
-    $this->actingAs($proUser)
+    expectViewPath($price, 'plans.1.key')->toBe('payg');
+    expectViewPath($price, 'plans.1.minutes')->toBe(750);
+    expectViewPath($price, 'plans.1.price_label')->toBe('$25');
+    expectViewPath($price, 'content.hero.title')->toBe('Managed pricing copy');
+    expectViewPath($price, 'comparison.Live browser transcription.0')->toBe('payg');
+
+    $billing = $this->actingAs($proUser)
         ->get(route('billing.edit'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('settings/Billing')
-            ->where('entitlements.plan.key', 'payg')
-            ->where('entitlements.plan.minutes', 45)
-            ->where('plans.1.key', 'payg')
-            ->where('plans.1.upload_price_per_hour', 0.123456789123)
-            ->where('plans.1.live_price_per_hour', 0.153456789123)
-            ->where('plans.1.llm_price', 8)
-            ->where('plans.1.polish_price_per_character', 0.000005123456)
-            ->where('plans.1.summary_price_per_character', 0.000006123456)
-        );
+        ->assertViewIs('settings.billing');
+
+    expectViewPath($billing, 'entitlements.plan.key')->toBe('payg');
+    expectViewPath($billing, 'entitlements.plan.minutes')->toBe(45);
+    expectViewPath($billing, 'plans.1.key')->toBe('payg');
+    expectViewPath($billing, 'plans.1.upload_price_per_hour')->toBe(0.123456789123);
+    expectViewPath($billing, 'plans.1.live_price_per_hour')->toBe(0.153456789123);
+    expectViewPath($billing, 'plans.1.llm_price')->toEqual(8);
+    expectViewPath($billing, 'plans.1.polish_price_per_character')->toBe(0.000005123456);
+    expectViewPath($billing, 'plans.1.summary_price_per_character')->toBe(0.000006123456);
 });
 
 test('pricing dashboard routes require the pricing management gate', function () {

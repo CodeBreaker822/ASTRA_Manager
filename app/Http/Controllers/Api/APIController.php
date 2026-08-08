@@ -15,6 +15,7 @@ use App\Services\AppSettingsService;
 use App\Services\ChunkedUploadService;
 use App\Services\LicenseKeyService;
 use App\Services\ProviderConnectionService;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -22,12 +23,22 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-use Inertia\Inertia;
-use Inertia\Response;
 use Throwable;
 
 class APIController extends Controller
 {
+    /** Methods an API token can be granted. */
+    private const HTTP_METHODS = ['post', 'get', 'put', 'patch', 'delete'];
+
+    /** Providers whose model list can be fetched with the credential itself. */
+    private const MODEL_DISCOVERY_PROVIDERS = [
+        'gemini',
+        'groq_transcription',
+        'groq_text_fixer',
+        'mistral',
+        'mistral_transcription',
+    ];
+
     /**
      * Display a listing of the resource.
      */
@@ -35,12 +46,51 @@ class APIController extends Controller
         AppSettingsService $settings,
         ApiTokenService $tokens,
         TranscriberPackageService $packages,
-    ): Response {
-        return Inertia::render('dashboard/Api', [
+    ): View {
+        $providers = array_map(
+            fn (array $provider): array => [
+                ...$provider,
+                // Providers that can list their models from the credential itself.
+                'supports_discovery' => in_array($provider['provider'], self::MODEL_DISCOVERY_PROVIDERS, true),
+            ],
+            array_values($settings->providerCards()),
+        );
+
+        return view('dashboard.api', [
             'apis' => $tokens->listForManager(),
-            'transcriptionProviders' => array_values($settings->providerCards()),
+            'transcriptionProviders' => $providers,
+            'providerSections' => $this->providerSections($providers),
+            'httpMethods' => self::HTTP_METHODS,
             'transcriberPackage' => $packages->current(),
         ]);
+    }
+
+    /**
+     * Splits the provider catalog into the two dashboard panels, each already
+     * partitioned into configured and still-available providers.
+     *
+     * @param  array<int, array<string, mixed>>  $providers
+     * @return array<int, array{category: string, title: string, description: string, configured: array<int, array<string, mixed>>, available: array<int, array<string, mixed>>}>
+     */
+    private function providerSections(array $providers): array
+    {
+        $sections = [
+            ['category' => 'transcriber', 'title' => 'Transcribers', 'description' => 'Speech-to-text providers'],
+            ['category' => 'text_fixer', 'title' => 'Text Fixers', 'description' => 'Transcript polishing and cleanup providers'],
+        ];
+
+        return array_map(function (array $section) use ($providers): array {
+            $inCategory = array_filter(
+                $providers,
+                fn (array $provider): bool => $provider['category'] === $section['category'],
+            );
+
+            return [
+                ...$section,
+                'configured' => array_values(array_filter($inCategory, fn (array $p): bool => (bool) $p['configured'])),
+                'available' => array_values(array_filter($inCategory, fn (array $p): bool => ! $p['configured'])),
+            ];
+        }, $sections);
     }
 
     public function updateTranscriptionProviders(Request $request, AppSettingsService $settings): JsonResponse
@@ -225,34 +275,58 @@ class APIController extends Controller
             ->paginate((int) ($validated['per_page'] ?? 25));
 
         $logs = $paginator->getCollection()
-            ->map(fn (TranscriptionApiRequestLog $log): array => [
-                'id' => $log->id,
-                'created_at' => $log->created_at?->toISOString(),
-                'source' => match ($log->operation) {
-                    'transcribe_provider' => 'Transcription',
-                    'polish_provider' => 'Text polishing',
-                    'summarize_provider' => 'Summarization',
-                    'chatbot_provider' => 'Chatbot',
-                    default => $log->operation,
-                },
-                'provider' => $this->transcriptionProviderName($log->provider),
-                'model' => $log->model,
-                'status' => $log->status,
-                'http_status' => $log->http_status,
-                'fallback_position' => data_get($log->request_summary, 'fallback_position'),
-                'error' => $log->error_message,
-            ]);
+            ->map(function (TranscriptionApiRequestLog $log): array {
+                $succeeded = in_array($log->status, ['provider_succeeded', 'fallback_succeeded'], true);
 
+                return [
+                    'id' => $log->id,
+                    'created_at' => $log->created_at?->toISOString(),
+                    'source' => match ($log->operation) {
+                        'transcribe_provider' => 'Transcription',
+                        'polish_provider' => 'Text polishing',
+                        'summarize_provider' => 'Summarization',
+                        'chatbot_provider' => 'Chatbot',
+                        default => $log->operation,
+                    },
+                    'provider' => $this->transcriptionProviderName($log->provider),
+                    'model' => $log->model,
+                    'status' => $log->status,
+                    'http_status' => $log->http_status,
+                    'fallback_position' => data_get($log->request_summary, 'fallback_position'),
+                    'error' => $log->error_message,
+                    // Display-ready fields so the table markup stays declarative.
+                    'succeeded' => $succeeded,
+                    'status_label' => match ($log->status) {
+                        'provider_succeeded' => 'Succeeded',
+                        'fallback_succeeded' => 'Fallback succeeded',
+                        default => 'Failed; fallback continued',
+                    },
+                    'logged_at' => $log->created_at?->format('M j, Y g:i:s A') ?? 'Unknown time',
+                ];
+            });
+
+        $pagination = [
+            'current_page' => $paginator->currentPage(),
+            'last_page' => $paginator->lastPage(),
+            'per_page' => $paginator->perPage(),
+            'total' => $paginator->total(),
+            'from' => $paginator->firstItem(),
+            'to' => $paginator->lastItem(),
+        ];
+
+        // A five-page window centred on the current page.
+        $windowStart = max(1, min($paginator->currentPage() - 2, $paginator->lastPage() - 4));
+
+        // `html` carries the table rendered by blade so the dashboard never
+        // assembles markup; `logs` and `pagination` keep the original shape.
         return response()->json([
+            'html' => view('dashboard.partials.provider-logs', [
+                'logs' => $logs->values(),
+                'pagination' => $pagination,
+                'pageNumbers' => range($windowStart, min($paginator->lastPage(), $windowStart + 4)),
+            ])->render(),
             'logs' => $logs->values(),
-            'pagination' => [
-                'current_page' => $paginator->currentPage(),
-                'last_page' => $paginator->lastPage(),
-                'per_page' => $paginator->perPage(),
-                'total' => $paginator->total(),
-                'from' => $paginator->firstItem(),
-                'to' => $paginator->lastItem(),
-            ],
+            'pagination' => $pagination,
         ]);
     }
 

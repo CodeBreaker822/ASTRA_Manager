@@ -1,12 +1,11 @@
 <?php
 
 use App\Exceptions\InsufficientWalletBalanceException;
-use Database\Seeders\PlanTierSeeder;
 use App\Models\User;
 use App\Services\EntitlementService;
 use App\Services\LicenseKeyService;
+use Database\Seeders\PlanTierSeeder;
 use Illuminate\Support\Facades\Cache;
-use Inertia\Testing\AssertableInertia;
 
 beforeEach(function () {
     $this->seed(PlanTierSeeder::class);
@@ -33,23 +32,22 @@ test('verified users can view billing settings with credit balance', function ()
         'summary_count' => 1,
     ]);
 
-    $this->actingAs($user)
+    $response = $this->actingAs($user)
         ->get(route('billing.edit'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('settings/Billing')
-            ->where('walletBalance', 1250)
-            ->where('entitlements.plan.key', 'free')
-            ->where('entitlements.plan.minutes', 60)
-            ->where('entitlements.usage.minutes_used', 3)
-            ->where('entitlements.usage.minutes_remaining', 57)
-            ->where('entitlements.usage.free_polish_remaining', 1)
-            ->where('entitlements.usage.free_summary_remaining', 2)
-            ->where('entitlements.usage.wallet_balance', 12.5)
-            ->where('entitlements.usage.wallet_balance_cents', 1250)
-            ->where('entitlements.usage.period', now()->toDateString())
-            ->has('plans', 2)
-        );
+        ->assertViewIs('settings.billing');
+
+    expectViewPath($response, 'walletBalance')->toBe(1250);
+    expectViewPath($response, 'entitlements.plan.key')->toBe('free');
+    expectViewPath($response, 'entitlements.plan.minutes')->toBe(60);
+    expectViewPath($response, 'entitlements.usage.minutes_used')->toBe(3);
+    expectViewPath($response, 'entitlements.usage.minutes_remaining')->toBe(57);
+    expectViewPath($response, 'entitlements.usage.free_polish_remaining')->toBe(1);
+    expectViewPath($response, 'entitlements.usage.free_summary_remaining')->toBe(2);
+    expectViewPath($response, 'entitlements.usage.wallet_balance')->toBe(12.5);
+    expectViewPath($response, 'entitlements.usage.wallet_balance_cents')->toBe(1250);
+    expectViewPath($response, 'entitlements.usage.period')->toBe(now()->toDateString());
+    expectViewPath($response, 'plans')->toHaveCount(2);
 });
 
 test('license status includes account credit balance for user licenses', function () {

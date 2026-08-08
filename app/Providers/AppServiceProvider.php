@@ -10,17 +10,24 @@ use App\Models\TranscriptProject;
 use App\Models\User;
 use App\Policies\TranscriptPolicy;
 use App\Policies\TranscriptProjectPolicy;
+use App\Services\PageContentService;
 use App\Services\PayMongoWalletTopupReconciler;
+use App\Support\FlashNotification;
+use App\Support\Nav;
 use Carbon\CarbonImmutable;
 use GuzzleHttp\Utils as GuzzleUtils;
 use Illuminate\Auth\Events\Login;
+use Illuminate\Contracts\View\View as ViewContract;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\ViewErrorBag;
 use Illuminate\Validation\Rules\Password;
 use Throwable;
 
@@ -40,6 +47,72 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureDefaults();
+        $this->shareMarketingSite();
+        $this->shareNavigation();
+    }
+
+    /**
+     * Resolve the navigation for the chrome components. They render in an
+     * isolated scope, so the data has to be composed onto them directly rather
+     * than passed down from a controller.
+     */
+    protected function shareNavigation(): void
+    {
+        View::composer('components.app.sidebar', function (ViewContract $view): void {
+            $user = Auth::user();
+
+            $view->with([
+                'navGroups' => Nav::sidebarGroups($user),
+                'navHome' => Nav::home($user),
+                'authUser' => $user,
+            ]);
+        });
+
+        View::composer('components.layouts.settings', function (ViewContract $view): void {
+            $view->with([
+                'settingsTabs' => Nav::settingsTabs(),
+                'navHome' => Nav::home(Auth::user()),
+            ]);
+        });
+
+        // $errors only exists inside the web middleware group, so read it from
+        // the view's own data rather than assuming it is bound.
+        View::composer('partials.flash', function (ViewContract $view): void {
+            $errors = $view->getData()['errors'] ?? null;
+
+            $view->with('notification', FlashNotification::current(
+                $errors instanceof ViewErrorBag ? $errors : null,
+            ));
+        });
+
+        // Fortify reports a bad recovery code under its own key, so the
+        // challenge reopens in recovery mode when that is the field that failed.
+        View::composer('auth.two-factor-challenge', function (ViewContract $view): void {
+            $errors = $view->getData()['errors'] ?? null;
+
+            $view->with('startInRecovery', filled(old('recovery_code'))
+                || ($errors instanceof ViewErrorBag && filled($errors->first('recovery_code'))));
+        });
+    }
+
+    /**
+     * Share the site chrome (brand, navigation, footer) with every blade
+     * layout that renders it.
+     */
+    protected function shareMarketingSite(): void
+    {
+        // Blade components render in an isolated scope, so every view that
+        // reads $site has to be listed here rather than inheriting it.
+        View::composer([
+            'components.layouts.*',
+            'components.marketing.*',
+            'partials.head',
+        ], function (ViewContract $view): void {
+            $view->with('site', once(fn () => app(PageContentService::class)->pageOrDefault(
+                'site',
+                config('marketing.pages.site', []),
+            )));
+        });
     }
 
     /**

@@ -5,7 +5,6 @@ use App\Models\TranscriptProject;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
-use Inertia\Testing\AssertableInertia;
 use Worksome\Exchange\Facades\Exchange;
 
 test('paymongo wallet top-up checkout creates a billing transaction and redirects to hosted checkout', function () {
@@ -28,11 +27,10 @@ test('paymongo wallet top-up checkout creates a billing transaction and redirect
 
     $user = User::factory()->create();
 
+    // Checkout hands off to PayMongo with an ordinary external redirect.
     $this->actingAs($user)
-        ->withHeader('X-Inertia', 'true')
         ->post(route('billing.checkout'), ['amount' => '10.00'])
-        ->assertStatus(409)
-        ->assertHeader('X-Inertia-Location', 'https://checkout.paymongo.com/cs_test_123');
+        ->assertRedirect('https://checkout.paymongo.com/cs_test_123');
 
     $transaction = BillingTransaction::query()->firstOrFail();
 
@@ -242,10 +240,8 @@ test('billing page refresh reconciles paid paymongo checkout and credits wallet'
     $this->actingAs($user)
         ->get(route('billing.edit'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('settings/Billing')
-            ->where('walletBalance', 1000)
-        );
+        ->assertViewIs('settings.billing')
+        ->assertViewHas('walletBalance', 1000);
 
     $transaction = BillingTransaction::query()->firstOrFail();
 

@@ -44,7 +44,7 @@ class TrackPageVisit
 
         $contentType = (string) $response->headers->get('content-type');
 
-        return str_contains($contentType, 'text/html') || $request->header('X-Inertia') === 'true';
+        return str_contains($contentType, 'text/html');
     }
 
     private function record(Request $request): void

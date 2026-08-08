@@ -6,7 +6,6 @@ use App\Models\UserPermissions;
 use App\Models\UserPositions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Inertia\Testing\AssertableInertia;
 
 test('public blog renders published database posts with sanitized markdown', function () {
     $this->withoutVite();
@@ -23,21 +22,17 @@ test('public blog renders published database posts with sanitized markdown', fun
 
     $this->get(route('blog.index'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('marketing/BlogIndex')
-            ->has('posts', 1)
-            ->where('posts.0.slug', $published->slug)
-        );
+        ->assertViewIs('marketing.blog-index')
+        ->assertViewHas('posts', fn ($posts): bool => count($posts) === 1
+            && data_get($posts, '0.slug') === $published->slug);
 
     $this->get(route('blog.show', $published->slug))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('marketing/BlogShow')
-            ->where('post.slug', $published->slug)
-            ->where('post.html', fn (string $html): bool => str_contains($html, '<h2>Safe heading</h2>')
-                && ! str_contains($html, '<script')
-                && ! str_contains($html, 'javascript:alert'))
-        );
+        ->assertViewIs('marketing.blog-show')
+        ->assertViewHas('post', fn ($post): bool => data_get($post, 'slug') === $published->slug
+            && str_contains((string) data_get($post, 'html'), '<h2>Safe heading</h2>')
+            && ! str_contains((string) data_get($post, 'html'), '<script')
+            && ! str_contains((string) data_get($post, 'html'), 'javascript:alert'));
 
     $this->get(route('blog.show', $draft->slug))
         ->assertNotFound();
@@ -70,11 +65,9 @@ test('content editors can create publish update and delete blog posts', function
     $this->actingAs($user)
         ->get(route('dashboard.blog.index'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('dashboard/Blog')
-            ->has('posts', 1)
-            ->where('posts.0.slug', 'a-cms-shipped-post')
-        );
+        ->assertViewIs('dashboard.blog')
+        ->assertViewHas('posts', fn ($posts): bool => count($posts) === 1
+            && data_get($posts, '0.slug') === 'a-cms-shipped-post');
 
     $this->actingAs($user)
         ->post(route('dashboard.blog.publish', $post))

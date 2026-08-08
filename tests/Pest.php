@@ -1,6 +1,8 @@
 <?php
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Testing\TestResponse;
+use Pest\Expectation;
 use Tests\TestCase;
 
 /*
@@ -44,7 +46,16 @@ expect()->extend('toBeOne', function () {
 |
 */
 
-function something()
+/**
+ * Reads a dot-path out of a rendered view's data and wraps it in an
+ * expectation, so nested view data can be asserted in one line.
+ *
+ * expectViewPath($response, 'entitlements.plan.key')->toBe('free');
+ */
+function expectViewPath(TestResponse $response, string $path): Expectation
 {
-    // ..
+    [$key, $rest] = array_pad(explode('.', $path, 2), 2, null);
+    $value = $response->viewData($key);
+
+    return expect($rest === null ? $value : data_get($value, $rest));
 }

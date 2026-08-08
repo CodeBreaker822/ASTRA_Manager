@@ -5,7 +5,6 @@ use App\Models\User;
 use App\Models\UserPermissions;
 use App\Models\UserPositions;
 use Illuminate\Support\Facades\Cache;
-use Inertia\Testing\AssertableInertia;
 
 beforeEach(function () {
     Cache::flush();
@@ -16,11 +15,9 @@ test('marketing pages use source defaults when CMS content is missing', function
 
     PageContent::query()->delete();
 
-    $this->get(route('home'))
-        ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->where('content.hero.title', config('marketing.pages.home.hero.title'))
-        );
+    $response = $this->get(route('home'))->assertOk();
+    expectViewPath($response, 'content.hero.title')
+        ->toBe(config('marketing.pages.home.hero.title'));
 
     $this->get(route('features'))
         ->assertOk();
@@ -41,13 +38,12 @@ test('page managers can update home features and download content', function () 
         ->put(route('dashboard.pages.update', ['page' => 'home']), ['content' => $home])
         ->assertRedirect();
 
-    $this->get(route('home'))
+    $response = $this->get(route('home'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('marketing/Landing')
-            ->where('content.hero.title', 'Editable home story')
-            ->where('seo.title', $home['seo']['title'])
-        );
+        ->assertViewIs('marketing.landing');
+
+    expectViewPath($response, 'content.hero.title')->toBe('Editable home story');
+    expectViewPath($response, 'seo.title')->toBe($home['seo']['title']);
 
     $features = config('marketing.pages.features');
     $features['hero']['title'] = 'Editable feature story';
@@ -60,13 +56,12 @@ test('page managers can update home features and download content', function () 
     expect(PageContent::query()->where('page', 'features')->where('section', 'hero')->firstOrFail()->content['title'])
         ->toBe('Editable feature story');
 
-    $this->get(route('features'))
+    $featuresPage = $this->get(route('features'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('marketing/Features')
-            ->where('content.hero.title', 'Editable feature story')
-            ->where('content.feature_rows.0.title', 'Managed live transcription')
-        );
+        ->assertViewIs('marketing.features');
+
+    expectViewPath($featuresPage, 'content.hero.title')->toBe('Editable feature story');
+    expectViewPath($featuresPage, 'content.feature_rows.0.title')->toBe('Managed live transcription');
 
     $download = config('marketing.pages.download');
     $download['download_card']['button_label'] = 'Download managed build';
@@ -75,12 +70,12 @@ test('page managers can update home features and download content', function () 
         ->put(route('dashboard.pages.update', ['page' => 'download']), ['content' => $download])
         ->assertRedirect();
 
-    $this->get(route('download'))
+    $downloadPage = $this->get(route('download'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('marketing/Download')
-            ->where('content.download_card.button_label', 'Download managed build')
-        );
+        ->assertViewIs('marketing.download');
+
+    expectViewPath($downloadPage, 'content.download_card.button_label')
+        ->toBe('Download managed build');
 });
 
 test('page dashboard routes require the pages management gate', function () {

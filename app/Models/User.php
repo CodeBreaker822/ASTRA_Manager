@@ -98,4 +98,17 @@ class User extends Authenticatable implements MustVerifyEmail
     {
         return $this->hasOne(API::class);
     }
+
+    /**
+     * Avatar initials: the first letter of the first two parts of the email,
+     * splitting on whitespace and the usual address separators.
+     */
+    public function initials(): string
+    {
+        $parts = preg_split('/[\s@._-]+/', $this->email, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        return collect(array_slice($parts, 0, 2))
+            ->map(fn (string $part): string => mb_strtoupper(mb_substr($part, 0, 1)))
+            ->implode('');
+    }
 }

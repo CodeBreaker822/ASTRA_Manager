@@ -13,6 +13,7 @@ use App\Services\Web\TranscriptionWorkflowService;
 use App\Services\Web\TranscriptPayloadPresenter;
 use App\Services\WebApiTranscriptionClient;
 use App\Services\WebTranscriptProcessor;
+use App\Support\WorkspaceView;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -271,16 +272,26 @@ class TranscriptionController extends Controller
 
         $project->load(['transcripts.sections' => fn ($query) => $query->orderBy('position')]);
 
+        $presented = [
+            'id' => $project->id,
+            'title' => $project->title,
+            'transcripts' => $project->transcripts
+                ->sortByDesc('created_at')
+                ->values()
+                ->map(fn (Transcript $transcript): array => $payloads->present($transcript))
+                ->all(),
+        ];
+
+        $mode = WorkspaceView::mode($presented);
+
+        // `html` is the transcript pane rendered by blade so the client never
+        // builds markup. `project` keeps the original response shape.
         return response()->json([
-            'project' => [
-                'id' => $project->id,
-                'title' => $project->title,
-                'transcripts' => $project->transcripts
-                    ->sortByDesc('created_at')
-                    ->values()
-                    ->map(fn (Transcript $transcript): array => $payloads->present($transcript))
-                    ->all(),
-            ],
+            'html' => view(
+                'workspace.partials.transcript',
+                WorkspaceView::transcriptPane($presented, $mode),
+            )->render(),
+            'project' => $presented,
             'entitlements' => $entitlements->summaryFor($user),
         ]);
     }

@@ -52,4 +52,32 @@ class Money
 
         return (int) round($usdCents * $rate);
     }
+
+    /**
+     * Format an amount the way Intl.NumberFormat did on the client: pad to
+     * $min fraction digits, allow up to $max, and drop the trailing zeros in
+     * between. Implemented without ext-intl, which is not guaranteed here.
+     */
+    public static function format(float $value, string $currency = 'USD', int $min = 0, int $max = 2): string
+    {
+        $rounded = round($value, $max);
+        $formatted = number_format($rounded, $max, '.', ',');
+
+        if ($max > $min && str_contains($formatted, '.')) {
+            $formatted = rtrim($formatted, '0');
+            [$whole, $fraction] = array_pad(explode('.', $formatted, 2), 2, '');
+            $formatted = $min === 0 && $fraction === ''
+                ? $whole
+                : $whole.'.'.str_pad($fraction, $min, '0');
+        }
+
+        return (self::SYMBOLS[$currency] ?? $currency.' ').$formatted;
+    }
+
+    private const SYMBOLS = [
+        'USD' => '$',
+        'PHP' => '₱',
+        'EUR' => '€',
+        'GBP' => '£',
+    ];
 }

@@ -24,9 +24,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->middleware('throttle:10,1')
         ->name('user-password.update');
 
-    Route::inertia('settings/appearance', 'settings/Appearance')->name('appearance.edit');
+    Route::view('settings/appearance', 'settings.appearance')->name('appearance.edit');
 
-    Route::inertia('settings/recording', 'settings/Recording')->name('recording.edit');
+    Route::view('settings/recording', 'settings.recording')->name('recording.edit');
 
     Route::get('settings/billing', [BillingController::class, 'edit'])->name('billing.edit');
     Route::post('settings/billing/checkout', [BillingController::class, 'checkout'])->name('billing.checkout');

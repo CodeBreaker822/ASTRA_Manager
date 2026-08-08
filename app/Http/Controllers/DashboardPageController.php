@@ -3,31 +3,35 @@
 namespace App\Http\Controllers;
 
 use App\Services\PageContentService;
+use App\Support\CmsLabels;
 use Closure;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
-use Inertia\Inertia;
-use Inertia\Response;
 
 class DashboardPageController extends Controller
 {
-    public function edit(string $page, PageContentService $pages): Response
+    public function edit(string $page, PageContentService $pages): View
     {
         Gate::authorize('cms.manage-pages');
 
         $definition = $this->definition($page);
         $defaults = $this->defaults($page);
+        $content = $pages->pageOrDefault($page, $defaults);
 
-        return Inertia::render('dashboard/Pages', [
+        return view('dashboard.pages', [
             'pageKey' => $page,
             'title' => $definition['label'],
             'description' => $definition['description'],
             'previewUrl' => $definition['preview_url'],
             'pageOptions' => $this->pageOptions(),
-            'content' => $pages->pageOrDefault($page, $defaults),
+            'content' => $content,
             'schema' => $defaults,
+            'sections' => $this->sections($defaults),
+            'seoTitle' => (string) data_get($content, 'seo.title', ''),
+            'seoDescription' => (string) data_get($content, 'seo.description', ''),
         ]);
     }
 
@@ -45,6 +49,21 @@ class DashboardPageController extends Controller
         $pages->save($page, $validated['content'], $request->user()?->id);
 
         return back()->with('success', $definition['label'].' saved.');
+    }
+
+    /**
+     * The editable sections of a page, with their display wording resolved.
+     *
+     * @param  array<string, mixed>  $schema
+     * @return array<int, array{key: string, label: string, description: string}>
+     */
+    private function sections(array $schema): array
+    {
+        return array_map(fn (string $key): array => [
+            'key' => $key,
+            'label' => CmsLabels::section($key),
+            'description' => CmsLabels::sectionDescription($key),
+        ], array_keys($schema));
     }
 
     /**

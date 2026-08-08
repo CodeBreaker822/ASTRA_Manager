@@ -5,8 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\BlogPost;
 use App\Services\MarketingSeoService;
 use App\Services\PageContentService;
-use Inertia\Inertia;
-use Inertia\Response;
+use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class BlogController extends Controller
@@ -14,22 +14,26 @@ class BlogController extends Controller
     public function index(
         PageContentService $pages,
         MarketingSeoService $seo,
-    ): Response {
+    ): View {
         $content = $pages->pageOrDefault(
             'blog',
             config('marketing.pages.blog', []),
         );
 
-        return Inertia::render('marketing/BlogIndex', [
+        $template = (string) data_get($content, 'index.reading_time_template', '{minutes} min read');
+
+        $posts = $this->publishedPosts()
+            ->get()
+            ->map(fn (BlogPost $post): array => $this->withReadingTime($post->toPublicArray(), $template))
+            ->values()
+            ->all();
+
+        return view('marketing.blog-index', [
             'content' => $content,
-            'posts' => BlogPost::query()
-                ->where('status', 'published')
-                ->whereNotNull('published_at')
-                ->where('published_at', '<=', now())
-                ->orderByDesc('published_at')
-                ->get()
-                ->map(fn (BlogPost $post): array => $post->toPublicArray())
-                ->values(),
+            'posts' => $posts,
+            // The first post is the hero card; the rest fill the grid below it.
+            'featuredPost' => $posts[0] ?? null,
+            'remainingPosts' => array_slice($posts, 1),
             'seo' => $seo->metadata(
                 $content,
                 route('blog.index'),
@@ -42,7 +46,7 @@ class BlogController extends Controller
         string $slug,
         PageContentService $pages,
         MarketingSeoService $seo,
-    ): Response {
+    ): View {
         $post = BlogPost::query()
             ->where('status', 'published')
             ->whereNotNull('published_at')
@@ -59,19 +63,17 @@ class BlogController extends Controller
             config('marketing.pages.blog', []),
         );
         $seoTitleTemplate = (string) data_get($content, 'article.seo_title_template', '{title}');
+        $template = (string) data_get($content, 'article.reading_time_template', '{minutes} min read');
 
-        return Inertia::render('marketing/BlogShow', [
-            'post' => $post->toPublicArray(withBody: true),
+        return view('marketing.blog-show', [
+            'post' => $this->withReadingTime($post->toPublicArray(withBody: true), $template),
             'content' => $content,
-            'relatedPosts' => BlogPost::query()
-                ->where('status', 'published')
-                ->whereNotNull('published_at')
-                ->where('published_at', '<=', now())
+            'article' => $content['article'],
+            'relatedPosts' => $this->publishedPosts()
                 ->whereKeyNot($post->getKey())
-                ->orderByDesc('published_at')
                 ->limit(3)
                 ->get()
-                ->map(fn (BlogPost $related): array => $related->toPublicArray())
+                ->map(fn (BlogPost $related): array => $this->withReadingTime($related->toPublicArray(), $template))
                 ->values(),
             'seo' => $seo->metadata(
                 [
@@ -85,5 +87,34 @@ class BlogController extends Controller
                 'article',
             ),
         ]);
+    }
+
+    /**
+     * Posts visible to the public, newest first.
+     *
+     * @return Builder<BlogPost>
+     */
+    private function publishedPosts(): Builder
+    {
+        return BlogPost::query()
+            ->where('status', 'published')
+            ->whereNotNull('published_at')
+            ->where('published_at', '<=', now())
+            ->orderByDesc('published_at');
+    }
+
+    /**
+     * Renders the CMS-managed "{minutes} min read" wording onto a post so the
+     * view prints a finished string.
+     *
+     * @param  array<string, mixed>  $post
+     * @return array<string, mixed>
+     */
+    private function withReadingTime(array $post, string $template): array
+    {
+        return [
+            ...$post,
+            'reading_time' => str_replace('{minutes}', (string) $post['reading_minutes'], $template),
+        ];
     }
 }

@@ -10,38 +10,49 @@ use App\Services\PayMongoCheckoutService;
 use App\Services\PayMongoWalletTopupReconciler;
 use App\Services\PlanService;
 use App\Services\WalletTopupService;
+use App\Support\BillingRates;
 use App\Support\Money;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Inertia\Inertia;
-use Inertia\Response;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 class BillingController extends Controller
 {
+    /** What the free tier includes: [entitlement, qualifier]. */
+    private const FREE_TIER_ITEMS = [
+        ['60 transcription minutes per day', 'Resets at midnight'],
+        ['3 polishing uses per day', 'No credit balance deducted'],
+        ['3 summarization uses per day', 'No credit balance deducted'],
+        ['TXT, Word, Excel exports', null],
+    ];
+
     public function edit(
         Request $request,
         EntitlementService $entitlements,
         PayMongoCheckoutService $payMongo,
         PayMongoWalletTopupReconciler $reconciler,
         PlanService $plans,
-    ): Response {
+    ): View {
         $user = $request->user();
         abort_unless($user instanceof User, 403);
 
         $reconciler->reconcileFor($user);
         $user->refresh();
 
-        return Inertia::render('settings/Billing', [
+        $tiers = $plans->tiersForDisplay();
+        $paygPlan = collect($tiers)->firstWhere('key', 'payg');
+
+        return view('settings.billing', [
             'billing' => [
                 'checkout_available' => $payMongo->isConfiguredForWalletTopup(),
             ],
             'entitlements' => $entitlements->summaryFor($user),
-            'plans' => $plans->tiersForDisplay(),
+            'plans' => $tiers,
             'topup' => [
                 'wallet_currency' => 'USD',
                 'checkout_currency' => 'PHP',
@@ -50,6 +61,17 @@ class BillingController extends Controller
                 'pass_on_fees' => (bool) config('services.paymongo.pass_on_fees', true),
             ],
             'walletBalance' => Money::decimalDollarsToUsdCents($user->wallet_balance),
+            'walletBalanceLabel' => Money::format(
+                Money::decimalDollarsToUsdCents($user->wallet_balance) / 100,
+                'USD',
+                2,
+                2,
+            ),
+            'freeTierItems' => self::FREE_TIER_ITEMS,
+            'paygRates' => BillingRates::forPlan($paygPlan),
+            'paymentMethods' => collect($payMongo->paymentMethodTypes())
+                ->map(fn (string $method): string => mb_strtoupper(str_replace('_', ' ', $method)))
+                ->implode(', '),
         ]);
     }
 
@@ -102,7 +124,7 @@ class BillingController extends Controller
             ]);
         });
 
-        return Inertia::location($checkout['checkout_url']);
+        return redirect()->away($checkout['checkout_url']);
     }
 
     public function success(

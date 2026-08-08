@@ -3,6 +3,7 @@
 namespace App\Services\Web;
 
 use App\Models\Transcript;
+use Illuminate\Support\Carbon;
 
 class TranscriptPayloadPresenter
 {
@@ -95,11 +96,14 @@ class TranscriptPayloadPresenter
     {
         return array_map(function (array $entry): array {
             $status = (string) ($entry['status'] ?? '');
+            $createdAt = $entry['created_at'] ?? null;
 
             return [
                 'status' => $status,
                 'message' => $this->safeProcessingMessage($status),
-                'created_at' => $entry['created_at'] ?? null,
+                'created_at' => $createdAt,
+                // Preformatted for the log modal so blade never parses a date.
+                'logged_at' => $createdAt ? Carbon::parse($createdAt)->format('M j, g:i:s A') : '',
             ];
         }, array_values($log));
     }

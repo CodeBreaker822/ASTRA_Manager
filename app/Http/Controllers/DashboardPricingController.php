@@ -6,22 +6,99 @@ use App\Models\PlanComparisonRow;
 use App\Models\PlanTier;
 use App\Services\PageContentService;
 use App\Services\PlanService;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-use Inertia\Inertia;
-use Inertia\Response;
 
 class DashboardPricingController extends Controller
 {
-    public function edit(PlanService $plans, PageContentService $pages): Response
+    /** Tiers the pricing form edits, in display order. */
+    private const PLAN_KEYS = ['free', 'payg'];
+
+    /** Hourly rate inputs: [field, label, placeholder, hint]. */
+    private const RATE_FIELDS = [
+        ['upload_price_per_hour', 'Uploaded audio price per hour ($)', '0.12', 'Example: <strong>0.12</strong> = $0.12/hour'],
+        ['live_price_per_hour', 'Live recording price per hour ($)', '0.15', 'Example: <strong>0.15</strong> = $0.15/hour'],
+    ];
+
+    /** Per-character rate inputs: [field, label]. */
+    private const CHAR_RATE_FIELDS = [
+        ['polish_price_per_character', 'Polish price per character ($)'],
+        ['summary_price_per_character', 'Summary price per character ($)'],
+    ];
+
+    /** Feature toggles stored under a tier's `entitlements`: [field, label]. */
+    private const ENTITLEMENT_FIELDS = [
+        ['upload', 'Upload audio transcription'],
+        ['live', 'Live browser transcription'],
+        ['polish', 'Transcript polishing'],
+        ['summarize', 'Transcript summarization'],
+    ];
+
+    /**
+     * An HTML checkbox group submits nothing when every box is cleared, so the
+     * `exports` and `tier_keys` keys have to be defaulted back to empty arrays
+     * before validation sees them.
+     */
+    private function normalizeCheckboxGroups(Request $request): void
+    {
+        $merge = [];
+        $tiers = $request->input('tiers');
+
+        if (is_array($tiers)) {
+            foreach ($tiers as $index => $tier) {
+                if (! is_array($tier)) {
+                    continue;
+                }
+
+                $entitlements = is_array($tier['entitlements'] ?? null) ? $tier['entitlements'] : [];
+                $exports = $entitlements['exports'] ?? null;
+                $entitlements['exports'] = is_array($exports) ? array_values($exports) : [];
+                $tier['entitlements'] = $entitlements;
+                $tiers[$index] = $tier;
+            }
+
+            $merge['tiers'] = $tiers;
+        }
+
+        $rows = $request->input('comparisonRows');
+
+        if (is_array($rows)) {
+            foreach ($rows as $index => $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+
+                $keys = $row['tier_keys'] ?? null;
+                $row['tier_keys'] = is_array($keys) ? array_values($keys) : [];
+                $rows[$index] = $row;
+            }
+
+            $merge['comparisonRows'] = $rows;
+        }
+
+        // A malformed payload is left untouched so validation reports it.
+        if ($merge !== []) {
+            $request->merge($merge);
+        }
+    }
+
+    public function edit(PlanService $plans, PageContentService $pages): View
     {
         Gate::authorize('cms.manage-pricing');
 
-        return Inertia::render('dashboard/Pricing', [
-            'tiers' => $plans->tiersForDisplay(),
+        return view('dashboard.pricing', [
+            // The form keeps a fixed six feature slots so blanks stay editable.
+            'tiers' => array_map(
+                fn (array $tier): array => [
+                    ...$tier,
+                    'features' => array_slice(array_pad($tier['features'], 6, ''), 0, 6),
+                ],
+                $plans->tiersForDisplay(),
+            ),
             'comparisonRows' => collect($plans->comparison())
                 ->map(fn (array $tierKeys, string $label): array => [
                     'label' => $label,
@@ -29,12 +106,19 @@ class DashboardPricingController extends Controller
                 ])
                 ->values(),
             'pricingContent' => $pages->page('pricing'),
+            'planKeys' => self::PLAN_KEYS,
+            'exportFormats' => array_keys(config('workspace.export_formats')),
+            'rateFields' => self::RATE_FIELDS,
+            'charRateFields' => self::CHAR_RATE_FIELDS,
+            'entitlementFields' => self::ENTITLEMENT_FIELDS,
         ]);
     }
 
     public function update(Request $request, PlanService $plans, PageContentService $pages): RedirectResponse
     {
         Gate::authorize('cms.manage-pricing');
+
+        $this->normalizeCheckboxGroups($request);
 
         $validated = $request->validate([
             'tiers' => ['required', 'array', 'min:1'],

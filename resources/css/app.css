@@ -79,6 +79,10 @@
 }
 
 @layer utilities {
+    [x-cloak] {
+        display: none !important;
+    }
+
     body,
     html {
         --font-sans:

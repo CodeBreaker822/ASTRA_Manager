@@ -5,11 +5,10 @@ namespace App\Http\Controllers;
 use App\Services\MarketingSeoService;
 use App\Services\PageContentService;
 use App\Services\PlanService;
+use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use Inertia\Inertia;
-use Inertia\Response;
 use SplFileInfo;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
@@ -19,13 +18,14 @@ class DownloadController extends Controller
         PageContentService $pages,
         PlanService $plans,
         MarketingSeoService $seo,
-    ): Response {
+    ): View {
         $content = $pages->pageOrDefault('download', config('marketing.pages.download', []));
         $release = $this->latestRelease();
 
-        return Inertia::render('marketing/Download', [
+        return view('marketing.download', [
             'release' => $release,
             'content' => $content,
+            'card' => $content['download_card'],
             'pricing' => $plans->marketingSummary(),
             'seo' => $seo->metadata(
                 $content,

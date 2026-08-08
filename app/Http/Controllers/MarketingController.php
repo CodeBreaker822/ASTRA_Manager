@@ -5,8 +5,8 @@ namespace App\Http\Controllers;
 use App\Services\MarketingSeoService;
 use App\Services\PageContentService;
 use App\Services\PlanService;
-use Inertia\Inertia;
-use Inertia\Response;
+use App\Support\Money;
+use Illuminate\Contracts\View\View;
 
 class MarketingController extends Controller
 {
@@ -14,11 +14,11 @@ class MarketingController extends Controller
         PageContentService $pages,
         PlanService $plans,
         MarketingSeoService $seo,
-    ): Response {
+    ): View {
         $content = $pages->pageOrDefault('home', config('marketing.pages.home', []));
         $pricing = $plans->marketingSummary();
 
-        return Inertia::render('marketing/Landing', [
+        return view('marketing.landing', [
             'content' => $content,
             'pricing' => $pricing,
             'seo' => $seo->metadata(
@@ -33,13 +33,13 @@ class MarketingController extends Controller
         PageContentService $pages,
         PlanService $plans,
         MarketingSeoService $seo,
-    ): Response {
+    ): View {
         $content = $pages->pageOrDefault(
             'audio_to_text',
             config('marketing.pages.audio_to_text', []),
         );
 
-        return Inertia::render('marketing/AudioToText', [
+        return view('marketing.audio-to-text', [
             'content' => $content,
             'pricing' => $plans->marketingSummary(),
             'seo' => $seo->metadata(
@@ -54,10 +54,10 @@ class MarketingController extends Controller
         PageContentService $pages,
         PlanService $plans,
         MarketingSeoService $seo,
-    ): Response {
+    ): View {
         $content = $pages->pageOrDefault('features', config('marketing.pages.features', []));
 
-        return Inertia::render('marketing/Features', [
+        return view('marketing.features', [
             'content' => $content,
             'pricing' => $plans->marketingSummary(),
             'seo' => $seo->metadata(
@@ -75,18 +75,28 @@ class MarketingController extends Controller
         PlanService $plans,
         PageContentService $pages,
         MarketingSeoService $seo,
-    ): Response {
+    ): View {
         $content = $pages->pageOrDefault('pricing', config('marketing.pages.pricing', []));
         $pricing = $plans->marketingSummary();
         $tiers = $plans->tiersForDisplay();
 
         throw_if($tiers === [], \RuntimeException::class, 'Public pricing is not configured.');
 
-        return Inertia::render('marketing/Price', [
-            'plans' => $tiers,
+        $labels = $content['plans_ui'];
+        $currency = $pricing['currency'];
+
+        return view('marketing.price', [
+            'plans' => array_map(fn (array $tier): array => [
+                ...$tier,
+                'upload_rate' => $this->hourlyRate($tier['upload_price_per_hour'], $currency, $labels),
+                'live_rate' => $this->hourlyRate($tier['live_price_per_hour'], $currency, $labels),
+                'polish_rate' => $this->characterRate($tier['polish_price_per_character'], $currency, $labels),
+                'summary_rate' => $this->characterRate($tier['summary_price_per_character'], $currency, $labels),
+            ], $tiers),
             'comparison' => $plans->comparison(),
-            'currency' => $pricing['currency'],
+            'currency' => $currency,
             'content' => $content,
+            'planLabels' => $labels,
             'seo' => $seo->metadata(
                 $content,
                 route('price'),
@@ -96,5 +106,25 @@ class MarketingController extends Controller
                 ),
             ),
         ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $labels
+     */
+    private function hourlyRate(float $amount, string $currency, array $labels): string
+    {
+        return Money::format($amount, $currency, 2, 2).$labels['per_hour_suffix'];
+    }
+
+    /**
+     * Per-character rates are quoted per 1,000 characters, which is the unit
+     * the pricing table advertises.
+     *
+     * @param  array<string, mixed>  $labels
+     */
+    private function characterRate(float $amount, string $currency, array $labels): string
+    {
+        return Money::format($amount * 1000, $currency, 2, 4)
+            .$labels['per_thousand_characters_suffix'];
     }
 }

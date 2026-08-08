@@ -4,7 +4,6 @@ use App\Models\API;
 use App\Models\User;
 use App\Models\UserPermissions;
 use App\Models\UserPositions;
-use Inertia\Testing\AssertableInertia;
 
 test('api settings page requires api manager permission', function () {
     $this->actingAs(User::factory()->create())
@@ -20,11 +19,10 @@ test('api managers can open api management from the dashboard surface', function
     $this->actingAs($user)
         ->get(route('api.manager'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('dashboard/Api')
-            ->has('apis')
-            ->has('transcriptionProviders')
-            ->has('transcriberPackage'));
+        ->assertViewIs('dashboard.api')
+        ->assertViewHas('apis')
+        ->assertViewHas('transcriptionProviders')
+        ->assertViewHas('transcriberPackage');
 });
 
 test('configured admin can open api settings through gate bypass', function () {
@@ -40,8 +38,7 @@ test('configured admin can open api settings through gate bypass', function () {
     $this->actingAs($user)
         ->get(route('api.manager'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('dashboard/Api'));
+        ->assertViewIs('dashboard.api');
 });
 
 test('api manager page does not expose stored license keys', function () {
@@ -58,10 +55,9 @@ test('api manager page does not expose stored license keys', function () {
     $this->actingAs($user)
         ->get(route('api.manager'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->where('apis.0.app_name', 'private-client')
-            ->missing('apis.0.app_token')
-            ->where('apis.0.token_suffix', 'ken_for_test'));
+        ->assertViewHas('apis', fn ($apis): bool => data_get($apis, '0.app_name') === 'private-client'
+            && ! array_key_exists('app_token', (array) data_get($apis, '0'))
+            && data_get($apis, '0.token_suffix') === 'ken_for_test');
 });
 
 test('api manager page only lists global tokens', function () {
@@ -88,10 +84,9 @@ test('api manager page only lists global tokens', function () {
     $this->actingAs($manager)
         ->get(route('api.manager'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('dashboard/Api')
-            ->has('apis', 1)
-            ->where('apis.0.app_name', 'global-client'));
+        ->assertViewIs('dashboard.api')
+        ->assertViewHas('apis', fn ($apis): bool => count($apis) === 1
+            && data_get($apis, '0.app_name') === 'global-client');
 });
 
 test('api manager endpoints cannot mutate user tokens', function () {
@@ -142,16 +137,19 @@ test('user management edit payload only includes the masked user generated api t
         'can_get' => true,
     ]);
 
-    $this->actingAs($manager)
+    $response = $this->actingAs($manager)
         ->get(route('dashboard.users.index'))
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('dashboard/Users')
-            ->where('users.1.id', $managedUser->id)
-            ->where('users.1.license.app_name', 'web-user-token')
-            ->missing('users.1.license.app_token')
-            ->where('users.1.license.token_suffix', '_edit')
-            ->where('users.1.license.masked_token', '********************_edit'));
+        ->assertViewIs('dashboard.users');
+
+    $managed = collect($response->viewData('users'))
+        ->firstWhere('id', $managedUser->id);
+
+    expect($managed)->not->toBeNull();
+    expect($managed['license']['app_name'])->toBe('web-user-token');
+    expect($managed['license'])->not->toHaveKey('app_token');
+    expect($managed['license']['token_suffix'])->toBe('_edit');
+    expect($managed['license']['masked_token'])->toBe('********************_edit');
 });
 
 function createApiSettingsUserWithPermissions(array $permissions): User

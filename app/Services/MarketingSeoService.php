@@ -20,8 +20,7 @@ class MarketingSeoService
      *     site_name: string,
      *     type: string,
      *     robots: string,
-     *     structured_data: array<string, mixed>|null,
-     *     head: array<int, string>
+     *     structured_data: array<string, mixed>|null
      * }
      */
     public function metadata(
@@ -34,7 +33,7 @@ class MarketingSeoService
         $site = $this->site();
         $image = trim((string) data_get($site, 'seo.default_image_url', '/JervaLogo.png'));
 
-        $metadata = [
+        return [
             'title' => trim((string) ($seo['title'] ?? data_get($site, 'brand.name', config('app.name')))),
             'description' => trim((string) ($seo['description'] ?? '')),
             'canonical_url' => $canonicalUrl,
@@ -45,11 +44,6 @@ class MarketingSeoService
             'type' => $type,
             'robots' => 'index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1',
             'structured_data' => $structuredData,
-        ];
-
-        return [
-            ...$metadata,
-            'head' => $this->headTags($metadata),
         ];
     }
 
@@ -389,49 +383,5 @@ class MarketingSeoService
             '@type' => 'FAQPage',
             'mainEntity' => $questions,
         ];
-    }
-
-    /**
-     * Build the initial document head for installations that do not run the
-     * optional Inertia SSR service. The Vue head manager uses the same keys and
-     * takes over these elements after hydration and client-side navigation.
-     *
-     * @param  array{title: string, description: string, canonical_url: string, image_url: string, site_name: string, type: string, robots: string, structured_data: array<string, mixed>|null}  $metadata
-     * @return array<int, string>
-     */
-    private function headTags(array $metadata): array
-    {
-        $escape = fn (string $value): string => htmlspecialchars(
-            $value,
-            ENT_QUOTES | ENT_SUBSTITUTE,
-            'UTF-8',
-        );
-
-        $tags = [
-            '<title data-inertia="">'.$escape($metadata['title']).'</title>',
-            '<meta data-inertia="description" name="description" content="'.$escape($metadata['description']).'">',
-            '<meta data-inertia="robots" name="robots" content="'.$escape($metadata['robots']).'">',
-            '<link data-inertia="canonical" rel="canonical" href="'.$escape($metadata['canonical_url']).'">',
-            '<meta data-inertia="og:type" property="og:type" content="'.$escape($metadata['type']).'">',
-            '<meta data-inertia="og:site_name" property="og:site_name" content="'.$escape($metadata['site_name']).'">',
-            '<meta data-inertia="og:title" property="og:title" content="'.$escape($metadata['title']).'">',
-            '<meta data-inertia="og:description" property="og:description" content="'.$escape($metadata['description']).'">',
-            '<meta data-inertia="og:url" property="og:url" content="'.$escape($metadata['canonical_url']).'">',
-            '<meta data-inertia="og:image" property="og:image" content="'.$escape($metadata['image_url']).'">',
-            '<meta data-inertia="twitter:card" name="twitter:card" content="summary_large_image">',
-            '<meta data-inertia="twitter:title" name="twitter:title" content="'.$escape($metadata['title']).'">',
-            '<meta data-inertia="twitter:description" name="twitter:description" content="'.$escape($metadata['description']).'">',
-            '<meta data-inertia="twitter:image" name="twitter:image" content="'.$escape($metadata['image_url']).'">',
-        ];
-
-        if ($metadata['structured_data'] !== null) {
-            $json = json_encode(
-                $metadata['structured_data'],
-                JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
-            );
-            $tags[] = '<script data-inertia="structured-data" type="application/ld+json">'.$json.'</script>';
-        }
-
-        return $tags;
     }
 }

@@ -4,12 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Services\DashboardAccessService;
 use App\Services\DashboardAnalyticsService;
+use App\Support\DashboardOverview;
+use App\Support\Nav;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
-use Inertia\Inertia;
-use Inertia\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DashboardController extends Controller
@@ -18,7 +19,7 @@ class DashboardController extends Controller
         Request $request,
         DashboardAccessService $dashboardAccess,
         DashboardAnalyticsService $analytics,
-    ): Response|RedirectResponse {
+    ): View|RedirectResponse {
         if (! $dashboardAccess->canAccess($request->user())) {
             return redirect()->route('workspace.index');
         }
@@ -28,13 +29,18 @@ class DashboardController extends Controller
 
         if ($canViewAnalytics) {
             $validated = $request->validate([
-                'days' => ['sometimes', 'integer', Rule::in([7, 30, 90])],
+                'days' => ['sometimes', 'integer', Rule::in(DashboardOverview::DAY_OPTIONS)],
             ]);
             $days = (int) ($validated['days'] ?? 30);
         }
 
-        return Inertia::render('dashboard/Index', [
-            'analytics' => $canViewAnalytics ? $analytics->dashboard($days) : null,
+        $figures = $canViewAnalytics ? $analytics->dashboard($days) : null;
+
+        return view('dashboard.index', [
+            'analytics' => $figures,
+            'overview' => DashboardOverview::from($figures),
+            'dayOptions' => DashboardOverview::DAY_OPTIONS,
+            'shortcuts' => Nav::dashboardShortcuts($request->user()),
         ]);
     }
 
